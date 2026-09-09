@@ -47,6 +47,7 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
         var isLastBlock = false;
         var blockIndex = 0;
         Span<byte> blockHeader = stackalloc byte[MetadataBlockHeaderLength];
+        Span<byte> streamInfo = stackalloc byte[StreamInfoLength];
 
         while (!isLastBlock)
         {
@@ -69,7 +70,6 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
                         throw new InvalidDataException($"STREAMINFOのサイズが不正である: {blockLength} bytes");
                     }
 
-                    Span<byte> streamInfo = stackalloc byte[StreamInfoLength];
                     stream.ReadExactly(streamInfo);
                     duration = ReadDuration(streamInfo);
                     break;
