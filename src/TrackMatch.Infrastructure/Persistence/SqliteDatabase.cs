@@ -1,0 +1,116 @@
+using Microsoft.Data.Sqlite;
+
+namespace TrackMatch.Infrastructure.Persistence;
+
+/// <summary>
+/// TrackMatchのSQLite接続とスキーマ初期化を管理する。
+/// </summary>
+public sealed class SqliteDatabase
+{
+    private const int BusyTimeoutMilliseconds = 5000;
+    private readonly string _connectionString;
+
+    public SqliteDatabase(string databasePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+
+        var fullPath = Path.GetFullPath(databasePath);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = fullPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = true,
+        }.ToString();
+    }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+
+        // GUIとScannerが同じDBを扱うため、読み取りと書き込みを並行しやすいWALを最初から使用する。
+        await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "PRAGMA synchronous = NORMAL;", cancellationToken);
+
+        const string schema = """
+            CREATE TABLE IF NOT EXISTS Tracks (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Path TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                FileSize INTEGER NOT NULL,
+                LastWriteTimeUtcTicks INTEGER NOT NULL,
+                DurationTicks INTEGER NOT NULL,
+                ArtistsJson TEXT NOT NULL,
+                Title TEXT NULL,
+                Album TEXT NULL,
+                TrackNumber INTEGER NULL,
+                DiscNumber INTEGER NULL,
+                GenresJson TEXT NOT NULL,
+                IsMissing INTEGER NOT NULL DEFAULT 0 CHECK (IsMissing IN (0, 1)),
+                UpdatedAtUtcTicks INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks
+                ON Tracks (LastWriteTimeUtcTicks);
+
+            CREATE TABLE IF NOT EXISTS Fingerprints (
+                TrackId INTEGER PRIMARY KEY,
+                Algorithm INTEGER NOT NULL,
+                ValuesBlob BLOB NOT NULL,
+                ExtractedAtUtcTicks INTEGER NOT NULL,
+                FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ScanSessions (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                RootPath TEXT NOT NULL,
+                StartedAtUtcTicks INTEGER NOT NULL,
+                CompletedAtUtcTicks INTEGER NULL,
+                Status TEXT NOT NULL,
+                TotalFiles INTEGER NOT NULL DEFAULT 0,
+                ProcessedFiles INTEGER NOT NULL DEFAULT 0,
+                AddedFiles INTEGER NOT NULL DEFAULT 0,
+                UpdatedFiles INTEGER NOT NULL DEFAULT 0,
+                RemovedFiles INTEGER NOT NULL DEFAULT 0,
+                ErrorCount INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_ScanSessions_StartedAtUtcTicks
+                ON ScanSessions (StartedAtUtcTicks DESC);
+            """;
+
+        await ExecuteNonQueryAsync(connection, schema, cancellationToken);
+    }
+
+    public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
+    {
+        var connection = new SqliteConnection(_connectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
+            await ExecuteNonQueryAsync(connection, $"PRAGMA busy_timeout = {BusyTimeoutMilliseconds};", cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task ExecuteNonQueryAsync(
+        SqliteConnection connection,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
