@@ -31,6 +31,11 @@ static async Task<int> RunAsync(string[] args)
         return await RunProbeAsync(args);
     }
 
+    if (string.Equals(args[0], "analyze-probe", StringComparison.OrdinalIgnoreCase))
+    {
+        return RunAnalyzeProbe(args);
+    }
+
     PrintUsage();
     return 1;
 }
@@ -200,6 +205,48 @@ static async Task<int> RunProbeAsync(string[] args)
     }
 }
 
+static int RunAnalyzeProbe(string[] args)
+{
+    if (args.Length != 2)
+    {
+        PrintUsage();
+        return 1;
+    }
+
+    try
+    {
+        var measurements = ProbeAnalysisCsv.ReadMeasurements(args[1]);
+        var statistics = new ProbeAnalyzer().Analyze(measurements);
+
+        Console.WriteLine("Relation\tCount\tSimilarity(min/median/max)\tMinCoverage(min/median/max)\tMaxCoverage(min/median/max)\tDurationRatio(min/median/max)");
+        foreach (var item in statistics)
+        {
+            Console.WriteLine(string.Join(
+                '\t',
+                item.ExpectedRelation,
+                item.Count.ToString(CultureInfo.InvariantCulture),
+                FormatStatistics(item.Similarity),
+                FormatStatistics(item.MinimumCoverage),
+                FormatStatistics(item.MaximumCoverage),
+                FormatStatistics(item.DurationRatio)));
+        }
+
+        return 0;
+    }
+    catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 2;
+    }
+}
+
+static string FormatStatistics(ProbeMetricStatistics statistics)
+{
+    return string.Create(
+        CultureInfo.InvariantCulture,
+        $"{statistics.Minimum:F4}/{statistics.Median:F4}/{statistics.Maximum:F4}");
+}
+
 static void WriteTextResult(
     TrackMatch.Core.Fingerprinting.AudioFingerprint a,
     TrackMatch.Core.Fingerprinting.AudioFingerprint b,
@@ -256,6 +303,7 @@ static void PrintUsage()
     Console.Error.WriteLine("  TrackMatch.Scanner scan <folder>");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
     Console.Error.WriteLine();
     Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
 }

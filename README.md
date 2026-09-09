@@ -54,6 +54,16 @@ dotnet run --project src/TrackMatch.Scanner -- probe .\probe-pairs.csv --output 
 
 During one Probe run, fingerprints are cached by file path so an audio file shared by several pairs is processed by `fpcalc` only once.
 
+## Analyze Probe results
+
+After collecting known-pair results, summarize the distribution for each `ExpectedRelation`:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- analyze-probe .\probe-results.csv
+```
+
+The summary reports count and minimum / median / maximum values for similarity, the lower and higher of the two coverage values, and duration ratio. These statistics are intended to calibrate classification thresholds from real audio rather than hard-code thresholds before measurements exist.
+
 ## Project structure
 
 - `TrackMatch.Core` - domain models, fingerprint comparison and Probe orchestration.
