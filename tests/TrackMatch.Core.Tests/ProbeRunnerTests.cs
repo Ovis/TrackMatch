@@ -43,8 +43,7 @@ public sealed class ProbeRunnerTests
             return Task.FromResult(new AudioFingerprint(
                 fullPath,
                 TimeSpan.FromSeconds(30),
-                [0x12345678u, 0x12345678u, 0x12345678u],
-                TimeSpan.FromSeconds(10)));
+                [0x12345678u, 0x12345678u, 0x12345678u]));
         }
 
         public int GetCount(string path) => _counts.GetValueOrDefault(Path.GetFullPath(path));
