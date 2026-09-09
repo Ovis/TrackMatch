@@ -1,14 +1,39 @@
 using System.Globalization;
+using System.Text;
+using TrackMatch.Core.Comparison;
 using TrackMatch.Infrastructure.Audio;
+using TrackMatch.Infrastructure.Chromaprint;
 using TrackMatch.Infrastructure.Scanning;
 
-return Run(args);
+return await RunAsync(args);
 
-static int Run(string[] args)
+static async Task<int> RunAsync(string[] args)
 {
-    if (args.Length != 2 || !string.Equals(args[0], "scan", StringComparison.OrdinalIgnoreCase))
+    if (args.Length == 0)
     {
-        Console.Error.WriteLine("Usage: TrackMatch.Scanner scan <folder>");
+        PrintUsage();
+        return 1;
+    }
+
+    if (string.Equals(args[0], "scan", StringComparison.OrdinalIgnoreCase))
+    {
+        return RunScan(args);
+    }
+
+    if (string.Equals(args[0], "compare", StringComparison.OrdinalIgnoreCase))
+    {
+        return await RunCompareAsync(args);
+    }
+
+    PrintUsage();
+    return 1;
+}
+
+static int RunScan(string[] args)
+{
+    if (args.Length != 2)
+    {
+        PrintUsage();
         return 1;
     }
 
@@ -51,4 +76,121 @@ static int Run(string[] args)
 
     Console.Error.WriteLine($"Scanned: {total}, Success: {succeeded}, Failed: {failed}");
     return failed == 0 ? 0 : 2;
+}
+
+static async Task<int> RunCompareAsync(string[] args)
+{
+    if (args.Length < 3)
+    {
+        PrintUsage();
+        return 1;
+    }
+
+    var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
+    var csv = false;
+
+    for (var i = 3; i < args.Length; i++)
+    {
+        if (string.Equals(args[i], "--csv", StringComparison.OrdinalIgnoreCase))
+        {
+            csv = true;
+            continue;
+        }
+
+        if (string.Equals(args[i], "--fpcalc", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            fpcalcPath = args[++i];
+            continue;
+        }
+
+        Console.Error.WriteLine($"不明なオプション: {args[i]}");
+        return 1;
+    }
+
+    try
+    {
+        var extractor = new FpcalcFingerprintExtractor(fpcalcPath);
+        var fingerprintATask = extractor.ExtractAsync(args[1]);
+        var fingerprintBTask = extractor.ExtractAsync(args[2]);
+        await Task.WhenAll(fingerprintATask, fingerprintBTask);
+
+        var a = await fingerprintATask;
+        var b = await fingerprintBTask;
+        var result = new FingerprintComparer().Compare(a, b);
+
+        if (csv)
+        {
+            WriteCsvResult(a, b, result);
+        }
+        else
+        {
+            WriteTextResult(a, b, result);
+        }
+
+        return 0;
+    }
+    catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 2;
+    }
+}
+
+static void WriteTextResult(
+    TrackMatch.Core.Fingerprinting.AudioFingerprint a,
+    TrackMatch.Core.Fingerprinting.AudioFingerprint b,
+    FingerprintComparisonResult result)
+{
+    Console.WriteLine($"File A            : {a.Path}");
+    Console.WriteLine($"File B            : {b.Path}");
+    Console.WriteLine($"Duration A        : {a.Duration.TotalSeconds:F3} sec");
+    Console.WriteLine($"Duration B        : {b.Duration.TotalSeconds:F3} sec");
+    Console.WriteLine($"Fingerprint A     : {a.Values.Count} items");
+    Console.WriteLine($"Fingerprint B     : {b.Values.Count} items");
+    Console.WriteLine($"Similarity        : {result.Similarity:P2}");
+    Console.WriteLine($"Matched duration  : {result.MatchedDuration.TotalSeconds:F3} sec");
+    Console.WriteLine($"Coverage A        : {result.CoverageA:P2}");
+    Console.WriteLine($"Coverage B        : {result.CoverageB:P2}");
+    Console.WriteLine($"Best offset       : {result.BestOffset.TotalSeconds:+0.000;-0.000;0.000} sec ({result.BestOffsetItems:+#;-#;0} items)");
+    Console.WriteLine($"Duration ratio    : {Math.Min(a.Duration.TotalSeconds, b.Duration.TotalSeconds) / Math.Max(a.Duration.TotalSeconds, b.Duration.TotalSeconds):P2}");
+}
+
+static void WriteCsvResult(
+    TrackMatch.Core.Fingerprinting.AudioFingerprint a,
+    TrackMatch.Core.Fingerprinting.AudioFingerprint b,
+    FingerprintComparisonResult result)
+{
+    Console.WriteLine("FileA,FileB,DurationASeconds,DurationBSeconds,FingerprintLengthA,FingerprintLengthB,BestOffsetSeconds,Similarity,MatchedDurationSeconds,CoverageA,CoverageB,DurationRatio");
+    Console.WriteLine(string.Join(",",
+        Csv(a.Path),
+        Csv(b.Path),
+        a.Duration.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+        b.Duration.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+        a.Values.Count.ToString(CultureInfo.InvariantCulture),
+        b.Values.Count.ToString(CultureInfo.InvariantCulture),
+        result.BestOffset.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+        result.Similarity.ToString("F6", CultureInfo.InvariantCulture),
+        result.MatchedDuration.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+        result.CoverageA.ToString("F6", CultureInfo.InvariantCulture),
+        result.CoverageB.ToString("F6", CultureInfo.InvariantCulture),
+        (Math.Min(a.Duration.TotalSeconds, b.Duration.TotalSeconds) / Math.Max(a.Duration.TotalSeconds, b.Duration.TotalSeconds)).ToString("F6", CultureInfo.InvariantCulture)));
+}
+
+static string Csv(string value)
+{
+    if (value.IndexOfAny([',', '"', '\r', '\n']) < 0)
+    {
+        return value;
+    }
+
+    return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+}
+
+static void PrintUsage()
+{
+    Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  TrackMatch.Scanner scan <folder>");
+    Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
 }
