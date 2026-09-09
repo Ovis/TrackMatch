@@ -64,9 +64,30 @@ dotnet run --project src/TrackMatch.Scanner -- analyze-probe .\probe-results.csv
 
 The summary reports count and minimum / median / maximum values for similarity, the lower and higher of the two coverage values, and duration ratio. These statistics are intended to calibrate classification thresholds from real audio rather than hard-code thresholds before measurements exist.
 
+## Classify Probe results with a calibrated profile
+
+The relationship classifier has no built-in threshold defaults. Create a JSON profile from the measured distributions with all of the following properties:
+
+- `DuplicateMinimumSimilarity`
+- `DuplicateMinimumCoverage`
+- `DuplicateMinimumDurationRatio`
+- `ShortVersionMinimumSimilarity`
+- `ShortVersionMinimumMaximumCoverage`
+- `ShortVersionMaximumMinimumCoverage`
+- `ShortVersionMaximumDurationRatio`
+- `AlternateVersionMinimumSimilarity`
+
+All values are ratios from `0.0` through `1.0`. Apply the profile to the same Probe result CSV:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- classify-probe .\probe-results.csv --profile .\thresholds.json
+```
+
+Each row is classified as `DuplicateCandidate`, `ShortVersionCandidate`, `AlternateVersionCandidate`, or `NeedsReview`. The output keeps `ExpectedRelation` beside the predicted relation so calibration can be iterated without changing the classifier code. Threshold values should be chosen from real Probe measurements; the repository intentionally does not provide arbitrary default numbers.
+
 ## Project structure
 
-- `TrackMatch.Core` - domain models, fingerprint comparison and Probe orchestration.
+- `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification and Probe orchestration.
 - `TrackMatch.Infrastructure` - file-system, FLAC metadata and Chromaprint process integration.
 - `TrackMatch.Scanner` - command-line host and text/CSV input-output.
 - `TrackMatch.Core.Tests` - Core tests.
