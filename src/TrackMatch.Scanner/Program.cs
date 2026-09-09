@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using TrackMatch.Core.Comparison;
+using TrackMatch.Core.Probe;
 using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Chromaprint;
 using TrackMatch.Infrastructure.Scanning;
@@ -23,6 +24,11 @@ static async Task<int> RunAsync(string[] args)
     if (string.Equals(args[0], "compare", StringComparison.OrdinalIgnoreCase))
     {
         return await RunCompareAsync(args);
+    }
+
+    if (string.Equals(args[0], "probe", StringComparison.OrdinalIgnoreCase))
+    {
+        return await RunProbeAsync(args);
     }
 
     PrintUsage();
@@ -136,6 +142,64 @@ static async Task<int> RunCompareAsync(string[] args)
     }
 }
 
+static async Task<int> RunProbeAsync(string[] args)
+{
+    if (args.Length < 2)
+    {
+        PrintUsage();
+        return 1;
+    }
+
+    var inputPath = args[1];
+    string? outputPath = null;
+    var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (string.Equals(args[i], "--output", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            outputPath = args[++i];
+            continue;
+        }
+
+        if (string.Equals(args[i], "--fpcalc", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            fpcalcPath = args[++i];
+            continue;
+        }
+
+        Console.Error.WriteLine($"不明なオプション: {args[i]}");
+        return 1;
+    }
+
+    try
+    {
+        var pairs = ProbeCsv.ReadPairs(inputPath);
+        var runner = new ProbeRunner(new FpcalcFingerprintExtractor(fpcalcPath), new FingerprintComparer());
+
+        using var output = outputPath is null
+            ? new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true)
+            : new StreamWriter(outputPath, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        ProbeCsv.WriteHeader(output);
+        var processed = 0;
+        await foreach (var result in runner.RunAsync(pairs))
+        {
+            ProbeCsv.WriteResult(output, result);
+            await output.FlushAsync();
+            processed++;
+            Console.Error.WriteLine($"Probe: {processed}/{pairs.Count} {result.Pair.Label}");
+        }
+
+        return 0;
+    }
+    catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 2;
+    }
+}
+
 static void WriteTextResult(
     TrackMatch.Core.Fingerprinting.AudioFingerprint a,
     TrackMatch.Core.Fingerprinting.AudioFingerprint b,
@@ -191,6 +255,7 @@ static void PrintUsage()
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  TrackMatch.Scanner scan <folder>");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine();
     Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
 }

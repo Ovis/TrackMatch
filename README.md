@@ -1,15 +1,13 @@
 # TrackMatch
 
-TrackMatch is a tool for finding acoustically identical or closely related tracks in large FLAC music libraries.
+TrackMatch is a tool for finding acoustically duplicate or related FLAC tracks in a music library.
 
-The project starts as a console-based scanner and analysis tool. A GUI can later reuse the same shared libraries and database.
+The project is being built around acoustic fingerprints so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
 
 ## Requirements
 
 - .NET 10 SDK
-- `fpcalc` from Chromaprint for acoustic fingerprint comparison
-
-`fpcalc` can be available on `PATH`, specified with `TRACKMATCH_FPCALC`, or passed to the `compare` command with `--fpcalc`.
+- `fpcalc` from Chromaprint for fingerprint comparison commands
 
 ## Build
 
@@ -32,20 +30,34 @@ The scanner recursively enumerates FLAC files and reads STREAMINFO and Vorbis Co
 dotnet run --project src/TrackMatch.Scanner -- compare "D:\Music\a.flac" "D:\Music\b.flac"
 ```
 
-For Probe data collection, CSV output is available:
+Use `--csv` for machine-readable output. `fpcalc` can be specified with `--fpcalc`, the `TRACKMATCH_FPCALC` environment variable, or `PATH`.
 
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- compare "D:\Music\a.flac" "D:\Music\b.flac" --csv
+The Probe uses the complete raw fingerprint (`fpcalc -raw -json -length 0 -algorithm 2`) and performs offset-aware comparison. Classification thresholds are intentionally not fixed yet; they will be calibrated using known real-library pairs.
+
+## Run a batch Probe
+
+Create an input CSV with the following columns:
+
+```csv
+Label,ExpectedRelation,FileA,FileB,Notes
+same-track,duplicate,D:\Music\album-a\track.flac,D:\Music\album-b\track.flac,same recording on different CDs
+full-vs-tv,tv-size,D:\Music\full.flac,D:\Music\tv-size.flac,
 ```
 
-TrackMatch invokes `fpcalc -raw -json -length 0 -algorithm 2` so that the entire track is fingerprinted as raw 32-bit values under fixed algorithm settings. The comparer searches relative offsets and reports Hamming-bit similarity, matched duration, coverage for both files, and the best offset. Classification thresholds are intentionally deferred until representative real-library pairs have been measured.
+`ExpectedRelation` is a free-form label intended for calibration data, for example `duplicate`, `remaster`, `tv-size`, `instrumental`, `remix`, `live`, or `unrelated`.
+
+Run all pairs and write a result CSV:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- probe .\probe-pairs.csv --output .\probe-results.csv
+```
+
+During one Probe run, fingerprints are cached by file path so an audio file shared by several pairs is processed by `fpcalc` only once.
 
 ## Project structure
 
-- `TrackMatch.Core` - domain models, fingerprint comparison, and shared abstractions.
-- `TrackMatch.Infrastructure` - filesystem, FLAC metadata, Chromaprint process integration, and future persistence.
-- `TrackMatch.Scanner` - console host for scanning and analysis commands.
-- `TrackMatch.Core.Tests` - tests for core behavior.
-- `TrackMatch.Infrastructure.Tests` - tests for infrastructure behavior.
-
-The GUI project will be added after the scanner and matching logic are validated.
+- `TrackMatch.Core` - domain models, fingerprint comparison and Probe orchestration.
+- `TrackMatch.Infrastructure` - file-system, FLAC metadata and Chromaprint process integration.
+- `TrackMatch.Scanner` - command-line host and text/CSV input-output.
+- `TrackMatch.Core.Tests` - Core tests.
+- `TrackMatch.Infrastructure.Tests` - Infrastructure tests.
