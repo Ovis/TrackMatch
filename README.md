@@ -15,6 +15,14 @@ dotnet restore TrackMatch.sln
 dotnet build TrackMatch.sln --configuration Release
 ```
 
+## Scan FLAC metadata
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music"
+```
+
+The scanner recursively enumerates FLAC files and reads STREAMINFO and Vorbis Comment metadata without reading the audio frames themselves. A malformed or unreadable FLAC file is reported as an error while the remaining files continue to be scanned.
+
 ## Project structure
 
 - `TrackMatch.Core` - domain models and audio comparison logic.
