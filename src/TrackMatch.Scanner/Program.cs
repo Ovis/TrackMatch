@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Probe;
 using TrackMatch.Infrastructure.Audio;
@@ -34,6 +36,11 @@ static async Task<int> RunAsync(string[] args)
     if (string.Equals(args[0], "analyze-probe", StringComparison.OrdinalIgnoreCase))
     {
         return RunAnalyzeProbe(args);
+    }
+
+    if (string.Equals(args[0], "classify-probe", StringComparison.OrdinalIgnoreCase))
+    {
+        return RunClassifyProbe(args);
     }
 
     PrintUsage();
@@ -240,6 +247,56 @@ static int RunAnalyzeProbe(string[] args)
     }
 }
 
+static int RunClassifyProbe(string[] args)
+{
+    if (args.Length != 4 || !string.Equals(args[2], "--profile", StringComparison.OrdinalIgnoreCase))
+    {
+        PrintUsage();
+        return 1;
+    }
+
+    try
+    {
+        var measurements = ProbeAnalysisCsv.ReadMeasurements(args[1]);
+        var profileJson = File.ReadAllText(args[3], Encoding.UTF8);
+        var profile = JsonSerializer.Deserialize<RelationshipThresholdProfile>(
+            profileJson,
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                RespectRequiredConstructorParameters = true,
+            }) ?? throw new InvalidDataException("しきい値プロファイルを読み込めない。");
+
+        var classifier = new RelationshipClassifier(profile);
+        Console.WriteLine("ExpectedRelation\tPredictedRelation\tSimilarity\tMinCoverage\tMaxCoverage\tDurationRatio\tReason");
+        foreach (var measurement in measurements)
+        {
+            var result = classifier.Classify(measurement);
+            Console.WriteLine(string.Join(
+                '\t',
+                measurement.ExpectedRelation,
+                result.Kind,
+                measurement.Similarity.ToString("F6", CultureInfo.InvariantCulture),
+                measurement.MinimumCoverage.ToString("F6", CultureInfo.InvariantCulture),
+                measurement.MaximumCoverage.ToString("F6", CultureInfo.InvariantCulture),
+                measurement.DurationRatio.ToString("F6", CultureInfo.InvariantCulture),
+                result.Reason));
+        }
+
+        return 0;
+    }
+    catch (JsonException exception)
+    {
+        Console.Error.WriteLine($"しきい値プロファイルJSONが不正である: {exception.Message}");
+        return 2;
+    }
+    catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 2;
+    }
+}
+
 static string FormatStatistics(ProbeMetricStatistics statistics)
 {
     return string.Create(
@@ -304,6 +361,7 @@ static void PrintUsage()
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
+    Console.Error.WriteLine("  TrackMatch.Scanner classify-probe <results.csv> --profile <thresholds.json>");
     Console.Error.WriteLine();
     Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
 }
