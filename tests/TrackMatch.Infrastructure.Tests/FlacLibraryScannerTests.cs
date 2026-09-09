@@ -18,7 +18,7 @@ public sealed class FlacLibraryScannerTests
         try
         {
             var scanner = new FlacLibraryScanner(new FlacMetadataReader());
-            var results = scanner.Scan(root).ToArray();
+            var results = scanner.Scan(root, TestContext.Current.CancellationToken).ToArray();
 
             Assert.Single(results);
             Assert.True(results[0].IsSuccess);
@@ -41,7 +41,7 @@ public sealed class FlacLibraryScannerTests
         try
         {
             var scanner = new FlacLibraryScanner(new FlacMetadataReader());
-            var results = scanner.Scan(root).ToArray();
+            var results = scanner.Scan(root, TestContext.Current.CancellationToken).ToArray();
 
             Assert.Equal(2, results.Length);
             Assert.Single(results, result => result.IsSuccess);
