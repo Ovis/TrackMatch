@@ -31,4 +31,4 @@ jobs:
         run: dotnet build TrackMatch.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test TrackMatch.sln --configuration Release --no-build
+        run: dotnet test --solution TrackMatch.sln --configuration Release --no-build
