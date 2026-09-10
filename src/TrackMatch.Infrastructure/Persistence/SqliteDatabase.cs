@@ -66,6 +66,19 @@ public sealed class SqliteDatabase
                 FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS CandidatePairs (
+                TrackIdA INTEGER NOT NULL,
+                TrackIdB INTEGER NOT NULL,
+                MinimumSegmentHashDistance INTEGER NOT NULL,
+                GeneratedAtUtcTicks INTEGER NOT NULL,
+                PRIMARY KEY (TrackIdA, TrackIdB),
+                CHECK (TrackIdA < TrackIdB),
+                FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CandidatePairs_TrackIdB ON CandidatePairs (TrackIdB);
+
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 RootPath TEXT NOT NULL,
