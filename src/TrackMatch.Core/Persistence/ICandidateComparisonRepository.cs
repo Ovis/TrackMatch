@@ -10,4 +10,7 @@ public interface ICandidateComparisonRepository
     Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateComparison> comparisons,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CandidateComparison>> GetAllAsync(
+        CancellationToken cancellationToken = default);
 }

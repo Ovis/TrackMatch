@@ -59,4 +59,43 @@ public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database)
 
         await transaction.CommitAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<CandidateComparison>> GetAllAsync(
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TrackIdA, TrackIdB, Similarity, BestOffsetItems, BestOffsetTicks,
+                   MatchedItems, MatchedDurationTicks, CoverageA, CoverageB, DurationRatio
+            FROM CandidateComparisons
+            ORDER BY Similarity DESC, TrackIdA, TrackIdB;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
+            sql,
+            cancellationToken: cancellationToken));
+        return rows.Select(row => new CandidateComparison(
+            row.TrackIdA,
+            row.TrackIdB,
+            row.Similarity,
+            checked((int)row.BestOffsetItems),
+            TimeSpan.FromTicks(row.BestOffsetTicks),
+            checked((int)row.MatchedItems),
+            TimeSpan.FromTicks(row.MatchedDurationTicks),
+            row.CoverageA,
+            row.CoverageB,
+            row.DurationRatio)).ToArray();
+    }
+
+    private sealed record ComparisonRow(
+        long TrackIdA,
+        long TrackIdB,
+        double Similarity,
+        long BestOffsetItems,
+        long BestOffsetTicks,
+        long MatchedItems,
+        long MatchedDurationTicks,
+        double CoverageA,
+        double CoverageB,
+        double DurationRatio);
 }

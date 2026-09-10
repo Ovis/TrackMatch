@@ -54,9 +54,9 @@ The candidate-generation parameters can be changed for calibration without rebui
 dotnet run --project src/TrackMatch.Scanner -- generate-candidates --db ".\trackmatch.db" --segment-length 256 --stride 128 --max-distance 3
 ```
 
-`--algorithm` can be used when working with a fingerprint algorithm other than the current default of 2. Candidate generation replaces the current `CandidatePairs` set. Replacing candidate pairs also removes detailed comparison results that belong to the previous candidate set.
+`--algorithm` can be used when working with a fingerprint algorithm other than the current default of 2. Candidate generation replaces the current `CandidatePairs` set. Replacing candidate pairs also removes detailed comparison and classification results that belong to the previous candidate set.
 
-## Analyze generated candidates
+## Analyze and classify generated candidates
 
 Run the offset-aware raw-fingerprint comparison only for the generated candidate pairs:
 
@@ -66,13 +66,23 @@ dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackm
 
 The command reuses fingerprints already stored in SQLite; it does not run `fpcalc` again. For every available candidate pair it stores similarity, best offset, matched duration, coverage for both tracks, and duration ratio in `CandidateComparisons`. A stale candidate whose fingerprint is no longer available is skipped instead of comparing invalid data.
 
+After a threshold profile has been calibrated from Probe measurements, pass it to the same command to classify the detailed comparison results and export a human-reviewable report:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackmatch.db" --profile ".\thresholds.json" --format csv --output ".\candidates.csv"
+```
+
+`--format` accepts `csv`, `text`, or `txt`. If `--output` is omitted, the report is written to standard output. File output uses UTF-8 with BOM. The report contains relationship kind, similarity, coverage values, duration ratio, best offset, matched duration, and both tracks' artist/title/album/genre/path metadata.
+
+Classification results are also stored in `CandidateClassifications`. The serialized threshold profile used for each classification is retained so the decision conditions can be traced later. Re-running classification replaces the previous classifications with results from the current profile.
+
 The current library pipeline is therefore:
 
 ```text
-scan -> generate-candidates -> analyze-candidates
+scan -> generate-candidates -> analyze-candidates -> classify/export
 ```
 
-Relationship classification is intentionally kept separate until thresholds have been calibrated from real Probe measurements.
+The repository intentionally does not provide arbitrary default relationship thresholds. Use real Probe measurements to create `thresholds.json` before classifying the library.
 
 ## Compare two tracks with Chromaprint
 
