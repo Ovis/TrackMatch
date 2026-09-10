@@ -24,13 +24,19 @@ dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music"
 
 The scanner recursively enumerates FLAC files and reads STREAMINFO and Vorbis Comment metadata without reading the audio frames themselves. A malformed or unreadable FLAC file is reported as an error while the remaining files continue to be scanned.
 
-To persist the library in SQLite and perform an incremental scan, specify `--db`:
+To persist the library in SQLite and perform an incremental scan including Chromaprint extraction, specify `--db`:
 
 ```powershell
 dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music" --db ".\trackmatch.db"
 ```
 
-The first run registers all readable FLAC tracks. Later runs compare file size and last-write time, update only changed tracks, keep unchanged rows as-is, and mark tracks that disappeared from the scanned root as missing. A file that was discovered but could not be read is counted as an error and is not incorrectly marked missing. Each run is recorded in `ScanSessions` with added, updated, missing, and error counts.
+`fpcalc` can also be specified explicitly:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music" --db ".\trackmatch.db" --fpcalc "C:\Tools\fpcalc.exe"
+```
+
+The first run registers all readable FLAC tracks and stores raw Chromaprint fingerprints. Later runs compare file size and last-write time, update metadata and regenerate fingerprints only for changed tracks, leave unchanged tracks with existing fingerprints untouched, and retry tracks whose fingerprint is still missing. Tracks that disappeared from the scanned root are retained with `IsMissing` set. Metadata or fingerprint failures are recorded as per-file errors without aborting the rest of the scan. Each run is recorded in `ScanSessions` with added, updated, missing, and error counts.
 
 ## Compare two tracks with Chromaprint
 
@@ -96,7 +102,7 @@ Each row is classified as `DuplicateCandidate`, `ShortVersionCandidate`, `Altern
 ## Project structure
 
 - `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification and Probe orchestration.
-- `TrackMatch.Infrastructure` - file-system, FLAC metadata and Chromaprint process integration.
+- `TrackMatch.Infrastructure` - file-system, FLAC metadata, SQLite persistence and Chromaprint process integration.
 - `TrackMatch.Scanner` - command-line host and text/CSV input-output.
 - `TrackMatch.Core.Tests` - Core tests.
 - `TrackMatch.Infrastructure.Tests` - Infrastructure tests.
