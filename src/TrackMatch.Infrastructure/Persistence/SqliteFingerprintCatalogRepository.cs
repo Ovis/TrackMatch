@@ -30,7 +30,7 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
         return rows
             .Select(row => new StoredFingerprint(
                 row.TrackId,
-                row.Algorithm,
+                checked((int)row.Algorithm),
                 new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), Decode(row.ValuesBlob))))
             .ToArray();
     }
@@ -51,9 +51,10 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
         return values;
     }
 
+    // SQLite INTEGERはInt64として返るため、DapperのコンストラクタMaterialize境界ではlongで受ける。
     private sealed record FingerprintRow(
         long TrackId,
-        int Algorithm,
+        long Algorithm,
         string Path,
         long DurationTicks,
         byte[] ValuesBlob);
