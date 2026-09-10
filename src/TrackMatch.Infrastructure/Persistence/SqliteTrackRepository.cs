@@ -104,7 +104,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
         // ルート自身との一致とディレクトリ区切り文字を付けた前方一致に限定し、D:\Music2等の隣接パスを混ぜない。
         var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        var prefix = fullRootPath + Path.DirectorySeparatorChar + "%";
+        var prefix = EscapeLike(fullRootPath + Path.DirectorySeparatorChar) + "%";
         const string sql = """
             SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
@@ -116,7 +116,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<TrackRow>(new CommandDefinition(
             sql,
-            new { RootPath = fullRootPath, Prefix = EscapeLike(prefix) },
+            new { RootPath = fullRootPath, Prefix = prefix },
             cancellationToken: cancellationToken));
         return rows.Select(ToStoredTrack).ToArray();
     }
