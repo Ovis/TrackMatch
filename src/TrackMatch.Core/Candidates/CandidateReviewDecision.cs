@@ -6,4 +6,5 @@ namespace TrackMatch.Core.Candidates;
 public enum CandidateReviewDecision
 {
     NotDuplicate,
+    ConfirmedDuplicate,
 }

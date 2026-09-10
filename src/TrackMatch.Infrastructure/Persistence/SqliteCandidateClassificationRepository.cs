@@ -73,8 +73,7 @@ public sealed class SqliteCandidateClassificationRepository(SqliteDatabase datab
                 SELECT 1
                 FROM CandidateReviews r
                 WHERE r.TrackIdA = c.TrackIdA
-                  AND r.TrackIdB = c.TrackIdB
-                  AND r.Decision = 'NotDuplicate')
+                  AND r.TrackIdB = c.TrackIdB)
             ORDER BY CASE c.Kind
                 WHEN 'DuplicateCandidate' THEN 0
                 WHEN 'ShortVersionCandidate' THEN 1
