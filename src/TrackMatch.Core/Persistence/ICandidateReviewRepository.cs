@@ -9,6 +9,8 @@ public interface ICandidateReviewRepository
 {
     Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default);
+
     Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(
         CancellationToken cancellationToken = default);
 }

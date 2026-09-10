@@ -14,7 +14,33 @@ public sealed class CandidateReviewTests
     }
 
     [Fact]
-    public async Task GenerateAsync_ExcludesNotDuplicateReview()
+    public void ConfirmedDuplicate_RequiresKeepTrackFromPair()
+    {
+        var pair = CandidatePairKey.Create(1, 2);
+
+        var valid = new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, 2);
+        valid.Validate();
+
+        Assert.Throws<ArgumentException>(() =>
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null).Validate());
+        Assert.Throws<ArgumentException>(() =>
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, 3).Validate());
+    }
+
+    [Fact]
+    public void NotDuplicate_DoesNotAcceptKeepTrack()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.NotDuplicate,
+            null,
+            1);
+
+        Assert.Throws<ArgumentException>(review.Validate);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ExcludesReviewedPair()
     {
         var values = Enumerable.Repeat(0u, 300).ToArray();
         var fingerprints = new FakeFingerprintCatalogRepository(
@@ -65,6 +91,9 @@ public sealed class CandidateReviewTests
     {
         public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
 
         public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(excluded);

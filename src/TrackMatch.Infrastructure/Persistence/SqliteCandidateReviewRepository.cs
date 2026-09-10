@@ -12,8 +12,9 @@ public sealed class SqliteCandidateReviewRepository(SqliteDatabase database) : I
     public async Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(review);
+        review.Validate();
 
-        const string sql = """
+        const string reviewSql = """
             INSERT INTO CandidateReviews (
                 TrackIdA, TrackIdB, Decision, Note, ReviewedAtUtcTicks)
             VALUES (@TrackIdA, @TrackIdB, @Decision, @Note, @ReviewedAtUtcTicks)
@@ -22,19 +23,64 @@ public sealed class SqliteCandidateReviewRepository(SqliteDatabase database) : I
                 Note = excluded.Note,
                 ReviewedAtUtcTicks = excluded.ReviewedAtUtcTicks;
             """;
+        const string selectionSql = """
+            INSERT INTO CandidateReviewSelections (TrackIdA, TrackIdB, KeepTrackId)
+            VALUES (@TrackIdA, @TrackIdB, @KeepTrackId)
+            ON CONFLICT(TrackIdA, TrackIdB) DO UPDATE SET
+                KeepTrackId = excluded.KeepTrackId;
+            """;
+        const string deleteSelectionSql = """
+            DELETE FROM CandidateReviewSelections
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
+            """;
+
+        var parameters = new
+        {
+            review.Pair.TrackIdA,
+            review.Pair.TrackIdB,
+            Decision = review.Decision.ToString(),
+            review.Note,
+            review.KeepTrackId,
+            ReviewedAtUtcTicks = DateTime.UtcNow.Ticks,
+        };
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
-            sql,
-            new
-            {
-                review.Pair.TrackIdA,
-                review.Pair.TrackIdB,
-                Decision = review.Decision.ToString(),
-                review.Note,
-                ReviewedAtUtcTicks = DateTime.UtcNow.Ticks,
-            },
+            reviewSql,
+            parameters,
+            transaction,
             cancellationToken: cancellationToken));
+
+        var selectionCommand = review.Decision == CandidateReviewDecision.ConfirmedDuplicate
+            ? selectionSql
+            : deleteSelectionSql;
+        await connection.ExecuteAsync(new CommandDefinition(
+            selectionCommand,
+            parameters,
+            transaction,
+            cancellationToken: cancellationToken));
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CandidateReview>> GetAllAsync(
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, s.KeepTrackId
+            FROM CandidateReviews r
+            LEFT JOIN CandidateReviewSelections s
+                ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
+            ORDER BY r.TrackIdA, r.TrackIdB;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<ReviewRow>(new CommandDefinition(
+            sql,
+            cancellationToken: cancellationToken));
+
+        return rows.Select(ToReview).ToArray();
     }
 
     public async Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(
@@ -42,19 +88,40 @@ public sealed class SqliteCandidateReviewRepository(SqliteDatabase database) : I
     {
         const string sql = """
             SELECT TrackIdA, TrackIdB
-            FROM CandidateReviews
-            WHERE Decision = @Decision;
+            FROM CandidateReviews;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReviewPairRow>(new CommandDefinition(
             sql,
-            new { Decision = CandidateReviewDecision.NotDuplicate.ToString() },
             cancellationToken: cancellationToken));
         return rows
             .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
             .ToHashSet();
     }
 
+    private static CandidateReview ToReview(ReviewRow row)
+    {
+        if (!Enum.TryParse<CandidateReviewDecision>(row.Decision, out var decision))
+        {
+            throw new InvalidDataException($"未知の候補レビュー判定である: {row.Decision}");
+        }
+
+        var review = new CandidateReview(
+            CandidatePairKey.Create(row.TrackIdA, row.TrackIdB),
+            decision,
+            row.Note,
+            row.KeepTrackId);
+        review.Validate();
+        return review;
+    }
+
     private sealed record ReviewPairRow(long TrackIdA, long TrackIdB);
+
+    private sealed record ReviewRow(
+        long TrackIdA,
+        long TrackIdB,
+        string Decision,
+        string? Note,
+        long? KeepTrackId);
 }
