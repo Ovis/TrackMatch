@@ -24,7 +24,7 @@ public sealed class IncrementalLibraryScanServiceTests
             Stored(3, Metadata(updatedPath, 100, 10)),
             Stored(4, Metadata(missingPath, 100, 10)),
         ],
-        missingFingerprintIds: [2]);
+        missingFingerprintIds: new HashSet<long> { 2 });
         var scanner = new FakeLibraryScanner(
         [
             LibraryScanResult.Success(Metadata(unchangedPath, 100, 10)),
@@ -52,7 +52,9 @@ public sealed class IncrementalLibraryScanServiceTests
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
         var path = Path.Combine(root, "retry.flac");
-        var repository = new FakeTrackRepository([Stored(1, Metadata(path, 100, 10))], missingFingerprintIds: [1]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 100, 10))],
+            missingFingerprintIds: new HashSet<long> { 1 });
         var extractor = new FakeFingerprintExtractor(path);
         var service = new IncrementalLibraryScanService(
             new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 100, 10))]),
