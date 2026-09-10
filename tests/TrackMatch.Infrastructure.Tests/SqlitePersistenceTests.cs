@@ -57,12 +57,17 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
 
         var fingerprint = new AudioFingerprint(path, updated.Duration, [0u, 1u, uint.MaxValue, 0x12345678u]);
         await repository.SaveFingerprintAsync(id, fingerprint, algorithm: 2, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
 
         var restored = Assert.IsType<AudioFingerprint>(
             await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
         Assert.Equal(fingerprint.Path, restored.Path);
         Assert.Equal(fingerprint.Duration, restored.Duration);
         Assert.Equal(fingerprint.Values, restored.Values);
+
+        await repository.DeleteFingerprintAsync(id, TestContext.Current.CancellationToken);
+        Assert.Null(await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
+        Assert.Contains(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
     }
 
     [Fact]

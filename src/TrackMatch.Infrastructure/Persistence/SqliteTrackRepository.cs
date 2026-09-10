@@ -102,9 +102,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
-        // ルート自身との一致とディレクトリ区切り文字を付けた前方一致に限定し、D:\Music2等の隣接パスを混ぜない。
-        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        var prefix = EscapeLike(fullRootPath + Path.DirectorySeparatorChar) + "%";
+        var parameters = CreateRootPathParameters(rootPath);
         const string sql = """
             SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
@@ -116,9 +114,33 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<TrackRow>(new CommandDefinition(
             sql,
-            new { RootPath = fullRootPath, Prefix = prefix },
+            parameters,
             cancellationToken: cancellationToken));
         return rows.Select(ToStoredTrack).ToArray();
+    }
+
+    public async Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootPathAsync(
+        string rootPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+
+        var parameters = CreateRootPathParameters(rootPath);
+        const string sql = """
+            SELECT t.Id
+            FROM Tracks t
+            LEFT JOIN Fingerprints f ON f.TrackId = t.Id
+            WHERE f.TrackId IS NULL
+              AND (t.Path = @RootPath COLLATE NOCASE
+                   OR t.Path LIKE @Prefix ESCAPE '\' COLLATE NOCASE);
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var ids = await connection.QueryAsync<long>(new CommandDefinition(
+            sql,
+            parameters,
+            cancellationToken: cancellationToken));
+        return ids.ToHashSet();
     }
 
     public async Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
@@ -180,6 +202,20 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             cancellationToken: cancellationToken));
     }
 
+    public async Task DeleteFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM Fingerprints WHERE TrackId = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+    }
+
     public async Task<AudioFingerprint?> GetFingerprintAsync(
         long trackId,
         CancellationToken cancellationToken = default)
@@ -205,6 +241,14 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         return row is null
             ? null
             : new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), DecodeFingerprint(row.ValuesBlob));
+    }
+
+    private static object CreateRootPathParameters(string rootPath)
+    {
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        // LIKEのワイルドカードは末尾に後付けし、ルートパス自身に含まれる%, _のみをエスケープする。
+        var prefix = EscapeLike(fullRootPath + Path.DirectorySeparatorChar) + "%";
+        return new { RootPath = fullRootPath, Prefix = prefix };
     }
 
     private static StoredTrack ToStoredTrack(TrackRow row)
