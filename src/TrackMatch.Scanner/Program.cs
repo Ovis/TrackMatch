@@ -59,11 +59,18 @@ static async Task<int> RunScanAsync(string[] args)
 
     var rootPath = args[1];
     string? databasePath = null;
+    var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
     for (var i = 2; i < args.Length; i++)
     {
         if (string.Equals(args[i], "--db", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
         {
             databasePath = args[++i];
+            continue;
+        }
+
+        if (string.Equals(args[i], "--fpcalc", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            fpcalcPath = args[++i];
             continue;
         }
 
@@ -83,8 +90,15 @@ static async Task<int> RunScanAsync(string[] args)
         var service = new IncrementalLibraryScanService(
             new FlacLibraryScanner(new FlacMetadataReader()),
             new SqliteTrackRepository(database),
-            new SqliteScanSessionRepository(database));
+            new SqliteScanSessionRepository(database),
+            new FpcalcFingerprintExtractor(fpcalcPath),
+            fingerprintAlgorithm: 2);
         var result = await service.ScanAsync(rootPath);
+        foreach (var error in result.Errors)
+        {
+            Console.Error.WriteLine($"ERROR\t{error.Stage}\t{error.Path}\t{error.Message}");
+        }
+
         var summary = result.Summary;
         Console.Error.WriteLine(
             $"Session: {result.SessionId}, Scanned: {summary.TotalFiles}, Processed: {summary.ProcessedFiles}, " +
@@ -399,12 +413,12 @@ static string Csv(string value)
 static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  TrackMatch.Scanner scan <folder> [--db <trackmatch.db>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner scan <folder> [--db <trackmatch.db>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
     Console.Error.WriteLine("  TrackMatch.Scanner classify-probe <results.csv> --profile <thresholds.json>");
     Console.Error.WriteLine();
-    Console.Error.WriteLine("scanに--dbを指定するとSQLiteへ増分走査結果を保存する。");
-    Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
+    Console.Error.WriteLine("scanに--dbを指定するとSQLiteへ増分走査し、新規・更新・未FingerprintのTrackをfpcalcで処理する。");
+    Console.Error.WriteLine("fpcalcは--fpcalc、TRACKMATCH_FPCALC環境変数、またはPATHで指定できる。");
 }
