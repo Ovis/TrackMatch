@@ -66,5 +66,8 @@ public sealed class CandidateAnalysisServiceTests
             Comparisons = comparisons.ToArray();
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<CandidateComparison>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Comparisons);
     }
 }
