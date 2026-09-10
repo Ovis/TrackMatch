@@ -98,6 +98,20 @@ public sealed class SqliteDatabase
 
             CREATE INDEX IF NOT EXISTS IX_CandidateComparisons_Similarity ON CandidateComparisons (Similarity DESC);
 
+            CREATE TABLE IF NOT EXISTS CandidateClassifications (
+                TrackIdA INTEGER NOT NULL,
+                TrackIdB INTEGER NOT NULL,
+                Kind TEXT NOT NULL,
+                Reason TEXT NOT NULL,
+                ThresholdProfileJson TEXT NOT NULL,
+                ClassifiedAtUtcTicks INTEGER NOT NULL,
+                PRIMARY KEY (TrackIdA, TrackIdB),
+                FOREIGN KEY (TrackIdA, TrackIdB)
+                    REFERENCES CandidateComparisons (TrackIdA, TrackIdB) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CandidateClassifications_Kind ON CandidateClassifications (Kind);
+
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 RootPath TEXT NOT NULL,

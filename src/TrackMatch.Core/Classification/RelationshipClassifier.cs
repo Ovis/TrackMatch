@@ -3,7 +3,7 @@ using TrackMatch.Core.Probe;
 namespace TrackMatch.Core.Classification;
 
 /// <summary>
-/// Probeで得た音響指標を、校正済みしきい値プロファイルに基づいて分類する。
+/// 音響指標を、校正済みしきい値プロファイルに基づいて分類する。
 /// </summary>
 public sealed class RelationshipClassifier
 {
@@ -19,27 +19,38 @@ public sealed class RelationshipClassifier
     public RelationshipClassificationResult Classify(ProbeMeasurement measurement)
     {
         ArgumentNullException.ThrowIfNull(measurement);
+        return Classify(measurement.Similarity, measurement.CoverageA, measurement.CoverageB, measurement.DurationRatio);
+    }
 
-        if (measurement.Similarity >= _profile.DuplicateMinimumSimilarity
-            && measurement.MinimumCoverage >= _profile.DuplicateMinimumCoverage
-            && measurement.DurationRatio >= _profile.DuplicateMinimumDurationRatio)
+    public RelationshipClassificationResult Classify(
+        double similarity,
+        double coverageA,
+        double coverageB,
+        double durationRatio)
+    {
+        var minimumCoverage = Math.Min(coverageA, coverageB);
+        var maximumCoverage = Math.Max(coverageA, coverageB);
+
+        if (similarity >= _profile.DuplicateMinimumSimilarity
+            && minimumCoverage >= _profile.DuplicateMinimumCoverage
+            && durationRatio >= _profile.DuplicateMinimumDurationRatio)
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.DuplicateCandidate,
                 "Similarity・両Coverage・DurationRatioが重複候補のしきい値を満たす。");
         }
 
-        if (measurement.Similarity >= _profile.ShortVersionMinimumSimilarity
-            && measurement.MaximumCoverage >= _profile.ShortVersionMinimumMaximumCoverage
-            && measurement.MinimumCoverage <= _profile.ShortVersionMaximumMinimumCoverage
-            && measurement.DurationRatio <= _profile.ShortVersionMaximumDurationRatio)
+        if (similarity >= _profile.ShortVersionMinimumSimilarity
+            && maximumCoverage >= _profile.ShortVersionMinimumMaximumCoverage
+            && minimumCoverage <= _profile.ShortVersionMaximumMinimumCoverage
+            && durationRatio <= _profile.ShortVersionMaximumDurationRatio)
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.ShortVersionCandidate,
                 "短い側をほぼ覆う一方で長い側CoverageとDurationRatioが低く、Short Version候補の条件を満たす。");
         }
 
-        if (measurement.Similarity >= _profile.AlternateVersionMinimumSimilarity)
+        if (similarity >= _profile.AlternateVersionMinimumSimilarity)
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.AlternateVersionCandidate,
