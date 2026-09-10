@@ -76,10 +76,20 @@ dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackm
 
 Classification results are also stored in `CandidateClassifications`. The serialized threshold profile used for each classification is retained so the decision conditions can be traced later. Re-running classification replaces the previous classifications with results from the current profile.
 
+## Mark a candidate as not duplicate
+
+After human review, a pair can be permanently suppressed from future candidate runs:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --note "different arrangement"
+```
+
+The review is stored independently from `CandidatePairs`, so regenerating candidates does not lose it. A pair marked `NotDuplicate` is excluded from future candidate generation and from classification reports immediately. Track order is normalized, so `123/456` and `456/123` refer to the same reviewed pair.
+
 The current library pipeline is therefore:
 
 ```text
-scan -> generate-candidates -> analyze-candidates -> classify/export
+scan -> generate-candidates -> analyze-candidates -> classify/export -> human review
 ```
 
 The repository intentionally does not provide arbitrary default relationship thresholds. Use real Probe measurements to create `thresholds.json` before classifying the library.

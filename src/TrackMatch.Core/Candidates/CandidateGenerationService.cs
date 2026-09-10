@@ -8,6 +8,7 @@ namespace TrackMatch.Core.Candidates;
 public sealed class CandidateGenerationService(
     IFingerprintCatalogRepository fingerprintCatalog,
     ICandidatePairRepository candidatePairRepository,
+    ICandidateReviewRepository reviewRepository,
     CandidatePairGenerator pairGenerator)
 {
     public async Task<CandidateGenerationResult> GenerateAsync(
@@ -24,7 +25,12 @@ public sealed class CandidateGenerationService(
         options.Validate();
 
         var fingerprints = await fingerprintCatalog.GetActiveAsync(fingerprintAlgorithm, cancellationToken);
-        var result = pairGenerator.Generate(fingerprints, options);
+        var generated = pairGenerator.Generate(fingerprints, options);
+        var excluded = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
+        var pairs = generated.Pairs
+            .Where(pair => !excluded.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
+            .ToArray();
+        var result = new CandidateGenerationResult(generated.TrackCount, generated.SegmentCount, pairs);
         await candidatePairRepository.ReplaceAllAsync(result.Pairs, cancellationToken);
         return result;
     }

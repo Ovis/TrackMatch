@@ -69,6 +69,12 @@ public sealed class SqliteCandidateClassificationRepository(SqliteDatabase datab
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
             INNER JOIN Tracks a ON a.Id = c.TrackIdA
             INNER JOIN Tracks b ON b.Id = c.TrackIdB
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM CandidateReviews r
+                WHERE r.TrackIdA = c.TrackIdA
+                  AND r.TrackIdB = c.TrackIdB
+                  AND r.Decision = 'NotDuplicate')
             ORDER BY CASE c.Kind
                 WHEN 'DuplicateCandidate' THEN 0
                 WHEN 'ShortVersionCandidate' THEN 1

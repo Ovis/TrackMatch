@@ -35,6 +35,11 @@ static async Task<int> RunAsync(string[] args)
         return await CandidateCommands.RunAnalyzeAsync(args);
     }
 
+    if (string.Equals(args[0], "review-candidate", StringComparison.OrdinalIgnoreCase))
+    {
+        return await CandidateCommands.RunReviewAsync(args);
+    }
+
     if (string.Equals(args[0], "compare", StringComparison.OrdinalIgnoreCase))
     {
         return await RunCompareAsync(args);
@@ -425,13 +430,13 @@ static void PrintUsage()
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  TrackMatch.Scanner scan <folder> [--db <trackmatch.db>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner generate-candidates --db <trackmatch.db> [--algorithm <n>] [--segment-length <items>] [--stride <items>] [--max-distance <0..3>]");
-    Console.Error.WriteLine("  TrackMatch.Scanner analyze-candidates --db <trackmatch.db> [--algorithm <n>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner analyze-candidates --db <trackmatch.db> [--algorithm <n>] [--profile <thresholds.json>] [--format csv|text] [--output <path>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner review-candidate --db <trackmatch.db> --track-a <id> --track-b <id> [--note <text>]");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
     Console.Error.WriteLine("  TrackMatch.Scanner classify-probe <results.csv> --profile <thresholds.json>");
     Console.Error.WriteLine();
-    Console.Error.WriteLine("scanに--dbを指定するとSQLiteへ増分走査し、新規・更新・未FingerprintのTrackをfpcalcで処理する。");
-    Console.Error.WriteLine("generate-candidatesで保存済みFingerprintから候補ペアを再生成し、analyze-candidatesで詳細比較結果を保存する。");
+    Console.Error.WriteLine("review-candidateは指定ペアをNotDuplicateとして記録し、以後の候補生成とレポートから除外する。");
     Console.Error.WriteLine("fpcalcは--fpcalc、TRACKMATCH_FPCALC環境変数、またはPATHで指定できる。");
 }
