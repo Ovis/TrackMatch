@@ -76,15 +76,23 @@ dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackm
 
 Classification results are also stored in `CandidateClassifications`. The serialized threshold profile used for each classification is retained so the decision conditions can be traced later. Re-running classification replaces the previous classifications with results from the current profile.
 
-## Mark a candidate as not duplicate
+## Review a candidate
 
-After human review, a pair can be permanently suppressed from future candidate runs:
+A reviewed pair is stored independently from `CandidatePairs`, so regenerating candidates does not lose the decision. Reviewed pairs are excluded from future candidate generation and from classification reports immediately. Track order is normalized, so `123/456` and `456/123` refer to the same pair.
+
+Mark a pair as not duplicate:
 
 ```powershell
 dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --note "different arrangement"
 ```
 
-The review is stored independently from `CandidatePairs`, so regenerating candidates does not lose it. A pair marked `NotDuplicate` is excluded from future candidate generation and from classification reports immediately. Track order is normalized, so `123/456` and `456/123` refer to the same reviewed pair.
+The default decision remains `NotDuplicate` for compatibility. To confirm that a pair is duplicate and record which copy should be retained, specify `--decision duplicate` and `--keep`:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --decision duplicate --keep 123 --note "keep original album copy"
+```
+
+`--keep` must be one of the two Track IDs in the reviewed pair. The retained Track is stored separately from the pair decision so a later Trash/move workflow can identify the rejected copy without re-asking the user.
 
 The current library pipeline is therefore:
 
