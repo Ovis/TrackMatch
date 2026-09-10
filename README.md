@@ -38,6 +38,42 @@ dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music" --db ".\trackmatc
 
 The first run registers all readable FLAC tracks and stores raw Chromaprint fingerprints. Later runs compare file size and last-write time, update metadata and regenerate fingerprints only for changed tracks, leave unchanged tracks with existing fingerprints untouched, and retry tracks whose fingerprint is still missing. Tracks that disappeared from the scanned root are retained with `IsMissing` set. Metadata or fingerprint failures are recorded as per-file errors without aborting the rest of the scan. Each run is recorded in `ScanSessions` with added, updated, missing, and error counts.
 
+## Generate comparison candidates
+
+After fingerprints are stored, generate a reduced set of track pairs for detailed comparison:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- generate-candidates --db ".\trackmatch.db"
+```
+
+Candidate generation does not compare every pair in the library. It builds overlapping segment SimHashes from the stored raw Chromaprint fingerprints and uses a multi-index Hamming search to find acoustically promising track pairs. The defaults are 256 fingerprint items per segment, a 128-item stride, and a maximum segment SimHash Hamming distance of 3.
+
+The candidate-generation parameters can be changed for calibration without rebuilding the application:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- generate-candidates --db ".\trackmatch.db" --segment-length 256 --stride 128 --max-distance 3
+```
+
+`--algorithm` can be used when working with a fingerprint algorithm other than the current default of 2. Candidate generation replaces the current `CandidatePairs` set. Replacing candidate pairs also removes detailed comparison results that belong to the previous candidate set.
+
+## Analyze generated candidates
+
+Run the offset-aware raw-fingerprint comparison only for the generated candidate pairs:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackmatch.db"
+```
+
+The command reuses fingerprints already stored in SQLite; it does not run `fpcalc` again. For every available candidate pair it stores similarity, best offset, matched duration, coverage for both tracks, and duration ratio in `CandidateComparisons`. A stale candidate whose fingerprint is no longer available is skipped instead of comparing invalid data.
+
+The current library pipeline is therefore:
+
+```text
+scan -> generate-candidates -> analyze-candidates
+```
+
+Relationship classification is intentionally kept separate until thresholds have been calibrated from real Probe measurements.
+
 ## Compare two tracks with Chromaprint
 
 ```powershell
@@ -101,7 +137,7 @@ Each row is classified as `DuplicateCandidate`, `ShortVersionCandidate`, `Altern
 
 ## Project structure
 
-- `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification and Probe orchestration.
+- `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification, candidate generation and Probe orchestration.
 - `TrackMatch.Infrastructure` - file-system, FLAC metadata, SQLite persistence and Chromaprint process integration.
 - `TrackMatch.Scanner` - command-line host and text/CSV input-output.
 - `TrackMatch.Core.Tests` - Core tests.
