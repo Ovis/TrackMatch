@@ -147,25 +147,23 @@ internal static class CandidateCommands
             var database = new SqliteDatabase(databasePath);
             await database.InitializeAsync();
             var comparisonRepository = new SqliteCandidateComparisonRepository(database);
-            var service = new CandidateAnalysisService(
-                new SqliteFingerprintCatalogRepository(database),
-                new SqliteCandidatePairRepository(database),
-                comparisonRepository,
-                new FingerprintComparer());
-            var result = await service.AnalyzeAsync(algorithm);
 
             if (profilePath is null)
             {
+                var service = new CandidateAnalysisService(
+                    new SqliteFingerprintCatalogRepository(database),
+                    new SqliteCandidatePairRepository(database),
+                    comparisonRepository,
+                    new FingerprintComparer());
+                var result = await service.AnalyzeAsync(algorithm);
+
                 Console.WriteLine($"Candidates: {result.TotalCandidates}");
                 Console.WriteLine($"Compared: {result.ComparedCandidates}");
                 Console.WriteLine($"Skipped: {result.SkippedCandidates}");
                 return result.SkippedCandidates == 0 ? 0 : 2;
             }
 
-            Console.Error.WriteLine($"Candidates: {result.TotalCandidates}");
-            Console.Error.WriteLine($"Compared: {result.ComparedCandidates}");
-            Console.Error.WriteLine($"Skipped: {result.SkippedCandidates}");
-
+            // 閾値調整は繰り返し行うため、再分類では保存済みの詳細比較値を再利用しraw Fingerprint比較をやり直さない。
             var profileJson = File.ReadAllText(profilePath);
             var profile = JsonSerializer.Deserialize<RelationshipThresholdProfile>(
                 profileJson,
@@ -180,7 +178,7 @@ internal static class CandidateCommands
             var rows = await classificationService.ClassifyAsync(profile);
             await CandidateReportWriter.WriteAsync(rows, outputFormat, outputPath);
             Console.Error.WriteLine($"Classified: {rows.Count}");
-            return result.SkippedCandidates == 0 ? 0 : 2;
+            return 0;
         }
         catch (JsonException exception)
         {
