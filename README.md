@@ -76,7 +76,25 @@ dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackm
 
 Classification results are also stored in `CandidateClassifications`. The serialized threshold profile used for each classification is retained so the decision conditions can be traced later. Re-running classification replaces the previous classifications with results from the current profile.
 
-## Review a candidate
+## Review candidates with the WPF app
+
+`TrackMatch.App` provides the first Windows GUI for human review. It reads the same SQLite database as the Scanner and lists classified, not-yet-reviewed candidate pairs.
+
+```powershell
+dotnet run --project src/TrackMatch.App
+```
+
+Select the SQLite database used by the Scanner. The list shows the relationship classification and similarity, while the detail pane shows both tracks' title, artist, album, genre, file path, coverage values, duration ratio, and classification reason.
+
+The three review actions are:
+
+- `重複ではない` - saves `NotDuplicate`
+- `重複 / Aを残す` - saves `ConfirmedDuplicate` with Track A as Keep
+- `重複 / Bを残す` - saves `ConfirmedDuplicate` with Track B as Keep
+
+After saving a review, the pair is removed from the current list because reviewed pairs are excluded by the shared repository query. The GUI does not move or delete audio files in this stage; file operations remain explicit Scanner operations.
+
+## Review a candidate from the CLI
 
 A reviewed pair is stored independently from `CandidatePairs`, so regenerating candidates does not lose the decision. Reviewed pairs are excluded from future candidate generation and from classification reports immediately. Track order is normalized, so `123/456` and `456/123` refer to the same pair.
 
@@ -186,5 +204,6 @@ Each row is classified as `DuplicateCandidate`, `ShortVersionCandidate`, `Altern
 - `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification, candidate generation and Probe orchestration.
 - `TrackMatch.Infrastructure` - file-system, FLAC metadata, SQLite persistence and Chromaprint process integration.
 - `TrackMatch.Scanner` - command-line host and text/CSV input-output.
+- `TrackMatch.App` - WPF human-review UI over the shared SQLite database.
 - `TrackMatch.Core.Tests` - Core tests.
 - `TrackMatch.Infrastructure.Tests` - Infrastructure tests.
