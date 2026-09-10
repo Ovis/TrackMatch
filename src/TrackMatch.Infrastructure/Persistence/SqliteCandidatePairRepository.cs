@@ -48,4 +48,29 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
 
         await transaction.CommitAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TrackIdA, TrackIdB, MinimumSegmentHashDistance
+            FROM CandidatePairs
+            ORDER BY TrackIdA, TrackIdB;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
+            sql,
+            cancellationToken: cancellationToken));
+        return rows
+            .Select(row => new CandidatePair(
+                row.TrackIdA,
+                row.TrackIdB,
+                checked((int)row.MinimumSegmentHashDistance)))
+            .ToArray();
+    }
+
+    private sealed record CandidatePairRow(
+        long TrackIdA,
+        long TrackIdB,
+        long MinimumSegmentHashDistance);
 }

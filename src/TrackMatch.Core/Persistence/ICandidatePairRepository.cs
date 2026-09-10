@@ -10,4 +10,6 @@ public interface ICandidatePairRepository
     Task ReplaceAllAsync(
         IReadOnlyCollection<CandidatePair> pairs,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default);
 }
