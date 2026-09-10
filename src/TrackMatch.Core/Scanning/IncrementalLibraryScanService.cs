@@ -1,3 +1,4 @@
+using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Scanning;
@@ -8,13 +9,19 @@ namespace TrackMatch.Core.Scanning;
 public sealed class IncrementalLibraryScanService(
     ILibraryScanner scanner,
     ITrackRepository trackRepository,
-    IScanSessionRepository scanSessionRepository)
+    IScanSessionRepository scanSessionRepository,
+    IFingerprintExtractor fingerprintExtractor,
+    int fingerprintAlgorithm)
 {
     public async Task<IncrementalScanResult> ScanAsync(
         string rootPath,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        if (fingerprintAlgorithm < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fingerprintAlgorithm));
+        }
 
         var fullRootPath = Path.GetFullPath(rootPath);
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
@@ -23,11 +30,12 @@ public sealed class IncrementalLibraryScanService(
         var added = 0;
         var updated = 0;
         var removed = 0;
-        var errors = 0;
+        var errors = new List<IncrementalScanError>();
 
         try
         {
             var storedTracks = await trackRepository.GetByRootPathAsync(fullRootPath, cancellationToken);
+            var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootPathAsync(fullRootPath, cancellationToken);
             var storedByPath = storedTracks.ToDictionary(
                 track => Path.GetFullPath(track.Metadata.Path),
                 StringComparer.OrdinalIgnoreCase);
@@ -43,23 +51,47 @@ public sealed class IncrementalLibraryScanService(
 
                 if (!result.IsSuccess)
                 {
-                    errors++;
+                    errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗した。"));
                     continue;
                 }
 
                 processed++;
                 var metadata = result.Metadata!;
-                if (!storedByPath.TryGetValue(fullPath, out var stored))
+                var isNew = !storedByPath.TryGetValue(fullPath, out var stored);
+                var needsMetadataUpdate = isNew || stored!.IsMissing || HasChanged(stored, metadata);
+                long trackId;
+
+                if (isNew)
                 {
-                    await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                    trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
                     added++;
+                }
+                else if (needsMetadataUpdate)
+                {
+                    trackId = stored!.Id;
+                    await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                    await trackRepository.DeleteFingerprintAsync(trackId, cancellationToken);
+                    updated++;
+                }
+                else
+                {
+                    trackId = stored!.Id;
+                }
+
+                var needsFingerprint = isNew || needsMetadataUpdate || missingFingerprintIds.Contains(trackId);
+                if (!needsFingerprint)
+                {
                     continue;
                 }
 
-                if (stored.IsMissing || HasChanged(stored, metadata))
+                try
                 {
-                    await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
-                    updated++;
+                    var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
+                    await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+                {
+                    errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
                 }
             }
 
@@ -74,13 +106,13 @@ public sealed class IncrementalLibraryScanService(
                 removed++;
             }
 
-            var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors);
+            var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, cancellationToken);
-            return new IncrementalScanResult(sessionId, summary);
+            return new IncrementalScanResult(sessionId, summary, errors);
         }
         catch
         {
-            var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors);
+            var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.FailAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
             throw;
         }

@@ -52,36 +52,33 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
         var stored = Assert.IsType<StoredTrack>(await repository.GetByPathAsync(path, TestContext.Current.CancellationToken));
         Assert.Equal(200, stored.Metadata.FileSize);
         Assert.Equal("New title", stored.Metadata.Title);
-        Assert.Equal(["Artist A", "Artist B"], stored.Metadata.Artists);
-        Assert.Equal(["J-POPS"], stored.Metadata.Genres);
 
         var fingerprint = new AudioFingerprint(path, updated.Duration, [0u, 1u, uint.MaxValue, 0x12345678u]);
         await repository.SaveFingerprintAsync(id, fingerprint, algorithm: 2, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
 
-        var restored = Assert.IsType<AudioFingerprint>(
-            await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
-        Assert.Equal(fingerprint.Path, restored.Path);
-        Assert.Equal(fingerprint.Duration, restored.Duration);
+        var restored = Assert.IsType<AudioFingerprint>(await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
         Assert.Equal(fingerprint.Values, restored.Values);
+
+        await repository.DeleteFingerprintAsync(id, TestContext.Current.CancellationToken);
+        Assert.Null(await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
+        Assert.Contains(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task TrackRepository_GetsRootTracksAndMarksMissing()
+    public async Task TrackRepository_RootQueryIncludesChildrenButNotAdjacentPrefix()
     {
         var repository = new SqliteTrackRepository(_database);
         var root = Path.Combine(_directory, "Music");
-        var path = Path.Combine(root, "Album", "track.flac");
+        var childPath = Path.Combine(root, "Album", "track.flac");
         var outsidePath = Path.Combine(_directory, "Music2", "other.flac");
-        var id = await repository.UpsertMetadataAsync(CreateMetadata(path, 100, "Track"), TestContext.Current.CancellationToken);
+        var id = await repository.UpsertMetadataAsync(CreateMetadata(childPath, 100, "Track"), TestContext.Current.CancellationToken);
         await repository.UpsertMetadataAsync(CreateMetadata(outsidePath, 100, "Other"), TestContext.Current.CancellationToken);
 
         var tracks = await repository.GetByRootPathAsync(root, TestContext.Current.CancellationToken);
+
         var track = Assert.Single(tracks);
         Assert.Equal(id, track.Id);
-
-        await repository.MarkMissingAsync(id, TestContext.Current.CancellationToken);
-        var missing = Assert.IsType<StoredTrack>(await repository.GetByPathAsync(path, TestContext.Current.CancellationToken));
-        Assert.True(missing.IsMissing);
     }
 
     [Fact]

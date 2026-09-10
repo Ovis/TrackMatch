@@ -7,4 +7,5 @@ namespace TrackMatch.Core.Scanning;
 /// </summary>
 public sealed record IncrementalScanResult(
     long SessionId,
-    ScanSessionSummary Summary);
+    ScanSessionSummary Summary,
+    IReadOnlyList<IncrementalScanError> Errors);
