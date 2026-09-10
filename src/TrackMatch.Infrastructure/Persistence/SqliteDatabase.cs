@@ -1,3 +1,4 @@
+using Dapper;
 using Microsoft.Data.Sqlite;
 
 namespace TrackMatch.Infrastructure.Persistence;
@@ -35,8 +36,8 @@ public sealed class SqliteDatabase
         await using var connection = await OpenConnectionAsync(cancellationToken);
 
         // GUIとScannerが同じDBを扱うため、読み取りと書き込みを並行しやすいWALを最初から使用する。
-        await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
-        await ExecuteNonQueryAsync(connection, "PRAGMA synchronous = NORMAL;", cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition("PRAGMA journal_mode = WAL;", cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition("PRAGMA synchronous = NORMAL;", cancellationToken: cancellationToken));
 
         const string schema = """
             CREATE TABLE IF NOT EXISTS Tracks (
@@ -55,8 +56,7 @@ public sealed class SqliteDatabase
                 UpdatedAtUtcTicks INTEGER NOT NULL
             );
 
-            CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks
-                ON Tracks (LastWriteTimeUtcTicks);
+            CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks ON Tracks (LastWriteTimeUtcTicks);
 
             CREATE TABLE IF NOT EXISTS Fingerprints (
                 TrackId INTEGER PRIMARY KEY,
@@ -80,11 +80,10 @@ public sealed class SqliteDatabase
                 ErrorCount INTEGER NOT NULL DEFAULT 0
             );
 
-            CREATE INDEX IF NOT EXISTS IX_ScanSessions_StartedAtUtcTicks
-                ON ScanSessions (StartedAtUtcTicks DESC);
+            CREATE INDEX IF NOT EXISTS IX_ScanSessions_StartedAtUtcTicks ON ScanSessions (StartedAtUtcTicks DESC);
             """;
 
-        await ExecuteNonQueryAsync(connection, schema, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(schema, cancellationToken: cancellationToken));
     }
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
@@ -93,8 +92,8 @@ public sealed class SqliteDatabase
         try
         {
             await connection.OpenAsync(cancellationToken);
-            await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
-            await ExecuteNonQueryAsync(connection, $"PRAGMA busy_timeout = {BusyTimeoutMilliseconds};", cancellationToken);
+            await connection.ExecuteAsync(new CommandDefinition("PRAGMA foreign_keys = ON;", cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition($"PRAGMA busy_timeout = {BusyTimeoutMilliseconds};", cancellationToken: cancellationToken));
             return connection;
         }
         catch
@@ -102,15 +101,5 @@ public sealed class SqliteDatabase
             await connection.DisposeAsync();
             throw;
         }
-    }
-
-    private static async Task ExecuteNonQueryAsync(
-        SqliteConnection connection,
-        string commandText,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = commandText;
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }
