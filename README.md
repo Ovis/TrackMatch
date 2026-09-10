@@ -92,12 +92,30 @@ The default decision remains `NotDuplicate` for compatibility. To confirm that a
 dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --decision duplicate --keep 123 --note "keep original album copy"
 ```
 
-`--keep` must be one of the two Track IDs in the reviewed pair. The retained Track is stored separately from the pair decision so a later Trash/move workflow can identify the rejected copy without re-asking the user.
+`--keep` must be one of the two Track IDs in the reviewed pair. The retained Track is stored separately from the pair decision so the rejected copy can later be moved without asking again.
+
+## Move rejected tracks to Trash
+
+`trash-reviewed` builds a move plan from `ConfirmedDuplicate` reviews. It is a dry-run by default and preserves each rejected track's path relative to the library root under the Trash root:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- trash-reviewed --db ".\trackmatch.db" --library-root "D:\Music" --trash-root "D:\MusicTrash"
+```
+
+Review the reported `Ready` rows, then add `--execute` to actually move them:
+
+```powershell
+dotnet run --project src/TrackMatch.Scanner -- trash-reviewed --db ".\trackmatch.db" --library-root "D:\Music" --trash-root "D:\MusicTrash" --execute
+```
+
+The command never overwrites an existing Trash file. It also blocks a track when review data conflicts and the same Track ID is selected as both Keep and Reject across different confirmed duplicate pairs. Tracks outside the specified library root, already-missing tracks, missing source files, and existing destinations are reported instead of moved. The Trash root must be outside the library root so moved FLAC files are not re-discovered by a later scan.
+
+After a successful move, the rejected Track is marked `IsMissing` and its stored fingerprint is removed immediately. The original file is not deleted; it is moved to the corresponding relative path under the Trash root.
 
 The current library pipeline is therefore:
 
 ```text
-scan -> generate-candidates -> analyze-candidates -> classify/export -> human review
+scan -> generate-candidates -> analyze-candidates -> classify/export -> human review -> trash-reviewed
 ```
 
 The repository intentionally does not provide arbitrary default relationship thresholds. Use real Probe measurements to create `thresholds.json` before classifying the library.
