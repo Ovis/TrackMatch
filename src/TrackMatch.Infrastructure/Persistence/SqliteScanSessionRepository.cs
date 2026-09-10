@@ -1,3 +1,4 @@
+using Dapper;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Infrastructure.Persistence;
@@ -14,18 +15,21 @@ public sealed class SqliteScanSessionRepository(SqliteDatabase database) : IScan
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        const string sql = """
             INSERT INTO ScanSessions (RootPath, StartedAtUtcTicks, Status)
-            VALUES ($rootPath, $startedAtUtcTicks, 'Running');
+            VALUES (@RootPath, @StartedAtUtcTicks, 'Running');
             SELECT last_insert_rowid();
             """;
-        command.Parameters.AddWithValue("$rootPath", Path.GetFullPath(rootPath));
-        command.Parameters.AddWithValue("$startedAtUtcTicks", startedAtUtc.ToUniversalTime().Ticks);
 
-        return (long)(await command.ExecuteScalarAsync(cancellationToken)
-            ?? throw new InvalidOperationException("ScanSessionのIDを取得できなかった。"));
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        return await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            sql,
+            new
+            {
+                RootPath = Path.GetFullPath(rootPath),
+                StartedAtUtcTicks = startedAtUtc.ToUniversalTime().Ticks,
+            },
+            cancellationToken: cancellationToken));
     }
 
     public Task CompleteAsync(
@@ -56,31 +60,37 @@ public sealed class SqliteScanSessionRepository(SqliteDatabase database) : IScan
 
         ArgumentNullException.ThrowIfNull(summary);
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        const string sql = """
             UPDATE ScanSessions
-            SET CompletedAtUtcTicks = $completedAtUtcTicks,
-                Status = $status,
-                TotalFiles = $totalFiles,
-                ProcessedFiles = $processedFiles,
-                AddedFiles = $addedFiles,
-                UpdatedFiles = $updatedFiles,
-                RemovedFiles = $removedFiles,
-                ErrorCount = $errorCount
-            WHERE Id = $id AND Status = 'Running';
+            SET CompletedAtUtcTicks = @CompletedAtUtcTicks,
+                Status = @Status,
+                TotalFiles = @TotalFiles,
+                ProcessedFiles = @ProcessedFiles,
+                AddedFiles = @AddedFiles,
+                UpdatedFiles = @UpdatedFiles,
+                RemovedFiles = @RemovedFiles,
+                ErrorCount = @ErrorCount
+            WHERE Id = @Id AND Status = 'Running';
             """;
-        command.Parameters.AddWithValue("$completedAtUtcTicks", completedAtUtc.ToUniversalTime().Ticks);
-        command.Parameters.AddWithValue("$status", status);
-        command.Parameters.AddWithValue("$totalFiles", summary.TotalFiles);
-        command.Parameters.AddWithValue("$processedFiles", summary.ProcessedFiles);
-        command.Parameters.AddWithValue("$addedFiles", summary.AddedFiles);
-        command.Parameters.AddWithValue("$updatedFiles", summary.UpdatedFiles);
-        command.Parameters.AddWithValue("$removedFiles", summary.RemovedFiles);
-        command.Parameters.AddWithValue("$errorCount", summary.ErrorCount);
-        command.Parameters.AddWithValue("$id", sessionId);
 
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                Id = sessionId,
+                CompletedAtUtcTicks = completedAtUtc.ToUniversalTime().Ticks,
+                Status = status,
+                summary.TotalFiles,
+                summary.ProcessedFiles,
+                summary.AddedFiles,
+                summary.UpdatedFiles,
+                summary.RemovedFiles,
+                summary.ErrorCount,
+            },
+            cancellationToken: cancellationToken));
+
+        if (affected != 1)
         {
             throw new InvalidOperationException("Running状態のScanSessionを更新できなかった。");
         }
