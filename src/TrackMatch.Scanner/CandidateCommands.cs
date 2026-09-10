@@ -68,9 +68,11 @@ internal static class CandidateCommands
 
             var database = new SqliteDatabase(databasePath);
             await database.InitializeAsync();
+            var reviewRepository = new SqliteCandidateReviewRepository(database);
             var service = new CandidateGenerationService(
                 new SqliteFingerprintCatalogRepository(database),
                 new SqliteCandidatePairRepository(database),
+                reviewRepository,
                 new CandidatePairGenerator(new FingerprintSegmentSketcher()));
             var result = await service.GenerateAsync(algorithm, options);
 
@@ -192,6 +194,66 @@ internal static class CandidateCommands
         }
     }
 
+    public static async Task<int> RunReviewAsync(string[] args)
+    {
+        string? databasePath = null;
+        string? note = null;
+        long? trackIdA = null;
+        long? trackIdB = null;
+
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (TryReadStringOption(args, ref i, "--db", out var stringValue))
+            {
+                databasePath = stringValue;
+                continue;
+            }
+
+            if (TryReadLongOption(args, ref i, "--track-a", out var longValue))
+            {
+                trackIdA = longValue;
+                continue;
+            }
+
+            if (TryReadLongOption(args, ref i, "--track-b", out longValue))
+            {
+                trackIdB = longValue;
+                continue;
+            }
+
+            if (TryReadStringOption(args, ref i, "--note", out stringValue))
+            {
+                note = stringValue;
+                continue;
+            }
+
+            Console.Error.WriteLine($"不明または値が不正なオプション: {args[i]}");
+            return 1;
+        }
+
+        if (string.IsNullOrWhiteSpace(databasePath) || trackIdA is null || trackIdB is null)
+        {
+            Console.Error.WriteLine("--db、--track-a、--track-b は必須である。");
+            return 1;
+        }
+
+        try
+        {
+            var pair = CandidatePairKey.Create(trackIdA.Value, trackIdB.Value);
+            var database = new SqliteDatabase(databasePath);
+            await database.InitializeAsync();
+            var repository = new SqliteCandidateReviewRepository(database);
+            await repository.SaveAsync(new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, note));
+            Console.WriteLine($"NotDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}");
+            return 0;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 2;
+        }
+    }
+
     private static bool TryReadStringOption(string[] args, ref int index, string option, out string value)
     {
         value = string.Empty;
@@ -213,5 +275,16 @@ internal static class CandidateCommands
         }
 
         return int.TryParse(args[++index], out value);
+    }
+
+    private static bool TryReadLongOption(string[] args, ref int index, string option, out long value)
+    {
+        value = default;
+        if (!string.Equals(args[index], option, StringComparison.OrdinalIgnoreCase) || index + 1 >= args.Length)
+        {
+            return false;
+        }
+
+        return long.TryParse(args[++index], out value);
     }
 }
