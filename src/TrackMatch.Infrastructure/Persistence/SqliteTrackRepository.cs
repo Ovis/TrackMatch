@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using Dapper;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Persistence;
@@ -18,47 +18,57 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
+        const string upsertSql = """
+            INSERT INTO Tracks (
+                Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+                ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
+                IsMissing, UpdatedAtUtcTicks)
+            VALUES (
+                @Path, @FileSize, @LastWriteTimeUtcTicks, @DurationTicks,
+                @ArtistsJson, @Title, @Album, @TrackNumber, @DiscNumber, @GenresJson,
+                0, @UpdatedAtUtcTicks)
+            ON CONFLICT(Path) DO UPDATE SET
+                FileSize = excluded.FileSize,
+                LastWriteTimeUtcTicks = excluded.LastWriteTimeUtcTicks,
+                DurationTicks = excluded.DurationTicks,
+                ArtistsJson = excluded.ArtistsJson,
+                Title = excluded.Title,
+                Album = excluded.Album,
+                TrackNumber = excluded.TrackNumber,
+                DiscNumber = excluded.DiscNumber,
+                GenresJson = excluded.GenresJson,
+                IsMissing = 0,
+                UpdatedAtUtcTicks = excluded.UpdatedAtUtcTicks;
+            """;
+
+        var parameters = new
+        {
+            Path = Path.GetFullPath(metadata.Path),
+            metadata.FileSize,
+            LastWriteTimeUtcTicks = metadata.LastWriteTimeUtc.Ticks,
+            DurationTicks = metadata.Duration.Ticks,
+            ArtistsJson = JsonSerializer.Serialize(metadata.Artists),
+            metadata.Title,
+            metadata.Album,
+            TrackNumber = metadata.TrackNumber is null ? (long?)null : metadata.TrackNumber.Value,
+            DiscNumber = metadata.DiscNumber is null ? (long?)null : metadata.DiscNumber.Value,
+            GenresJson = JsonSerializer.Serialize(metadata.Genres),
+            UpdatedAtUtcTicks = DateTime.UtcNow.Ticks,
+        };
+
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            upsertSql,
+            parameters,
+            transaction,
+            cancellationToken: cancellationToken));
 
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = """
-                INSERT INTO Tracks (
-                    Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
-                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
-                    IsMissing, UpdatedAtUtcTicks)
-                VALUES (
-                    $path, $fileSize, $lastWriteTimeUtcTicks, $durationTicks,
-                    $artistsJson, $title, $album, $trackNumber, $discNumber, $genresJson,
-                    0, $updatedAtUtcTicks)
-                ON CONFLICT(Path) DO UPDATE SET
-                    FileSize = excluded.FileSize,
-                    LastWriteTimeUtcTicks = excluded.LastWriteTimeUtcTicks,
-                    DurationTicks = excluded.DurationTicks,
-                    ArtistsJson = excluded.ArtistsJson,
-                    Title = excluded.Title,
-                    Album = excluded.Album,
-                    TrackNumber = excluded.TrackNumber,
-                    DiscNumber = excluded.DiscNumber,
-                    GenresJson = excluded.GenresJson,
-                    IsMissing = 0,
-                    UpdatedAtUtcTicks = excluded.UpdatedAtUtcTicks;
-                """;
-            AddMetadataParameters(command, metadata);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        long id;
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "SELECT Id FROM Tracks WHERE Path = $path COLLATE NOCASE;";
-            command.Parameters.AddWithValue("$path", Path.GetFullPath(metadata.Path));
-            id = (long)(await command.ExecuteScalarAsync(cancellationToken)
-                ?? throw new InvalidOperationException("保存したTrackのIDを取得できなかった。"));
-        }
+        var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT Id FROM Tracks WHERE Path = @Path COLLATE NOCASE;",
+            new { parameters.Path },
+            transaction,
+            cancellationToken: cancellationToken));
 
         await transaction.CommitAsync(cancellationToken);
         return id;
@@ -70,35 +80,20 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        const string sql = """
             SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
             FROM Tracks
-            WHERE Path = $path COLLATE NOCASE;
+            WHERE Path = @Path COLLATE NOCASE;
             """;
-        command.Parameters.AddWithValue("$path", Path.GetFullPath(path));
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<TrackRow>(new CommandDefinition(
+            sql,
+            new { Path = Path.GetFullPath(path) },
+            cancellationToken: cancellationToken));
 
-        var metadata = new AudioTrackMetadata(
-            reader.GetString(1),
-            reader.GetInt64(2),
-            new DateTime(reader.GetInt64(3), DateTimeKind.Utc),
-            TimeSpan.FromTicks(reader.GetInt64(4)),
-            DeserializeList(reader.GetString(5)),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : checked((uint)reader.GetInt64(8)),
-            reader.IsDBNull(9) ? null : checked((uint)reader.GetInt64(9)),
-            DeserializeList(reader.GetString(10)));
-
-        return new StoredTrack(reader.GetInt64(0), metadata, reader.GetInt64(11) != 0);
+        return row is null ? null : ToStoredTrack(row);
     }
 
     public async Task SaveFingerprintAsync(
@@ -113,21 +108,26 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             throw new ArgumentOutOfRangeException(nameof(trackId));
         }
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        const string sql = """
             INSERT INTO Fingerprints (TrackId, Algorithm, ValuesBlob, ExtractedAtUtcTicks)
-            VALUES ($trackId, $algorithm, $valuesBlob, $extractedAtUtcTicks)
+            VALUES (@TrackId, @Algorithm, @ValuesBlob, @ExtractedAtUtcTicks)
             ON CONFLICT(TrackId) DO UPDATE SET
                 Algorithm = excluded.Algorithm,
                 ValuesBlob = excluded.ValuesBlob,
                 ExtractedAtUtcTicks = excluded.ExtractedAtUtcTicks;
             """;
-        command.Parameters.AddWithValue("$trackId", trackId);
-        command.Parameters.AddWithValue("$algorithm", algorithm);
-        command.Parameters.AddWithValue("$valuesBlob", EncodeFingerprint(fingerprint.Values));
-        command.Parameters.AddWithValue("$extractedAtUtcTicks", DateTime.UtcNow.Ticks);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                TrackId = trackId,
+                Algorithm = algorithm,
+                ValuesBlob = EncodeFingerprint(fingerprint.Values),
+                ExtractedAtUtcTicks = DateTime.UtcNow.Ticks,
+            },
+            cancellationToken: cancellationToken));
     }
 
     public async Task<AudioFingerprint?> GetFingerprintAsync(
@@ -139,41 +139,39 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             throw new ArgumentOutOfRangeException(nameof(trackId));
         }
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        const string sql = """
             SELECT t.Path, t.DurationTicks, f.ValuesBlob
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
-            WHERE f.TrackId = $trackId;
+            WHERE f.TrackId = @TrackId;
             """;
-        command.Parameters.AddWithValue("$trackId", trackId);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<FingerprintRow>(new CommandDefinition(
+            sql,
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
 
-        return new AudioFingerprint(
-            reader.GetString(0),
-            TimeSpan.FromTicks(reader.GetInt64(1)),
-            DecodeFingerprint((byte[])reader[2]));
+        return row is null
+            ? null
+            : new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), DecodeFingerprint(row.ValuesBlob));
     }
 
-    private static void AddMetadataParameters(SqliteCommand command, AudioTrackMetadata metadata)
+    private static StoredTrack ToStoredTrack(TrackRow row)
     {
-        command.Parameters.AddWithValue("$path", Path.GetFullPath(metadata.Path));
-        command.Parameters.AddWithValue("$fileSize", metadata.FileSize);
-        command.Parameters.AddWithValue("$lastWriteTimeUtcTicks", metadata.LastWriteTimeUtc.Ticks);
-        command.Parameters.AddWithValue("$durationTicks", metadata.Duration.Ticks);
-        command.Parameters.AddWithValue("$artistsJson", JsonSerializer.Serialize(metadata.Artists));
-        command.Parameters.AddWithValue("$title", (object?)metadata.Title ?? DBNull.Value);
-        command.Parameters.AddWithValue("$album", (object?)metadata.Album ?? DBNull.Value);
-        command.Parameters.AddWithValue("$trackNumber", metadata.TrackNumber is null ? DBNull.Value : metadata.TrackNumber.Value);
-        command.Parameters.AddWithValue("$discNumber", metadata.DiscNumber is null ? DBNull.Value : metadata.DiscNumber.Value);
-        command.Parameters.AddWithValue("$genresJson", JsonSerializer.Serialize(metadata.Genres));
-        command.Parameters.AddWithValue("$updatedAtUtcTicks", DateTime.UtcNow.Ticks);
+        var metadata = new AudioTrackMetadata(
+            row.Path,
+            row.FileSize,
+            new DateTime(row.LastWriteTimeUtcTicks, DateTimeKind.Utc),
+            TimeSpan.FromTicks(row.DurationTicks),
+            DeserializeList(row.ArtistsJson),
+            row.Title,
+            row.Album,
+            row.TrackNumber is null ? null : checked((uint)row.TrackNumber.Value),
+            row.DiscNumber is null ? null : checked((uint)row.DiscNumber.Value),
+            DeserializeList(row.GenresJson));
+
+        return new StoredTrack(row.Id, metadata, row.IsMissing != 0);
     }
 
     private static IReadOnlyList<string> DeserializeList(string json)
@@ -206,4 +204,20 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
         return values;
     }
+
+    private sealed record TrackRow(
+        long Id,
+        string Path,
+        long FileSize,
+        long LastWriteTimeUtcTicks,
+        long DurationTicks,
+        string ArtistsJson,
+        string? Title,
+        string? Album,
+        long? TrackNumber,
+        long? DiscNumber,
+        string GenresJson,
+        long IsMissing);
+
+    private sealed record FingerprintRow(string Path, long DurationTicks, byte[] ValuesBlob);
 }
