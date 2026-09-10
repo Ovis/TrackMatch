@@ -200,6 +200,8 @@ internal static class CandidateCommands
         string? note = null;
         long? trackIdA = null;
         long? trackIdB = null;
+        long? keepTrackId = null;
+        var decision = CandidateReviewDecision.NotDuplicate;
 
         for (var i = 1; i < args.Length; i++)
         {
@@ -218,6 +220,18 @@ internal static class CandidateCommands
             if (TryReadLongOption(args, ref i, "--track-b", out longValue))
             {
                 trackIdB = longValue;
+                continue;
+            }
+
+            if (TryReadLongOption(args, ref i, "--keep", out longValue))
+            {
+                keepTrackId = longValue;
+                continue;
+            }
+
+            if (TryReadStringOption(args, ref i, "--decision", out stringValue)
+                && TryParseReviewDecision(stringValue, out decision))
+            {
                 continue;
             }
 
@@ -240,11 +254,24 @@ internal static class CandidateCommands
         try
         {
             var pair = CandidatePairKey.Create(trackIdA.Value, trackIdB.Value);
+            var review = new CandidateReview(pair, decision, note, keepTrackId);
+            review.Validate();
+
             var database = new SqliteDatabase(databasePath);
             await database.InitializeAsync();
             var repository = new SqliteCandidateReviewRepository(database);
-            await repository.SaveAsync(new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, note));
-            Console.WriteLine($"NotDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}");
+            await repository.SaveAsync(review);
+
+            if (decision == CandidateReviewDecision.ConfirmedDuplicate)
+            {
+                var discardTrackId = keepTrackId == pair.TrackIdA ? pair.TrackIdB : pair.TrackIdA;
+                Console.WriteLine($"ConfirmedDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}, Keep: {keepTrackId}, Reject: {discardTrackId}");
+            }
+            else
+            {
+                Console.WriteLine($"NotDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}");
+            }
+
             return 0;
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
@@ -252,6 +279,26 @@ internal static class CandidateCommands
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
+    }
+
+    private static bool TryParseReviewDecision(string value, out CandidateReviewDecision decision)
+    {
+        if (string.Equals(value, "not-duplicate", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "notduplicate", StringComparison.OrdinalIgnoreCase))
+        {
+            decision = CandidateReviewDecision.NotDuplicate;
+            return true;
+        }
+
+        if (string.Equals(value, "duplicate", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "confirmed-duplicate", StringComparison.OrdinalIgnoreCase))
+        {
+            decision = CandidateReviewDecision.ConfirmedDuplicate;
+            return true;
+        }
+
+        decision = default;
+        return false;
     }
 
     private static bool TryReadStringOption(string[] args, ref int index, string option, out string value)
