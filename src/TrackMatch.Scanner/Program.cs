@@ -4,8 +4,10 @@ using System.Text.Json;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Probe;
+using TrackMatch.Core.Scanning;
 using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Chromaprint;
+using TrackMatch.Infrastructure.Persistence;
 using TrackMatch.Infrastructure.Scanning;
 
 return await RunAsync(args);
@@ -20,7 +22,7 @@ static async Task<int> RunAsync(string[] args)
 
     if (string.Equals(args[0], "scan", StringComparison.OrdinalIgnoreCase))
     {
-        return RunScan(args);
+        return await RunScanAsync(args);
     }
 
     if (string.Equals(args[0], "compare", StringComparison.OrdinalIgnoreCase))
@@ -47,49 +49,89 @@ static async Task<int> RunAsync(string[] args)
     return 1;
 }
 
-static int RunScan(string[] args)
+static async Task<int> RunScanAsync(string[] args)
 {
-    if (args.Length != 2)
+    if (args.Length < 2)
     {
         PrintUsage();
         return 1;
     }
 
-    var scanner = new FlacLibraryScanner(new FlacMetadataReader());
-    var total = 0;
-    var succeeded = 0;
-    var failed = 0;
+    var rootPath = args[1];
+    string? databasePath = null;
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (string.Equals(args[i], "--db", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            databasePath = args[++i];
+            continue;
+        }
+
+        Console.Error.WriteLine($"不明なオプション: {args[i]}");
+        return 1;
+    }
 
     try
     {
-        foreach (var result in scanner.Scan(args[1]))
+        if (databasePath is null)
         {
-            total++;
-            if (!result.IsSuccess)
-            {
-                failed++;
-                Console.Error.WriteLine($"ERROR\t{result.Path}\t{result.ErrorMessage}");
-                continue;
-            }
-
-            succeeded++;
-            var metadata = result.Metadata!;
-            Console.WriteLine(string.Join(
-                '\t',
-                metadata.Path,
-                metadata.Duration.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture),
-                string.Join("; ", metadata.Artists),
-                metadata.Title ?? string.Empty,
-                metadata.Album ?? string.Empty,
-                metadata.TrackNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-                metadata.DiscNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-                string.Join("; ", metadata.Genres)));
+            return RunLegacyScan(rootPath);
         }
+
+        var database = new SqliteDatabase(databasePath);
+        await database.InitializeAsync();
+        var service = new IncrementalLibraryScanService(
+            new FlacLibraryScanner(new FlacMetadataReader()),
+            new SqliteTrackRepository(database),
+            new SqliteScanSessionRepository(database));
+        var result = await service.ScanAsync(rootPath);
+        var summary = result.Summary;
+        Console.Error.WriteLine(
+            $"Session: {result.SessionId}, Scanned: {summary.TotalFiles}, Processed: {summary.ProcessedFiles}, " +
+            $"Added: {summary.AddedFiles}, Updated: {summary.UpdatedFiles}, Missing: {summary.RemovedFiles}, Errors: {summary.ErrorCount}");
+        return summary.ErrorCount == 0 ? 0 : 2;
     }
     catch (DirectoryNotFoundException exception)
     {
         Console.Error.WriteLine(exception.Message);
         return 1;
+    }
+    catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 2;
+    }
+}
+
+static int RunLegacyScan(string rootPath)
+{
+    var scanner = new FlacLibraryScanner(new FlacMetadataReader());
+    var total = 0;
+    var succeeded = 0;
+    var failed = 0;
+
+    foreach (var result in scanner.Scan(rootPath))
+    {
+        total++;
+        if (!result.IsSuccess)
+        {
+            failed++;
+            Console.Error.WriteLine($"ERROR\t{result.Path}\t{result.ErrorMessage}");
+            continue;
+        }
+
+        succeeded++;
+        var metadata = result.Metadata!;
+        Console.WriteLine(string.Join(
+            '\t',
+            metadata.Path,
+            metadata.Duration.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture),
+            string.Join("; ", metadata.Artists),
+            metadata.Title ?? string.Empty,
+            metadata.Album ?? string.Empty,
+            metadata.TrackNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            metadata.DiscNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            string.Join("; ", metadata.Genres)));
     }
 
     Console.Error.WriteLine($"Scanned: {total}, Success: {succeeded}, Failed: {failed}");
@@ -357,11 +399,12 @@ static string Csv(string value)
 static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  TrackMatch.Scanner scan <folder>");
+    Console.Error.WriteLine("  TrackMatch.Scanner scan <folder> [--db <trackmatch.db>]");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
     Console.Error.WriteLine("  TrackMatch.Scanner classify-probe <results.csv> --profile <thresholds.json>");
     Console.Error.WriteLine();
+    Console.Error.WriteLine("scanに--dbを指定するとSQLiteへ増分走査結果を保存する。");
     Console.Error.WriteLine("fpcalcはPATHまたはTRACKMATCH_FPCALC環境変数でも指定できる。");
 }

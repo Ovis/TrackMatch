@@ -96,6 +96,56 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         return row is null ? null : ToStoredTrack(row);
     }
 
+    public async Task<IReadOnlyList<StoredTrack>> GetByRootPathAsync(
+        string rootPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+
+        // ルート自身との一致とディレクトリ区切り文字を付けた前方一致に限定し、D:\Music2等の隣接パスを混ぜない。
+        var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        var prefix = EscapeLike(fullRootPath + Path.DirectorySeparatorChar) + "%";
+        const string sql = """
+            SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+                   ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
+            FROM Tracks
+            WHERE Path = @RootPath COLLATE NOCASE
+               OR Path LIKE @Prefix ESCAPE '\' COLLATE NOCASE;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<TrackRow>(new CommandDefinition(
+            sql,
+            new { RootPath = fullRootPath, Prefix = prefix },
+            cancellationToken: cancellationToken));
+        return rows.Select(ToStoredTrack).ToArray();
+    }
+
+    public async Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        const string sql = """
+            UPDATE Tracks
+            SET IsMissing = 1,
+                UpdatedAtUtcTicks = @UpdatedAtUtcTicks
+            WHERE Id = @TrackId;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            new { TrackId = trackId, UpdatedAtUtcTicks = DateTime.UtcNow.Ticks },
+            cancellationToken: cancellationToken));
+        if (affected != 1)
+        {
+            throw new InvalidOperationException("欠落状態へ更新するTrackが見つからなかった。");
+        }
+    }
+
     public async Task SaveFingerprintAsync(
         long trackId,
         AudioFingerprint fingerprint,
@@ -173,6 +223,11 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
         return new StoredTrack(row.Id, metadata, row.IsMissing != 0);
     }
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static IReadOnlyList<string> DeserializeList(string json)
         => JsonSerializer.Deserialize<string[]>(json)

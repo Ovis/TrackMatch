@@ -66,6 +66,25 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TrackRepository_GetsRootTracksAndMarksMissing()
+    {
+        var repository = new SqliteTrackRepository(_database);
+        var root = Path.Combine(_directory, "Music");
+        var path = Path.Combine(root, "Album", "track.flac");
+        var outsidePath = Path.Combine(_directory, "Music2", "other.flac");
+        var id = await repository.UpsertMetadataAsync(CreateMetadata(path, 100, "Track"), TestContext.Current.CancellationToken);
+        await repository.UpsertMetadataAsync(CreateMetadata(outsidePath, 100, "Other"), TestContext.Current.CancellationToken);
+
+        var tracks = await repository.GetByRootPathAsync(root, TestContext.Current.CancellationToken);
+        var track = Assert.Single(tracks);
+        Assert.Equal(id, track.Id);
+
+        await repository.MarkMissingAsync(id, TestContext.Current.CancellationToken);
+        var missing = Assert.IsType<StoredTrack>(await repository.GetByPathAsync(path, TestContext.Current.CancellationToken));
+        Assert.True(missing.IsMissing);
+    }
+
+    [Fact]
     public async Task ScanSessionRepository_CompletesRunningSession()
     {
         var repository = new SqliteScanSessionRepository(_database);
