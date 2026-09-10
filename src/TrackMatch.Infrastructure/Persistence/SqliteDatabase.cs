@@ -112,6 +112,20 @@ public sealed class SqliteDatabase
 
             CREATE INDEX IF NOT EXISTS IX_CandidateClassifications_Kind ON CandidateClassifications (Kind);
 
+            CREATE TABLE IF NOT EXISTS CandidateReviews (
+                TrackIdA INTEGER NOT NULL,
+                TrackIdB INTEGER NOT NULL,
+                Decision TEXT NOT NULL,
+                Note TEXT NULL,
+                ReviewedAtUtcTicks INTEGER NOT NULL,
+                PRIMARY KEY (TrackIdA, TrackIdB),
+                CHECK (TrackIdA < TrackIdB),
+                FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CandidateReviews_Decision ON CandidateReviews (Decision);
+
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 RootPath TEXT NOT NULL,
