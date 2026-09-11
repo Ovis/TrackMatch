@@ -48,7 +48,7 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task FingerprintSegmentSketchRepository_ReturnsStoredFingerprintTimestamp()
+    public async Task FingerprintSegmentSketchRepository_ReturnsLatestStoredFingerprintTimestampAcrossSegments()
     {
         var tracks = new SqliteTrackRepository(_database);
         var path = Path.Combine(_directory, "sketch.flac");
@@ -61,8 +61,36 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
         await repository.ReplaceTrackAsync(
             storedFingerprint,
             options,
-            [new FingerprintSegmentSketch(trackId, 0, 0x12345678u)],
+            [
+                new FingerprintSegmentSketch(trackId, 0, 0x12345678u),
+                new FingerprintSegmentSketch(trackId, 1, 0x23456789u),
+            ],
             TestContext.Current.CancellationToken);
+
+        // 過去世代のSegmentが残ったDBでも、Track状態には最新のFingerprint時刻を採用する。
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO CandidateSegmentSketches (
+                    TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
+                    MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
+                VALUES (
+                    @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
+                    @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
+                """,
+                new
+                {
+                    TrackId = trackId,
+                    Algorithm = 2,
+                    options.SegmentLengthItems,
+                    options.SegmentStrideItems,
+                    MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
+                    SegmentIndex = 99,
+                    Hash = 0L,
+                    FingerprintExtractedAtUtcTicks = extractedAtUtc.AddMinutes(-1).Ticks,
+                });
+        }
 
         var states = await repository.GetTrackStatesAsync(2, options, TestContext.Current.CancellationToken);
 
