@@ -1,203 +1,154 @@
 <Window x:Class="TrackMatch.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="TrackMatch" Height="980" Width="1280" MinHeight="800" MinWidth="1000">
+        Title="TrackMatch" Height="980" Width="1320" MinHeight="800" MinWidth="1080">
     <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="280"/><ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="100"/><ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="130"/><ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="100"/><ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <TextBlock VerticalAlignment="Center" Text="Database" />
-            <TextBox Grid.Column="2" Height="30" VerticalContentAlignment="Center" Text="{Binding DatabasePath, UpdateSourceTrigger=PropertyChanged}" />
-            <Button Grid.Column="4" Width="90" Height="30" Content="参照..." Click="BrowseDatabase_Click" />
-            <Button Grid.Column="6" Width="90" Height="30" Content="再読込" Click="Reload_Click" />
+            <TextBlock VerticalAlignment="Center" Text="Library"/>
+            <ComboBox x:Name="LibraryComboBox" Grid.Column="2" Height="30"
+                      ItemsSource="{Binding Libraries}" SelectedItem="{Binding SelectedLibrary}"
+                      DisplayMemberPath="Name" SelectionChanged="LibraryComboBox_SelectionChanged"/>
+            <Button Grid.Column="4" Height="30" Content="管理..." IsEnabled="{Binding CanManageLibraries}" Click="ManageLibraries_Click"/>
+            <Button Grid.Column="6" Height="30" Content="スキャン・分析" IsEnabled="{Binding CanAnalyzeLibrary}" Click="AnalyzeLibrary_Click"/>
+            <Button Grid.Column="8" Height="30" Content="キャンセル" IsEnabled="{Binding CanCancelAnalysis}" Click="CancelAnalysis_Click"/>
         </Grid>
 
-        <GroupBox Grid.Row="2" Header="ライブラリ分析" Padding="10">
+        <Border Grid.Row="2" Padding="10" BorderBrush="#D0D0D0" BorderThickness="1" CornerRadius="3">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="8" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="8" />
-                    <ColumnDefinition Width="90" />
-                    <ColumnDefinition Width="12" />
-                    <ColumnDefinition Width="120" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="8" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <TextBlock VerticalAlignment="Center" Text="Library Root" />
-                <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" Text="{Binding LibraryRoot, UpdateSourceTrigger=PropertyChanged}" />
-                <Button Grid.Column="4" Height="28" Content="参照..." Click="BrowseLibraryRoot_Click" />
-                <Button Grid.Column="6" Height="28" Content="スキャン・分析" IsEnabled="{Binding CanAnalyzeLibrary}" Click="AnalyzeLibrary_Click" />
-                <TextBlock Grid.Row="2" Grid.ColumnSpan="7" Text="{Binding AnalysisStatusText}" TextWrapping="Wrap" />
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="{Binding AnalysisStatusText}" TextWrapping="Wrap"/>
+                <Button Grid.Column="2" Padding="14,4" Content="エラー詳細..." Click="ShowAnalysisErrors_Click"/>
             </Grid>
-        </GroupBox>
+        </Border>
 
         <Grid Grid.Row="4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="16" />
-                <ColumnDefinition Width="3*" />
-            </Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
 
-            <DataGrid Grid.Column="0"
-                      ItemsSource="{Binding Candidates}"
-                      SelectedItem="{Binding SelectedCandidate}"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True"
-                      SelectionMode="Single"
-                      SelectionUnit="FullRow">
+            <DataGrid Grid.Column="0" ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
+                      AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="150" />
-                    <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*" />
-                    <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*" />
-                    <DataGridTextColumn Header="一致度" Binding="{Binding Similarity}" Width="90" />
+                    <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="150"/>
+                    <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
+                    <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
+                    <DataGridTextColumn Header="一致度" Binding="{Binding Similarity}" Width="90"/>
                 </DataGrid.Columns>
             </DataGrid>
 
             <Grid Grid.Column="2" DataContext="{Binding SelectedCandidate}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="8" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="12" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="12" />
-                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*"/><RowDefinition Height="12"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <GroupBox Header="Track A" Padding="12">
-                        <StackPanel>
-                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleA}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,6,0,0" Text="{Binding ArtistA}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,4,0,0" Text="{Binding AlbumA}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,4,0,0" Text="{Binding GenreA}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,10,0,0" Text="{Binding Row.PathA}" TextWrapping="Wrap" Opacity="0.75" />
-                        </StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <GroupBox Header="Track A" Padding="10">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleA}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,6,0,0" Text="{Binding ArtistA}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,4,0,0" Text="{Binding AlbumA}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,4,0,0" Text="{Binding GenreA}" TextWrapping="Wrap"/>
+                                <Separator Margin="0,8"/>
+                                <TextBlock Text="{Binding DurationA, StringFormat=Duration: {0}}"/>
+                                <TextBlock Text="{Binding FormatCodecA, StringFormat=Format / Codec: {0}}"/>
+                                <TextBlock Text="{Binding FileSizeA, StringFormat=File size: {0}}"/>
+                                <TextBlock Text="{Binding BitrateA, StringFormat=Bitrate: {0}}"/>
+                                <TextBlock Text="{Binding SampleRateA, StringFormat=Sample rate: {0}}"/>
+                                <TextBlock Text="{Binding BitDepthA, StringFormat=Bit depth: {0}}"/>
+                                <TextBlock Text="{Binding ChannelsA, StringFormat=Channels: {0}}"/>
+                                <TextBlock Margin="0,8,0,0" Text="{Binding Row.PathA}" TextWrapping="Wrap" Opacity="0.7"/>
+                            </StackPanel>
+                        </ScrollViewer>
                     </GroupBox>
-                    <GroupBox Grid.Column="2" Header="Track B" Padding="12">
-                        <StackPanel>
-                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleB}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,6,0,0" Text="{Binding ArtistB}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,4,0,0" Text="{Binding AlbumB}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,4,0,0" Text="{Binding GenreB}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,10,0,0" Text="{Binding Row.PathB}" TextWrapping="Wrap" Opacity="0.75" />
-                        </StackPanel>
+                    <GroupBox Grid.Column="2" Header="Track B" Padding="10">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleB}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,6,0,0" Text="{Binding ArtistB}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,4,0,0" Text="{Binding AlbumB}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,4,0,0" Text="{Binding GenreB}" TextWrapping="Wrap"/>
+                                <Separator Margin="0,8"/>
+                                <TextBlock Text="{Binding DurationB, StringFormat=Duration: {0}}"/>
+                                <TextBlock Text="{Binding FormatCodecB, StringFormat=Format / Codec: {0}}"/>
+                                <TextBlock Text="{Binding FileSizeB, StringFormat=File size: {0}}"/>
+                                <TextBlock Text="{Binding BitrateB, StringFormat=Bitrate: {0}}"/>
+                                <TextBlock Text="{Binding SampleRateB, StringFormat=Sample rate: {0}}"/>
+                                <TextBlock Text="{Binding BitDepthB, StringFormat=Bit depth: {0}}"/>
+                                <TextBlock Text="{Binding ChannelsB, StringFormat=Channels: {0}}"/>
+                                <TextBlock Margin="0,8,0,0" Text="{Binding Row.PathB}" TextWrapping="Wrap" Opacity="0.7"/>
+                            </StackPanel>
+                        </ScrollViewer>
                     </GroupBox>
                 </Grid>
 
-                <GroupBox Grid.Row="2" Header="比較結果" Padding="12">
+                <GroupBox Grid.Row="2" Header="比較結果" Padding="10">
                     <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="Similarity" /><TextBlock Grid.Column="2" Text="{Binding Similarity}" />
-                        <TextBlock Grid.Row="1" Text="Coverage A" /><TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding CoverageA}" />
-                        <TextBlock Grid.Row="2" Text="Coverage B" /><TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding CoverageB}" />
-                        <TextBlock Grid.Row="3" Text="Duration ratio" /><TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DurationRatio}" />
-                        <TextBlock Grid.Row="4" Text="Reason" /><TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding Reason}" TextWrapping="Wrap" />
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                        <TextBlock Text="Similarity"/><TextBlock Grid.Column="2" Text="{Binding Similarity}"/>
+                        <TextBlock Grid.Row="1" Text="Coverage A"/><TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding CoverageA}"/>
+                        <TextBlock Grid.Row="2" Text="Coverage B"/><TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding CoverageB}"/>
+                        <TextBlock Grid.Row="3" Text="Duration ratio"/><TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DurationRatio}"/>
+                        <TextBlock Grid.Row="4" Text="Reason"/><TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding Reason}" TextWrapping="Wrap"/>
                     </Grid>
                 </GroupBox>
 
                 <Grid Grid.Row="4" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Button Height="38" Content="Aを再生" IsEnabled="{Binding HasSelection}" Click="PlayA_Click" />
-                    <Button Grid.Column="2" Width="90" Height="38" Content="停止" Click="StopPlayback_Click" />
-                    <Button Grid.Column="4" Height="38" Content="Bを再生" IsEnabled="{Binding HasSelection}" Click="PlayB_Click" />
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="90"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Button Height="36" Content="Aを再生" IsEnabled="{Binding HasSelection}" Click="PlayA_Click"/>
+                    <Button Grid.Column="2" Height="36" Content="停止" Click="StopPlayback_Click"/>
+                    <Button Grid.Column="4" Height="36" Content="Bを再生" IsEnabled="{Binding HasSelection}" Click="PlayB_Click"/>
                 </Grid>
 
                 <Grid Grid.Row="6" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Button Height="42" Content="重複ではない" IsEnabled="{Binding HasSelection}" Click="NotDuplicate_Click" />
-                    <Button Grid.Column="2" Height="42" Content="重複 / Aを残す" IsEnabled="{Binding HasSelection}" Click="KeepA_Click" />
-                    <Button Grid.Column="4" Height="42" Content="重複 / Bを残す" IsEnabled="{Binding HasSelection}" Click="KeepB_Click" />
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Button Height="42" Content="重複ではない" IsEnabled="{Binding CanReview}" Click="NotDuplicate_Click"/>
+                    <Button Grid.Column="2" Height="42" Content="重複 / Aを残す" IsEnabled="{Binding CanReview}" Click="KeepA_Click"/>
+                    <Button Grid.Column="4" Height="42" Content="重複 / Bを残す" IsEnabled="{Binding CanReview}" Click="KeepB_Click"/>
                 </Grid>
             </Grid>
         </Grid>
 
-        <GroupBox Grid.Row="6" Header="レビュー済み重複のTrash移動" Padding="10">
+        <GroupBox Grid.Row="6" Header="レビュー済み重複のTrash移動（暫定: 単一Root Library）" Padding="10">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="8" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="8" />
-                    <ColumnDefinition Width="90" />
-                    <ColumnDefinition Width="12" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <TextBlock VerticalAlignment="Center" Text="Trash Root" />
-                <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" Text="{Binding TrashRoot, UpdateSourceTrigger=PropertyChanged}" />
-                <Button Grid.Column="4" Height="28" Content="参照..." Click="BrowseTrashRoot_Click" />
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="90"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="Trash Root"/>
+                <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" Text="{Binding TrashRoot, UpdateSourceTrigger=PropertyChanged}"/>
+                <Button Grid.Column="4" Height="28" Content="参照..." Click="BrowseTrashRoot_Click"/>
                 <StackPanel Grid.Column="6" Orientation="Horizontal">
-                    <Button Height="28" Padding="12,0" Content="Dry-run確認" IsEnabled="{Binding CanProcessTrash}" Click="PreviewTrash_Click" />
-                    <Button Height="28" Margin="8,0,0,0" Padding="12,0" Content="Trashへ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click" />
+                    <Button Height="28" Padding="12,0" Content="Dry-run確認" IsEnabled="{Binding CanProcessTrash}" Click="PreviewTrash_Click"/>
+                    <Button Height="28" Margin="8,0,0,0" Padding="12,0" Content="Trashへ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click"/>
                 </StackPanel>
             </Grid>
         </GroupBox>
 
         <Grid Grid.Row="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="16" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="16" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="{Binding StatusText}" />
-            <TextBlock Grid.Column="2" Text="{Binding PlaybackStatusText}" />
-            <TextBlock Grid.Column="4" Text="{Binding TrashStatusText}" />
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding StatusText}"/>
+            <TextBlock Grid.Column="2" Text="{Binding PlaybackStatusText}"/>
+            <TextBlock Grid.Column="4" Text="{Binding TrashStatusText}"/>
         </Grid>
     </Grid>
 </Window>

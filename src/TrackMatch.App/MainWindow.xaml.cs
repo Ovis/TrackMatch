@@ -1,9 +1,15 @@
 using Microsoft.Win32;
 using System.Windows;
+using System.Windows.Controls;
 using TrackMatch.App.Playback;
+using TrackMatch.Application;
+using TrackMatch.Core.Libraries;
 
 namespace TrackMatch.App;
 
+/// <summary>
+/// TrackMatchのMain Window。Library選択とDialog起動等のWPF固有Interactionだけを扱う。
+/// </summary>
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel = new(new WpfMediaPlayerTrackPlaybackService());
@@ -18,46 +24,59 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // 通常利用ではDBファイルを意識させず、Scannerと共有する標準DBを起動時にそのまま開く。
-        // 参照ボタンは既存DBを調査する場合などの明示的な切り替え手段として残す。
         Loaded -= MainWindow_Loaded;
         await _viewModel.LoadAsync();
+
+        // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
+        if (_viewModel.Libraries.Count == 0)
+        {
+            var service = new LibraryManagementService(_viewModel.DatabasePath);
+            var dialog = new NewLibraryDialog(service) { Owner = this };
+            if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
+            {
+                await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
+            }
+        }
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
         => _viewModel.Dispose();
 
-    private async void BrowseDatabase_Click(object sender, RoutedEventArgs e)
+    private async void LibraryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        if (LibraryComboBox.SelectedItem is Library library)
         {
-            Filter = "SQLite database (*.db;*.sqlite)|*.db;*.sqlite|All files (*.*)|*.*",
-            CheckFileExists = true,
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
+            await _viewModel.SelectLibraryAsync(library);
         }
-
-        _viewModel.DatabasePath = dialog.FileName;
-        await _viewModel.LoadAsync();
     }
 
-    private void BrowseLibraryRoot_Click(object sender, RoutedEventArgs e)
+    private async void ManageLibraries_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
+        var dialog = new LibraryManagementDialog(
+            new LibraryManagementService(_viewModel.DatabasePath),
+            _viewModel.SelectedLibrary?.Id)
         {
-            Title = "ライブラリのルートフォルダを選択",
-            Multiselect = false,
+            Owner = this,
         };
-        if (dialog.ShowDialog(this) == true)
-        {
-            _viewModel.LibraryRoot = dialog.FolderName;
-        }
+        dialog.ShowDialog();
+        await _viewModel.LoadAsync(dialog.SelectedLibraryId);
     }
 
     private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e)
         => await _viewModel.AnalyzeLibraryAsync();
+
+    private void CancelAnalysis_Click(object sender, RoutedEventArgs e)
+        => _viewModel.CancelAnalysis();
+
+    private void ShowAnalysisErrors_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.AnalysisErrors.Count == 0)
+        {
+            return;
+        }
+
+        new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
+    }
 
     private void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
@@ -74,18 +93,25 @@ public partial class MainWindow : Window
 
     private async void PreviewTrash_Click(object sender, RoutedEventArgs e)
     {
-        var result = await _viewModel.ProcessTrashAsync(execute: false);
-        if (result is null)
+        try
         {
-            return;
-        }
+            var result = await _viewModel.ProcessTrashAsync(execute: false);
+            if (result is null)
+            {
+                return;
+            }
 
-        MessageBox.Show(
-            this,
-            $"移動可能: {result.ReadyCount}件\nBlocked: {result.BlockedCount}件\n\n実際のファイル移動はまだ行っていません。",
-            "Trash Dry-run",
-            MessageBoxButton.OK,
-            result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            MessageBox.Show(
+                this,
+                $"移動可能: {result.ReadyCount}件\nBlocked: {result.BlockedCount}件\n\n実際のファイル移動はまだ行っていません。",
+                "Trash Dry-run",
+                MessageBoxButton.OK,
+                result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void ExecuteTrash_Click(object sender, RoutedEventArgs e)
@@ -102,38 +128,36 @@ public partial class MainWindow : Window
             return;
         }
 
-        var result = await _viewModel.ProcessTrashAsync(execute: true);
-        if (result is null)
+        try
         {
-            return;
-        }
+            var result = await _viewModel.ProcessTrashAsync(execute: true);
+            if (result is null)
+            {
+                return;
+            }
 
-        MessageBox.Show(
-            this,
-            $"移動完了: {result.MovedCount}件\nBlocked: {result.BlockedCount}件",
-            "Trash移動結果",
-            MessageBoxButton.OK,
-            result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            MessageBox.Show(
+                this,
+                $"移動完了: {result.MovedCount}件\nBlocked: {result.BlockedCount}件",
+                "Trash移動結果",
+                MessageBoxButton.OK,
+                result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
-    private async void Reload_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.LoadAsync();
+    private void PlayA_Click(object sender, RoutedEventArgs e) => _viewModel.PlayTrackA();
 
-    private void PlayA_Click(object sender, RoutedEventArgs e)
-        => _viewModel.PlayTrackA();
+    private void StopPlayback_Click(object sender, RoutedEventArgs e) => _viewModel.StopPlayback();
 
-    private void StopPlayback_Click(object sender, RoutedEventArgs e)
-        => _viewModel.StopPlayback();
+    private void PlayB_Click(object sender, RoutedEventArgs e) => _viewModel.PlayTrackB();
 
-    private void PlayB_Click(object sender, RoutedEventArgs e)
-        => _viewModel.PlayTrackB();
+    private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
 
-    private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.MarkNotDuplicateAsync();
+    private async void KeepA_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepAAsync();
 
-    private async void KeepA_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.ConfirmDuplicateKeepAAsync();
-
-    private async void KeepB_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.ConfirmDuplicateKeepBAsync();
+    private async void KeepB_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepBAsync();
 }

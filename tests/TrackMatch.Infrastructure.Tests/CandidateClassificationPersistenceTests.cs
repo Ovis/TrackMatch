@@ -11,16 +11,18 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests", Guid.NewGuid().ToString("N"));
     private SqliteDatabase _database = null!;
+    private long _libraryId;
 
     public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_directory);
         _database = new SqliteDatabase(Path.Combine(_directory, "trackmatch.db"));
         await _database.InitializeAsync(TestContext.Current.CancellationToken);
-        await new SqliteLibraryRepository(_database).CreateAsync(
+        var library = await new SqliteLibraryRepository(_database).CreateAsync(
             "Test Library",
             [_directory],
             TestContext.Current.CancellationToken);
+        _libraryId = library.Id;
     }
 
     public ValueTask DisposeAsync()
@@ -49,26 +51,15 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         var comparisonRepository = new SqliteCandidateComparisonRepository(_database);
         await comparisonRepository.ReplaceAllAsync(
             [new CandidateComparison(
-                Math.Min(idA, idB),
-                Math.Max(idA, idB),
-                0.98,
-                5,
-                TimeSpan.FromSeconds(0.5),
-                100,
-                TimeSpan.FromSeconds(12.5),
-                0.97,
-                0.96,
-                0.99)],
+                Math.Min(idA, idB), Math.Max(idA, idB), 0.98, 5, TimeSpan.FromSeconds(0.5), 100,
+                TimeSpan.FromSeconds(12.5), 0.97, 0.96, 0.99)],
             TestContext.Current.CancellationToken);
 
         var repository = new SqliteCandidateClassificationRepository(_database);
         await repository.ReplaceAllAsync(
             [new CandidateClassification(
-                Math.Min(idA, idB),
-                Math.Max(idA, idB),
-                AudioRelationshipKind.DuplicateCandidate,
-                "test reason",
-                "{\"test\":true}")],
+                Math.Min(idA, idB), Math.Max(idA, idB), AudioRelationshipKind.DuplicateCandidate,
+                "test reason", "{\"test\":true}")],
             TestContext.Current.CancellationToken);
 
         var row = Assert.Single(await repository.GetReportAsync(TestContext.Current.CancellationToken));
@@ -81,7 +72,7 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReviewReportRepository_ReturnsComparisonWithoutClassification()
+    public async Task ReviewReportRepository_ReturnsLibraryScopedComparisonAndAudioDetail()
     {
         var trackRepository = new SqliteTrackRepository(_database);
         var idA = await trackRepository.UpsertMetadataAsync(
@@ -96,35 +87,26 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
             [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 0)],
             TestContext.Current.CancellationToken);
         await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
-            [new CandidateComparison(
-                pair.TrackIdA,
-                pair.TrackIdB,
-                1.0,
-                0,
-                TimeSpan.Zero,
-                100,
-                TimeSpan.FromSeconds(12.5),
-                1.0,
-                1.0,
-                1.0)],
+            [new CandidateComparison(pair.TrackIdA, pair.TrackIdB, 1.0, 0, TimeSpan.Zero, 100,
+                TimeSpan.FromSeconds(12.5), 1.0, 1.0, 1.0)],
             TestContext.Current.CancellationToken);
 
         var row = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
-            .GetAsync(TestContext.Current.CancellationToken));
+            .GetAsync(_libraryId, TestContext.Current.CancellationToken));
 
         Assert.Null(row.Kind);
         Assert.Null(row.Reason);
         Assert.Equal(1.0, row.Similarity, 6);
         Assert.Equal("Same", row.TitleA);
         Assert.Equal("Same", row.TitleB);
+        Assert.Equal("FLAC", row.FormatA);
+        Assert.Equal("FLAC", row.CodecA);
+        Assert.Equal(44100, row.SampleRateHzA);
+        Assert.Equal(16, row.BitDepthA);
+        Assert.Equal(2, row.ChannelsA);
     }
 
-    private static AudioTrackMetadata Metadata(
-        string path,
-        string artist,
-        string title,
-        string album,
-        string genre)
+    private static AudioTrackMetadata Metadata(string path, string artist, string title, string album, string genre)
         => new(
             path,
             100,
@@ -135,5 +117,11 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
             album,
             1,
             1,
-            [genre]);
+            [genre],
+            "FLAC",
+            "FLAC",
+            900,
+            44100,
+            16,
+            2);
 }

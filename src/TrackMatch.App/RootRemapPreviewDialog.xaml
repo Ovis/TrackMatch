@@ -1,0 +1,33 @@
+<Window x:Class="TrackMatch.App.RootRemapPreviewDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Root保存場所を変更" Width="760" Height="620" MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+            <RowDefinition Height="*"/><RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <TextBlock Text="旧Root"/><TextBlock Grid.Column="2" Text="{Binding OldRootPath}" TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="1" Text="新Root"/><TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding NewRootPath}" TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="2" Text="対象Track"/><TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding TargetTrackCount}"/>
+            <TextBlock Grid.Row="3" Text="一致"/><TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding MatchedTrackCount}"/>
+            <TextBlock Grid.Row="4" Text="Missing"/><TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding MissingTrackCount}"/>
+            <TextBlock Grid.Row="5" Text="未登録Audio"/><TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding UnknownAudioFileCount}"/>
+        </Grid>
+        <TextBlock Grid.Row="2" FontWeight="SemiBold" Text="新Rootで見つからなかった相対Path"/>
+        <ListBox Grid.Row="4" ItemsSource="{Binding MissingRelativePaths}"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 ScrollViewer.CanContentScroll="True" />
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Width="100" Height="32" Content="適用" IsDefault="True" Click="Apply_Click"/>
+            <Button Width="100" Height="32" Margin="8,0,0,0" Content="キャンセル" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
