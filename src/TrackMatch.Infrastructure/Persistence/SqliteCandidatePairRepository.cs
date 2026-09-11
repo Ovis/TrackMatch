@@ -106,6 +106,27 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task DeleteAsync(
+        IReadOnlyCollection<CandidatePairKey> pairKeys,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pairKeys);
+        if (pairKeys.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = """
+            DELETE FROM CandidatePairs
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
+            """;
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            pairKeys.Select(key => new { key.TrackIdA, key.TrackIdB }),
+            cancellationToken: cancellationToken));
+    }
+
     public async Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         const string sql = """
