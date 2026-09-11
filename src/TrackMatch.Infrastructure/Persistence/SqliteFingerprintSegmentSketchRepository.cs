@@ -15,7 +15,9 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackId, MAX(FingerprintExtractedAtUtcTicks) AS FingerprintExtractedAtUtcTicks
+            SELECT
+                TrackId,
+                CAST(MAX(FingerprintExtractedAtUtcTicks) AS INTEGER) AS FingerprintExtractedAtUtcTicks
             FROM CandidateSegmentSketches
             WHERE Algorithm = @Algorithm
               AND SegmentLengthItems = @SegmentLengthItems
@@ -150,6 +152,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
         };
 
+    // SQLiteの集約式は型メタデータが失われる場合があるため、SQL側でINTEGERへCASTした値をlongで受ける。
     private sealed record SketchStateRow(long TrackId, long FingerprintExtractedAtUtcTicks);
     private sealed record SketchRow(long TrackId, long SegmentIndex, long Hash);
 }
