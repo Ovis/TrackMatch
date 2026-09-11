@@ -33,8 +33,14 @@ public sealed class CandidateClassificationServiceTests
         public Task ReplaceAllAsync(IReadOnlyCollection<CandidateComparison> comparisons, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task UpsertAsync(IReadOnlyCollection<CandidateComparison> comparisons, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task<IReadOnlyList<CandidateComparison>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(values);
+
+        public Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<CandidatePairKey, DateTime>>(new Dictionary<CandidatePairKey, DateTime>());
     }
 
     private sealed class FakeClassificationRepository : ICandidateClassificationRepository
