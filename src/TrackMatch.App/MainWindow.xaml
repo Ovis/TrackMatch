@@ -56,6 +56,8 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="12" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0">
@@ -110,6 +112,19 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Height="38" Content="Aを再生" IsEnabled="{Binding HasSelection}" Click="PlayA_Click" />
+                    <Button Grid.Column="2" Width="90" Height="38" Content="停止" Click="StopPlayback_Click" />
+                    <Button Grid.Column="4" Height="38" Content="Bを再生" IsEnabled="{Binding HasSelection}" Click="PlayB_Click" />
+                </Grid>
+
+                <Grid Grid.Row="6" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="8" />
                         <ColumnDefinition Width="*" />
@@ -121,6 +136,14 @@
             </Grid>
         </Grid>
 
-        <TextBlock Grid.Row="4" Text="{Binding StatusText}" />
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding StatusText}" />
+            <TextBlock Grid.Column="2" Text="{Binding PlaybackStatusText}" />
+        </Grid>
     </Grid>
 </Window>
