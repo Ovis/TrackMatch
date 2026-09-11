@@ -12,9 +12,9 @@ namespace TrackMatch.App;
 /// </summary>
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
-    private string _databasePath = string.Empty;
+    private string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CandidateReviewItemViewModel? _selectedCandidate;
-    private string _statusText = "SQLiteデータベースを選択してください。";
+    private string _statusText = "候補を読み込んでいます。";
     private bool _isBusy;
 
     public ObservableCollection<CandidateReviewItemViewModel> Candidates { get; } = [];
