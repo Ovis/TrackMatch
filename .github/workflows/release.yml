@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CHROMAPRINT_VERSION: '1.6.1'
+  CHROMAPRINT_SHA256: '735d6182b38e9f364b84ce6f4ccd682c75e2851de89735711d6b762d12b92a4e'
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore TrackMatch.sln
+
+      - name: Test
+        run: dotnet test --solution TrackMatch.sln --configuration Release
+
+      - name: Publish Windows x64
+        shell: pwsh
+        run: |
+          dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained false -o artifacts/package/App
+          dotnet publish src/TrackMatch.Scanner/TrackMatch.Scanner.csproj -c Release -r win-x64 --self-contained false -o artifacts/package/Scanner
+
+      - name: Download and verify Chromaprint fpcalc
+        shell: pwsh
+        run: |
+          $version = $env:CHROMAPRINT_VERSION
+          $archive = "artifacts/chromaprint-fpcalc.zip"
+          $url = "https://github.com/acoustid/chromaprint/releases/download/v$version/chromaprint-fpcalc-$version-windows-x86_64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:CHROMAPRINT_SHA256) {
+            throw "Chromaprint archive SHA-256 mismatch. Expected $env:CHROMAPRINT_SHA256, actual $actual"
+          }
+
+          Expand-Archive $archive -DestinationPath artifacts/chromaprint -Force
+          $fpcalc = Get-ChildItem artifacts/chromaprint -Filter fpcalc.exe -Recurse | Select-Object -First 1
+          if (-not $fpcalc) {
+            throw 'fpcalc.exe was not found in the Chromaprint archive.'
+          }
+
+          $sourceDir = $fpcalc.Directory.FullName
+          New-Item -ItemType Directory -Path artifacts/package/fpcalc -Force | Out-Null
+          Copy-Item "$sourceDir/*" artifacts/package/fpcalc -Recurse -Force
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/acoustid/chromaprint/v$version/LICENSE.md" -OutFile artifacts/package/fpcalc/LICENSE.md
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $archive = "TrackMatch-$tag-win-x64.zip"
+          Compress-Archive -Path artifacts/package/* -DestinationPath "artifacts/$archive" -CompressionLevel Optimal
+          "RELEASE_ARCHIVE=artifacts/$archive" >> $env:GITHUB_ENV
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create '${{ github.ref_name }}' $env:RELEASE_ARCHIVE --generate-notes --title 'TrackMatch ${{ github.ref_name }}'
