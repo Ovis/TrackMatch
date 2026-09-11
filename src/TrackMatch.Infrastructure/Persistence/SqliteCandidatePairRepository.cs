@@ -1,4 +1,6 @@
+using System.Data.Common;
 using Dapper;
+using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 
@@ -79,7 +81,11 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
 
         // 変更Track数がSQLiteのパラメータ上限を超えても処理できるよう、一時表を使って対象集合を渡す。
         await connection.ExecuteAsync(new CommandDefinition(
-            "CREATE TEMP TABLE IF NOT EXISTS AffectedCandidateTracks (TrackId INTEGER PRIMARY KEY); DELETE FROM AffectedCandidateTracks;",
+            "CREATE TEMP TABLE IF NOT EXISTS AffectedCandidateTracks (TrackId INTEGER PRIMARY KEY);",
+            transaction: transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM AffectedCandidateTracks;",
             transaction: transaction,
             cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
@@ -121,8 +127,8 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
     }
 
     private static async Task UpsertAsync(
-        Microsoft.Data.Sqlite.SqliteConnection connection,
-        Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        SqliteConnection connection,
+        DbTransaction transaction,
         IReadOnlyCollection<CandidatePair> pairs,
         CancellationToken cancellationToken)
     {
