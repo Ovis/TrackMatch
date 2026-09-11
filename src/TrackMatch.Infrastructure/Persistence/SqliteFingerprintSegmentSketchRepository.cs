@@ -20,18 +20,14 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             WHERE Algorithm = @Algorithm
               AND SegmentLengthItems = @SegmentLengthItems
               AND SegmentStrideItems = @SegmentStrideItems
+              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance
             GROUP BY TrackId;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<SketchStateRow>(new CommandDefinition(
             sql,
-            new
-            {
-                Algorithm = algorithm,
-                options.SegmentLengthItems,
-                options.SegmentStrideItems,
-            },
+            CreateConfigParameters(algorithm, options),
             cancellationToken: cancellationToken));
         return rows.ToDictionary(
             row => row.TrackId,
@@ -49,18 +45,14 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             WHERE Algorithm = @Algorithm
               AND SegmentLengthItems = @SegmentLengthItems
               AND SegmentStrideItems = @SegmentStrideItems
+              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance
             ORDER BY TrackId, SegmentIndex;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<SketchRow>(new CommandDefinition(
             sql,
-            new
-            {
-                Algorithm = algorithm,
-                options.SegmentLengthItems,
-                options.SegmentStrideItems,
-            },
+            CreateConfigParameters(algorithm, options),
             cancellationToken: cancellationToken));
         return rows
             .Select(row => new FingerprintSegmentSketch(
@@ -84,10 +76,10 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         const string insertSql = """
             INSERT INTO CandidateSegmentSketches (
                 TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
-                SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
+                MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
             VALUES (
                 @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
-                @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
+                @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -106,6 +98,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
                 fingerprint.Algorithm,
                 options.SegmentLengthItems,
                 options.SegmentStrideItems,
+                MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
                 sketch.SegmentIndex,
                 Hash = unchecked((long)sketch.Hash),
                 FingerprintExtractedAtUtcTicks = fingerprint.ExtractedAtUtc.ToUniversalTime().Ticks,
@@ -131,6 +124,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
               AND (
                     SegmentLengthItems <> @SegmentLengthItems
                  OR SegmentStrideItems <> @SegmentStrideItems
+                 OR MaximumSegmentHashDistance <> @MaximumSegmentHashDistance
                  OR NOT EXISTS (
                         SELECT 1
                         FROM Fingerprints f
@@ -143,14 +137,18 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             sql,
-            new
-            {
-                Algorithm = algorithm,
-                options.SegmentLengthItems,
-                options.SegmentStrideItems,
-            },
+            CreateConfigParameters(algorithm, options),
             cancellationToken: cancellationToken));
     }
+
+    private static object CreateConfigParameters(int algorithm, CandidateGenerationOptions options)
+        => new
+        {
+            Algorithm = algorithm,
+            options.SegmentLengthItems,
+            options.SegmentStrideItems,
+            MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
+        };
 
     private sealed record SketchStateRow(long TrackId, long FingerprintExtractedAtUtcTicks);
     private sealed record SketchRow(long TrackId, long SegmentIndex, long Hash);
