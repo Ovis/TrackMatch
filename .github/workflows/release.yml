@@ -36,6 +36,7 @@ jobs:
         run: |
           dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained false -o artifacts/package/App
           dotnet publish src/TrackMatch.Scanner/TrackMatch.Scanner.csproj -c Release -r win-x64 --self-contained false -o artifacts/package/Scanner
+          Copy-Item THIRD_PARTY_NOTICES.md artifacts/package/THIRD_PARTY_NOTICES.md
 
       - name: Download and verify Chromaprint fpcalc
         shell: pwsh
