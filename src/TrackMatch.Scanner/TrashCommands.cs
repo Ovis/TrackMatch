@@ -6,7 +6,7 @@ internal static class TrashCommands
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        string? databasePath = null;
+        var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
         string? libraryRoot = null;
         string? trashRoot = null;
         var execute = false;
@@ -41,11 +41,9 @@ internal static class TrashCommands
             return 1;
         }
 
-        if (string.IsNullOrWhiteSpace(databasePath)
-            || string.IsNullOrWhiteSpace(libraryRoot)
-            || string.IsNullOrWhiteSpace(trashRoot))
+        if (string.IsNullOrWhiteSpace(libraryRoot) || string.IsNullOrWhiteSpace(trashRoot))
         {
-            Console.Error.WriteLine("--db、--library-root、--trash-root は必須である。");
+            Console.Error.WriteLine("--library-root、--trash-root は必須である。");
             return 1;
         }
 

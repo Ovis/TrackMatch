@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackMatch.Infrastructure",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackMatch.Scanner", "src\TrackMatch.Scanner\TrackMatch.Scanner.csproj", "{26767452-709F-4439-B821-0C22D78A9630}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackMatch.App", "src\TrackMatch.App\TrackMatch.App.csproj", "{CA14A8C7-80ED-4DBA-83B0-3D45C1D07602}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackMatch.Core.Tests", "tests\TrackMatch.Core.Tests\TrackMatch.Core.Tests.csproj", "{D0EC7D4E-FA82-4F72-8BBF-63E2D2471F69}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackMatch.Infrastructure.Tests", "tests\TrackMatch.Infrastructure.Tests\TrackMatch.Infrastructure.Tests.csproj", "{F3ECF690-6105-4166-8FC3-5792BE3F4081}"
@@ -30,6 +32,10 @@ Global
 		{26767452-709F-4439-B821-0C22D78A9630}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{26767452-709F-4439-B821-0C22D78A9630}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{26767452-709F-4439-B821-0C22D78A9630}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CA14A8C7-80ED-4DBA-83B0-3D45C1D07602}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CA14A8C7-80ED-4DBA-83B0-3D45C1D07602}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CA14A8C7-80ED-4DBA-83B0-3D45C1D07602}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CA14A8C7-80ED-4DBA-83B0-3D45C1D07602}.Release|Any CPU.Build.0 = Release|Any CPU
 		{D0EC7D4E-FA82-4F72-8BBF-63E2D2471F69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{D0EC7D4E-FA82-4F72-8BBF-63E2D2471F69}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D0EC7D4E-FA82-4F72-8BBF-63E2D2471F69}.Release|Any CPU.ActiveCfg = Release|Any CPU
