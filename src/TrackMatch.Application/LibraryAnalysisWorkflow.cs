@@ -1,4 +1,5 @@
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Scanning;
 using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Chromaprint;
