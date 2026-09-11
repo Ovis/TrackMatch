@@ -33,8 +33,8 @@ Chromaprint 1.6.1の公式Windows x86-64パッケージは、Chromaprintの`pack
 Windows向けTrackMatch ZIPには次を収録する。
 
 - `THIRD_PARTY_NOTICES.md`（この文書）
-- `Scanner/fpcalc/LICENSE.md`（Chromaprint 1.6.1公式ライセンス文書）
-- `Scanner/fpcalc/LGPL-2.1.txt`（GNU LGPL 2.1全文）
+- `fpcalc/LICENSE.md`（Chromaprint 1.6.1公式ライセンス文書）
+- `fpcalc/LGPL-2.1.txt`（GNU LGPL 2.1全文）
 
 さらに、同じGitHub Releaseへ次の対応ソースを別ファイルとして添付する。
 
