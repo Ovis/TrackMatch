@@ -66,6 +66,26 @@ public sealed class SqliteDatabase
                 FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS CandidateSegmentSketches (
+                TrackId INTEGER NOT NULL,
+                Algorithm INTEGER NOT NULL,
+                SegmentLengthItems INTEGER NOT NULL,
+                SegmentStrideItems INTEGER NOT NULL,
+                MaximumSegmentHashDistance INTEGER NOT NULL,
+                SegmentIndex INTEGER NOT NULL,
+                Hash INTEGER NOT NULL,
+                FingerprintExtractedAtUtcTicks INTEGER NOT NULL,
+                PRIMARY KEY (
+                    TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
+                    MaximumSegmentHashDistance, SegmentIndex),
+                FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CandidateSegmentSketches_Config
+                ON CandidateSegmentSketches (
+                    Algorithm, SegmentLengthItems, SegmentStrideItems,
+                    MaximumSegmentHashDistance, TrackId);
+
             CREATE TABLE IF NOT EXISTS CandidatePairs (
                 TrackIdA INTEGER NOT NULL,
                 TrackIdB INTEGER NOT NULL,

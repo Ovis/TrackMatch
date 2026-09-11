@@ -16,30 +16,48 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
+        var sketches = fingerprints
+            .SelectMany(fingerprint => sketcher.Create(fingerprint, options))
+            .ToArray();
+        var pairs = GenerateFromSketches(sketches, targetTrackIds: null, options.MaximumSegmentHashHammingDistance);
+        return new CandidateGenerationResult(fingerprints.Count, sketches.Length, pairs);
+    }
+
+    /// <summary>
+    /// 保存済みSegment Sketchから候補ペアを生成する。
+    /// </summary>
+    /// <param name="sketches">現在有効な全TrackのSegment Sketch</param>
+    /// <param name="targetTrackIds">指定した場合、このTrackを一方に含むペアだけを返す</param>
+    /// <param name="maximumDistance">許容する32-bit SimHash Hamming距離</param>
+    public IReadOnlyList<CandidatePair> GenerateFromSketches(
+        IReadOnlyList<FingerprintSegmentSketch> sketches,
+        IReadOnlySet<long>? targetTrackIds,
+        int maximumDistance)
+    {
+        ArgumentNullException.ThrowIfNull(sketches);
+        if (maximumDistance is < 0 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumDistance));
+        }
+
         var lowerIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var upperIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var pairDistances = new Dictionary<(long A, long B), int>();
-        var segmentCount = 0;
 
-        foreach (var fingerprint in fingerprints)
+        foreach (var sketch in sketches)
         {
-            foreach (var sketch in sketcher.Create(fingerprint, options))
-            {
-                segmentCount++;
-                MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, pairDistances, options.MaximumSegmentHashHammingDistance);
-                MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, pairDistances, options.MaximumSegmentHashHammingDistance);
+            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, pairDistances, targetTrackIds, maximumDistance);
+            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, pairDistances, targetTrackIds, maximumDistance);
 
-                AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
-                AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
-            }
+            AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
+            AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
         }
 
-        var pairs = pairDistances
+        return pairDistances
             .Select(item => new CandidatePair(item.Key.A, item.Key.B, item.Value))
             .OrderBy(pair => pair.TrackIdA)
             .ThenBy(pair => pair.TrackIdB)
             .ToArray();
-        return new CandidateGenerationResult(fingerprints.Count, segmentCount, pairs);
     }
 
     private static void MatchHalf(
@@ -47,6 +65,7 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         ushort half,
         IReadOnlyDictionary<ushort, List<FingerprintSegmentSketch>> index,
         Dictionary<(long A, long B), int> pairDistances,
+        IReadOnlySet<long>? targetTrackIds,
         int maximumDistance)
     {
         foreach (var neighbor in EnumerateDistanceOneNeighborhood(half))
@@ -59,6 +78,13 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
             foreach (var other in indexedSketches)
             {
                 if (other.TrackId == current.TrackId)
+                {
+                    continue;
+                }
+
+                if (targetTrackIds is not null
+                    && !targetTrackIds.Contains(current.TrackId)
+                    && !targetTrackIds.Contains(other.TrackId))
                 {
                     continue;
                 }

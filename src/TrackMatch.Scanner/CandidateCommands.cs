@@ -63,16 +63,21 @@ internal static class CandidateCommands
             var database = new SqliteDatabase(databasePath);
             await database.InitializeAsync();
             var reviewRepository = new SqliteCandidateReviewRepository(database);
+            var sketcher = new FingerprintSegmentSketcher();
             var service = new CandidateGenerationService(
                 new SqliteFingerprintCatalogRepository(database),
+                new SqliteFingerprintSegmentSketchRepository(database),
                 new SqliteCandidatePairRepository(database),
                 reviewRepository,
-                new CandidatePairGenerator(new FingerprintSegmentSketcher()));
+                sketcher,
+                new CandidatePairGenerator(sketcher));
             var result = await service.GenerateAsync(algorithm, options);
 
             Console.WriteLine($"Tracks: {result.TrackCount}");
             Console.WriteLine($"Segments: {result.SegmentCount}");
-            Console.WriteLine($"Candidate pairs: {result.Pairs.Count}");
+            Console.WriteLine($"Indexed tracks: {result.IndexedTrackCount}");
+            Console.WriteLine($"Mode: {(result.IsFullRebuild ? "full" : "incremental")}");
+            Console.WriteLine($"Candidate pairs updated: {result.Pairs.Count}");
             return 0;
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)

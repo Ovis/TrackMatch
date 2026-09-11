@@ -6,4 +6,6 @@ namespace TrackMatch.Core.Candidates;
 public sealed record CandidateGenerationResult(
     int TrackCount,
     int SegmentCount,
-    IReadOnlyList<CandidatePair> Pairs);
+    IReadOnlyList<CandidatePair> Pairs,
+    int IndexedTrackCount = 0,
+    bool IsFullRebuild = false);
