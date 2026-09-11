@@ -40,6 +40,22 @@ public sealed class SqliteDatabase
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA synchronous = NORMAL;", cancellationToken: cancellationToken));
 
         const string schema = """
+            CREATE TABLE IF NOT EXISTS Libraries (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                NormalizedName TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS LibraryRoots (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                LibraryId INTEGER NOT NULL,
+                Path TEXT NOT NULL,
+                PathKey TEXT NOT NULL UNIQUE,
+                FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_LibraryRoots_LibraryId ON LibraryRoots (LibraryId);
+
             CREATE TABLE IF NOT EXISTS Tracks (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Path TEXT NOT NULL COLLATE NOCASE UNIQUE,
