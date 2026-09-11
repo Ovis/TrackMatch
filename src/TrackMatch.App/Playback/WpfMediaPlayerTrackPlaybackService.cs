@@ -20,7 +20,7 @@ public sealed class WpfMediaPlayerTrackPlaybackService : ITrackPlaybackService
     public event EventHandler? PlaybackEnded;
 
     /// <inheritdoc />
-    public event EventHandler<string>? PlaybackFailed;
+    public event Action<string>? PlaybackFailed;
 
     /// <inheritdoc />
     public void Play(string path)
@@ -71,5 +71,5 @@ public sealed class WpfMediaPlayerTrackPlaybackService : ITrackPlaybackService
         => PlaybackEnded?.Invoke(this, EventArgs.Empty);
 
     private void OnMediaFailed(object? sender, ExceptionEventArgs e)
-        => PlaybackFailed?.Invoke(this, e.ErrorException?.Message ?? "音声を再生できない。");
+        => PlaybackFailed?.Invoke(e.ErrorException?.Message ?? "音声を再生できない。");
 }
