@@ -43,15 +43,24 @@
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
 
-            <DataGrid Grid.Column="0" ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
-                      AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="150"/>
-                    <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
-                    <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
-                    <DataGridTextColumn Header="一致度" Binding="{Binding Similarity}" Width="90"/>
-                </DataGrid.Columns>
-            </DataGrid>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="8"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock VerticalAlignment="Center" Text="表示下限:"/>
+                    <TextBox Width="52" Height="26" Margin="8,0,4,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Right"
+                             Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock VerticalAlignment="Center" Text="%"/>
+                </StackPanel>
+                <DataGrid Grid.Row="2" ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
+                          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="150"/>
+                        <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
+                        <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
+                        <DataGridTextColumn Header="一致度" Binding="{Binding Similarity}" Width="90"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
 
             <Grid Grid.Column="2" DataContext="{Binding SelectedCandidate}">
                 <Grid.RowDefinitions>
@@ -135,7 +144,7 @@
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="90"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBlock VerticalAlignment="Center" Text="Trash Root"/>
-                <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" Text="{Binding TrashRoot, UpdateSourceTrigger=PropertyChanged}"/>
+                <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" IsReadOnly="True" Text="{Binding TrashRoot}"/>
                 <Button Grid.Column="4" Height="28" Content="参照..." Click="BrowseTrashRoot_Click"/>
                 <StackPanel Grid.Column="6" Orientation="Horizontal">
                     <Button Height="28" Padding="12,0" Content="Dry-run確認" IsEnabled="{Binding CanProcessTrash}" Click="PreviewTrash_Click"/>

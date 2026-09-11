@@ -78,7 +78,7 @@ public partial class MainWindow : Window
         new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
     }
 
-    private void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
+    private async void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
@@ -87,7 +87,7 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog(this) == true)
         {
-            _viewModel.TrashRoot = dialog.FolderName;
+            await _viewModel.SetTrashRootAsync(dialog.FolderName);
         }
     }
 
