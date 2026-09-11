@@ -24,7 +24,9 @@ public sealed class CandidateAnalysisService(
         var pairs = await candidatePairRepository.GetAllAsync(cancellationToken);
         var fingerprints = await fingerprintCatalog.GetActiveAsync(fingerprintAlgorithm, cancellationToken);
         var fingerprintsByTrackId = fingerprints.ToDictionary(item => item.TrackId);
-        var comparisons = new List<CandidateComparison>(pairs.Count);
+        var comparedAtByPair = await comparisonRepository.GetComparedAtUtcAsync(cancellationToken);
+        var changedComparisons = new List<CandidateComparison>();
+        var reused = 0;
         var skipped = 0;
 
         foreach (var pair in pairs)
@@ -38,8 +40,18 @@ public sealed class CandidateAnalysisService(
                 continue;
             }
 
+            var pairKey = CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB);
+            var newestFingerprintAt = a.ExtractedAtUtc >= b.ExtractedAtUtc ? a.ExtractedAtUtc : b.ExtractedAtUtc;
+            if (comparedAtByPair.TryGetValue(pairKey, out var comparedAtUtc)
+                && comparedAtUtc >= newestFingerprintAt)
+            {
+                // 両方のFingerprintが前回比較時点から変わっていなければ、raw Fingerprint比較は再実行しない。
+                reused++;
+                continue;
+            }
+
             var result = comparer.Compare(a.Fingerprint, b.Fingerprint);
-            comparisons.Add(new CandidateComparison(
+            changedComparisons.Add(new CandidateComparison(
                 pair.TrackIdA,
                 pair.TrackIdB,
                 result.Similarity,
@@ -52,8 +64,8 @@ public sealed class CandidateAnalysisService(
                 CalculateDurationRatio(a.Fingerprint.Duration, b.Fingerprint.Duration)));
         }
 
-        await comparisonRepository.ReplaceAllAsync(comparisons, cancellationToken);
-        return new CandidateAnalysisResult(pairs.Count, comparisons.Count, skipped);
+        await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+        return new CandidateAnalysisResult(pairs.Count, changedComparisons.Count, reused, skipped);
     }
 
     private static double CalculateDurationRatio(TimeSpan a, TimeSpan b)
