@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\TrackMatch.Application\TrackMatch.Application.csproj" />
     <ProjectReference Include="..\TrackMatch.Core\TrackMatch.Core.csproj" />
     <ProjectReference Include="..\TrackMatch.Infrastructure\TrackMatch.Infrastructure.csproj" />
   </ItemGroup>
