@@ -6,15 +6,17 @@ namespace TrackMatch.App;
 /// <summary>
 /// 候補一覧の表示に必要な値だけを整形する。
 /// </summary>
-public sealed class CandidateReviewItemViewModel(CandidateClassificationReportRow row)
+public sealed class CandidateReviewItemViewModel(CandidateReviewReportRow row)
 {
-    public CandidateClassificationReportRow Row { get; } = row;
+    public CandidateReviewReportRow Row { get; } = row;
 
     public long TrackIdA => Row.TrackIdA;
 
     public long TrackIdB => Row.TrackIdB;
 
-    public string Kind => Row.Kind.ToString();
+    public string Kind => Row.Kind?.ToString() ?? "未分類";
+
+    public string Reason => Row.Reason ?? "しきい値プロファイル未適用";
 
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);
 
