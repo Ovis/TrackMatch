@@ -15,7 +15,7 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT f.TrackId, f.Algorithm, t.Path, t.DurationTicks, f.ValuesBlob
+            SELECT f.TrackId, f.Algorithm, t.Path, t.DurationTicks, f.ValuesBlob, f.ExtractedAtUtcTicks
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE t.IsMissing = 0 AND f.Algorithm = @Algorithm
@@ -31,7 +31,8 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
             .Select(row => new StoredFingerprint(
                 row.TrackId,
                 checked((int)row.Algorithm),
-                new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), Decode(row.ValuesBlob))))
+                new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), Decode(row.ValuesBlob)),
+                new DateTime(row.ExtractedAtUtcTicks, DateTimeKind.Utc)))
             .ToArray();
     }
 
@@ -57,5 +58,6 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
         long Algorithm,
         string Path,
         long DurationTicks,
-        byte[] ValuesBlob);
+        byte[] ValuesBlob,
+        long ExtractedAtUtcTicks);
 }
