@@ -38,17 +38,7 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     public async Task CandidateComparisonRepository_ReplacesMeasurementsAndCascadeDeletesThem()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
-        var comparison = new CandidateComparison(
-            _trackIdA,
-            _trackIdB,
-            0.987,
-            -2,
-            TimeSpan.FromMilliseconds(-250),
-            100,
-            TimeSpan.FromSeconds(12),
-            0.9,
-            0.8,
-            0.95);
+        var comparison = CreateComparison(0.987);
 
         await repository.ReplaceAllAsync([comparison], TestContext.Current.CancellationToken);
 
@@ -62,6 +52,74 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
         Assert.Equal(0, count);
     }
+
+    [Fact]
+    public async Task CandidatePairRepository_PreservesComparisonForUnchangedPair()
+    {
+        var comparisonRepository = new SqliteCandidateComparisonRepository(_database);
+        await comparisonRepository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        // Sketch側の最良距離だけが更新されてもraw Fingerprint比較結果そのものは変わらないため、
+        // CandidatePairsをDELETE/INSERTせず比較結果を保持する。
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [new CandidatePair(_trackIdA, _trackIdB, 2)],
+            TestContext.Current.CancellationToken);
+
+        var comparisons = await comparisonRepository.GetAllAsync(TestContext.Current.CancellationToken);
+        Assert.Single(comparisons);
+        Assert.Equal(0.987, comparisons[0].Similarity, 6);
+    }
+
+    [Fact]
+    public async Task CandidateComparisonRepository_UpsertInvalidatesClassificationForChangedPair()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync("""
+                INSERT INTO CandidateClassifications (
+                    TrackIdA, TrackIdB, Kind, Reason, ThresholdProfileJson, ClassifiedAtUtcTicks)
+                VALUES (@TrackIdA, @TrackIdB, 'DuplicateCandidate', 'test', '{}', @Ticks);
+                """, new { TrackIdA = _trackIdA, TrackIdB = _trackIdB, Ticks = DateTime.UtcNow.Ticks });
+        }
+
+        await repository.UpsertAsync([CreateComparison(0.900)], TestContext.Current.CancellationToken);
+
+        await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var classificationCount = await verifyConnection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateClassifications;");
+        var similarity = await verifyConnection.ExecuteScalarAsync<double>("SELECT Similarity FROM CandidateComparisons;");
+        Assert.Equal(0, classificationCount);
+        Assert.Equal(0.900, similarity, 6);
+    }
+
+    [Fact]
+    public async Task CandidateComparisonRepository_ReturnsComparedAtUtc()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        var before = DateTime.UtcNow.AddSeconds(-1);
+
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        var values = await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken);
+        var comparedAt = values[CandidatePairKey.Create(_trackIdA, _trackIdB)];
+        Assert.True(comparedAt >= before);
+        Assert.Equal(DateTimeKind.Utc, comparedAt.Kind);
+    }
+
+    private CandidateComparison CreateComparison(double similarity)
+        => new(
+            _trackIdA,
+            _trackIdB,
+            similarity,
+            -2,
+            TimeSpan.FromMilliseconds(-250),
+            100,
+            TimeSpan.FromSeconds(12),
+            0.9,
+            0.8,
+            0.95);
 
     private AudioTrackMetadata CreateMetadata(string fileName)
         => new(

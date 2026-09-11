@@ -149,6 +149,7 @@ internal static class CandidateCommands
 
                 Console.WriteLine($"Candidates: {result.TotalCandidates}");
                 Console.WriteLine($"Compared: {result.ComparedCandidates}");
+                Console.WriteLine($"Reused: {result.ReusedCandidates}");
                 Console.WriteLine($"Skipped: {result.SkippedCandidates}");
                 return result.SkippedCandidates == 0 ? 0 : 2;
             }

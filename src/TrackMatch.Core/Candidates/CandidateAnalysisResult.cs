@@ -6,4 +6,5 @@ namespace TrackMatch.Core.Candidates;
 public sealed record CandidateAnalysisResult(
     int TotalCandidates,
     int ComparedCandidates,
+    int ReusedCandidates,
     int SkippedCandidates);
