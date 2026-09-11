@@ -7,7 +7,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// Candidate Generation用Segment SketchをSQLiteへ保存し、Fingerprint未変更時の再計算を避ける。
 /// </summary>
-public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase database) : IFingerprintSegmentSketchRepository
+public sealed class SqliteFingerprintSegmentSketchRepository(
+    SqliteDatabase database,
+    long? libraryId = null) : IFingerprintSegmentSketchRepository
 {
     public async Task<IReadOnlyDictionary<long, DateTime>> GetTrackStatesAsync(
         int algorithm,
@@ -15,12 +17,14 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT DISTINCT TrackId, FingerprintExtractedAtUtcTicks
-            FROM CandidateSegmentSketches
-            WHERE Algorithm = @Algorithm
-              AND SegmentLengthItems = @SegmentLengthItems
-              AND SegmentStrideItems = @SegmentStrideItems
-              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance;
+            SELECT DISTINCT s.TrackId, s.FingerprintExtractedAtUtcTicks
+            FROM CandidateSegmentSketches s
+            INNER JOIN Tracks t ON t.Id = s.TrackId
+            WHERE s.Algorithm = @Algorithm
+              AND s.SegmentLengthItems = @SegmentLengthItems
+              AND s.SegmentStrideItems = @SegmentStrideItems
+              AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
+              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId);
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -30,8 +34,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             cancellationToken: cancellationToken));
 
         // Microsoft.Data.SqliteではMAX等の集約式が元カラムのINTEGER型情報を保持せず、
-        // DapperがByte[]としてmaterializeしようとする場合がある。
-        // 実カラムをそのまま取得し、同一Trackに複数世代の状態が残っていても最新時刻をC#側で選ぶ。
+        // DapperがByte[]としてmaterializeしようとする場合があるため、最新時刻はC#側で選ぶ。
         return rows
             .GroupBy(row => row.TrackId)
             .ToDictionary(
@@ -45,13 +48,15 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackId, SegmentIndex, Hash
-            FROM CandidateSegmentSketches
-            WHERE Algorithm = @Algorithm
-              AND SegmentLengthItems = @SegmentLengthItems
-              AND SegmentStrideItems = @SegmentStrideItems
-              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance
-            ORDER BY TrackId, SegmentIndex;
+            SELECT s.TrackId, s.SegmentIndex, s.Hash
+            FROM CandidateSegmentSketches s
+            INNER JOIN Tracks t ON t.Id = s.TrackId
+            WHERE s.Algorithm = @Algorithm
+              AND s.SegmentLengthItems = @SegmentLengthItems
+              AND s.SegmentStrideItems = @SegmentStrideItems
+              AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
+              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
+            ORDER BY s.TrackId, s.SegmentIndex;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -88,6 +93,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await EnsureTrackInScopeAsync(connection, fingerprint.TrackId, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             deleteSql,
@@ -125,7 +131,11 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
     {
         const string sql = """
             DELETE FROM CandidateSegmentSketches
-            WHERE Algorithm = @Algorithm
+            WHERE TrackId IN (
+                SELECT t.Id
+                FROM Tracks t
+                WHERE @LibraryId IS NULL OR t.LibraryId = @LibraryId)
+              AND Algorithm = @Algorithm
               AND (
                     SegmentLengthItems <> @SegmentLengthItems
                  OR SegmentStrideItems <> @SegmentStrideItems
@@ -146,10 +156,31 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             cancellationToken: cancellationToken));
     }
 
-    private static object CreateConfigParameters(int algorithm, CandidateGenerationOptions options)
+    private async Task EnsureTrackInScopeAsync(
+        System.Data.Common.DbConnection connection,
+        long trackId,
+        CancellationToken cancellationToken)
+    {
+        if (libraryId is null)
+        {
+            return;
+        }
+
+        var exists = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM Tracks WHERE Id = @TrackId AND LibraryId = @LibraryId;",
+            new { TrackId = trackId, LibraryId = libraryId },
+            cancellationToken: cancellationToken));
+        if (exists != 1)
+        {
+            throw new InvalidOperationException("Library scope外のTrackへSegment Sketchを保存できません。");
+        }
+    }
+
+    private object CreateConfigParameters(int algorithm, CandidateGenerationOptions options)
         => new
         {
             Algorithm = algorithm,
+            LibraryId = libraryId,
             options.SegmentLengthItems,
             options.SegmentStrideItems,
             MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,

@@ -9,7 +9,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// 詳細比較前の候補TrackペアをSQLiteへ保存する。
 /// </summary>
-public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICandidatePairRepository
+public sealed class SqliteCandidatePairRepository(
+    SqliteDatabase database,
+    long? libraryId = null) : ICandidatePairRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidatePair> pairs,
@@ -21,12 +23,17 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         const string selectSql = """
-            SELECT TrackIdA, TrackIdB, MinimumSegmentHashDistance
-            FROM CandidatePairs;
+            SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
+            FROM CandidatePairs p
+            INNER JOIN Tracks a ON a.Id = p.TrackIdA
+            INNER JOIN Tracks b ON b.Id = p.TrackIdB
+            WHERE @LibraryId IS NULL
+               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId);
             """;
         var existingRows = (await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             selectSql,
-            transaction: transaction,
+            new { LibraryId = libraryId },
+            transaction,
             cancellationToken: cancellationToken))).ToArray();
         var incomingByKey = pairs.ToDictionary(
             pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
@@ -57,6 +64,7 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
                     || checked((int)existing.MinimumSegmentHashDistance) != pair.MinimumSegmentHashDistance;
             })
             .ToArray();
+        await EnsurePairsInScopeAsync(connection, transaction, changed, cancellationToken);
         await UpsertAsync(connection, transaction, changed, cancellationToken);
 
         // 不変ペアをDELETE/INSERTしないことで、その配下の詳細比較・分類結果を保持する。
@@ -78,6 +86,7 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await EnsurePairsInScopeAsync(connection, transaction, pairs, cancellationToken);
 
         // 変更Track数がSQLiteのパラメータ上限を超えても処理できるよう、一時表を使って対象集合を渡す。
         await connection.ExecuteAsync(new CommandDefinition(
@@ -118,26 +127,37 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
 
         const string sql = """
             DELETE FROM CandidatePairs
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
+            WHERE TrackIdA = @TrackIdA
+              AND TrackIdB = @TrackIdB
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
+                    AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)));
             """;
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             sql,
-            pairKeys.Select(key => new { key.TrackIdA, key.TrackIdB }),
+            pairKeys.Select(key => new { key.TrackIdA, key.TrackIdB, LibraryId = libraryId }),
             cancellationToken: cancellationToken));
     }
 
     public async Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackIdA, TrackIdB, MinimumSegmentHashDistance
-            FROM CandidatePairs
-            ORDER BY TrackIdA, TrackIdB;
+            SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
+            FROM CandidatePairs p
+            INNER JOIN Tracks a ON a.Id = p.TrackIdA
+            INNER JOIN Tracks b ON b.Id = p.TrackIdB
+            WHERE @LibraryId IS NULL
+               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId)
+            ORDER BY p.TrackIdA, p.TrackIdB;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows
             .Select(row => new CandidatePair(
@@ -145,6 +165,29 @@ public sealed class SqliteCandidatePairRepository(SqliteDatabase database) : ICa
                 row.TrackIdB,
                 checked((int)row.MinimumSegmentHashDistance)))
             .ToArray();
+    }
+
+    private async Task EnsurePairsInScopeAsync(
+        SqliteConnection connection,
+        DbTransaction transaction,
+        IReadOnlyCollection<CandidatePair> pairs,
+        CancellationToken cancellationToken)
+    {
+        if (libraryId is null || pairs.Count == 0)
+        {
+            return;
+        }
+
+        var trackIds = pairs.SelectMany(pair => new[] { pair.TrackIdA, pair.TrackIdB }).Distinct().ToArray();
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            new { LibraryId = libraryId, TrackIds = trackIds },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (count != trackIds.Length)
+        {
+            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Pairとして保存できません。");
+        }
     }
 
     private static async Task UpsertAsync(

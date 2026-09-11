@@ -8,7 +8,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// Candidate Generation向けに有効なTrackのFingerprintをSQLiteから読み出す。
 /// </summary>
-public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) : IFingerprintCatalogRepository
+public sealed class SqliteFingerprintCatalogRepository(
+    SqliteDatabase database,
+    long? libraryId = null) : IFingerprintCatalogRepository
 {
     public async Task<IReadOnlyList<StoredFingerprint>> GetActiveAsync(
         int algorithm,
@@ -18,14 +20,16 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
             SELECT f.TrackId, f.Algorithm, t.Path, t.DurationTicks, f.ValuesBlob, f.ExtractedAtUtcTicks
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
-            WHERE t.IsMissing = 0 AND f.Algorithm = @Algorithm
+            WHERE t.IsMissing = 0
+              AND f.Algorithm = @Algorithm
+              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
             ORDER BY f.TrackId;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<FingerprintRow>(new CommandDefinition(
             sql,
-            new { Algorithm = algorithm },
+            new { Algorithm = algorithm, LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows.Select(ToStoredFingerprint).ToArray();
     }
@@ -38,14 +42,16 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
             SELECT f.TrackId, f.Algorithm, f.ExtractedAtUtcTicks
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
-            WHERE t.IsMissing = 0 AND f.Algorithm = @Algorithm
+            WHERE t.IsMissing = 0
+              AND f.Algorithm = @Algorithm
+              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
             ORDER BY f.TrackId;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<FingerprintStateRow>(new CommandDefinition(
             sql,
-            new { Algorithm = algorithm },
+            new { Algorithm = algorithm, LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows
             .Select(row => new StoredFingerprintState(
@@ -72,6 +78,7 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE t.IsMissing = 0
               AND f.Algorithm = @Algorithm
+              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
               AND f.TrackId IN @TrackIds
             ORDER BY f.TrackId;
             """;
@@ -83,7 +90,7 @@ public sealed class SqliteFingerprintCatalogRepository(SqliteDatabase database) 
         {
             var rows = await connection.QueryAsync<FingerprintRow>(new CommandDefinition(
                 sql,
-                new { Algorithm = algorithm, TrackIds = batch },
+                new { Algorithm = algorithm, LibraryId = libraryId, TrackIds = batch },
                 cancellationToken: cancellationToken));
             result.AddRange(rows.Select(ToStoredFingerprint));
         }

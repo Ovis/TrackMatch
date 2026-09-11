@@ -7,7 +7,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// 候補Trackペアの詳細Fingerprint比較結果をSQLiteへ保存する。
 /// </summary>
-public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database) : ICandidateComparisonRepository
+public sealed class SqliteCandidateComparisonRepository(
+    SqliteDatabase database,
+    long? libraryId = null) : ICandidateComparisonRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateComparison> comparisons,
@@ -17,10 +19,27 @@ public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database)
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM CandidateComparisons;",
-            transaction: transaction,
-            cancellationToken: cancellationToken));
+        if (libraryId is null)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM CandidateComparisons;",
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+        }
+        else
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidateComparisons
+                WHERE TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
+                  AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId);
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
+        await EnsureComparisonsInScopeAsync(connection, transaction, comparisons, cancellationToken);
         await UpsertCoreAsync(connection, transaction, comparisons, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -38,6 +57,7 @@ public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database)
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await EnsureComparisonsInScopeAsync(connection, transaction, comparisons, cancellationToken);
 
         // 詳細比較値が変わったペアの分類結果は古くなるため、再分類されるまで表示対象に残さない。
         const string deleteClassificationSql = """
@@ -58,15 +78,20 @@ public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database)
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackIdA, TrackIdB, Similarity, BestOffsetItems, BestOffsetTicks,
-                   MatchedItems, MatchedDurationTicks, CoverageA, CoverageB, DurationRatio
-            FROM CandidateComparisons
-            ORDER BY Similarity DESC, TrackIdA, TrackIdB;
+            SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
+                   c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
+            FROM CandidateComparisons c
+            INNER JOIN Tracks a ON a.Id = c.TrackIdA
+            INNER JOIN Tracks b ON b.Id = c.TrackIdB
+            WHERE @LibraryId IS NULL
+               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId)
+            ORDER BY c.Similarity DESC, c.TrackIdA, c.TrackIdB;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows.Select(ToDomain).ToArray();
     }
@@ -76,17 +101,48 @@ public sealed class SqliteCandidateComparisonRepository(SqliteDatabase database)
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackIdA, TrackIdB, ComparedAtUtcTicks
-            FROM CandidateComparisons;
+            SELECT c.TrackIdA, c.TrackIdB, c.ComparedAtUtcTicks
+            FROM CandidateComparisons c
+            INNER JOIN Tracks a ON a.Id = c.TrackIdA
+            INNER JOIN Tracks b ON b.Id = c.TrackIdB
+            WHERE @LibraryId IS NULL
+               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId);
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparedAtRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows.ToDictionary(
             row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB),
             row => new DateTime(row.ComparedAtUtcTicks, DateTimeKind.Utc));
+    }
+
+    private async Task EnsureComparisonsInScopeAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        IReadOnlyCollection<CandidateComparison> comparisons,
+        CancellationToken cancellationToken)
+    {
+        if (libraryId is null || comparisons.Count == 0)
+        {
+            return;
+        }
+
+        var trackIds = comparisons
+            .SelectMany(item => new[] { item.TrackIdA, item.TrackIdB })
+            .Distinct()
+            .ToArray();
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            new { LibraryId = libraryId, TrackIds = trackIds },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (count != trackIds.Length)
+        {
+            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Comparisonとして保存できません。");
+        }
     }
 
     private static async Task UpsertCoreAsync(
