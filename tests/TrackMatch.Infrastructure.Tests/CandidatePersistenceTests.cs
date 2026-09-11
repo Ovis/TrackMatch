@@ -19,6 +19,10 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
         Directory.CreateDirectory(_directory);
         _database = new SqliteDatabase(Path.Combine(_directory, "trackmatch.db"));
         await _database.InitializeAsync(TestContext.Current.CancellationToken);
+        await new SqliteLibraryRepository(_database).CreateAsync(
+            "Test Library",
+            [_directory],
+            TestContext.Current.CancellationToken);
     }
 
     public ValueTask DisposeAsync()

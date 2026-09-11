@@ -89,7 +89,8 @@ public sealed class IncrementalLibraryScanServiceTests
         Assert.Equal("Metadata", Assert.Single(result.Errors).Stage);
     }
 
-    private static StoredTrack Stored(long id, AudioTrackMetadata metadata) => new(id, metadata, false);
+    private static StoredTrack Stored(long id, AudioTrackMetadata metadata)
+        => new(id, metadata, false, 1, 1, Path.GetFileName(metadata.Path));
 
     private static AudioTrackMetadata Metadata(string path, long size, long second)
         => new(

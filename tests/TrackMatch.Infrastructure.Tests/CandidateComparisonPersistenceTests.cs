@@ -19,6 +19,10 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         Directory.CreateDirectory(_directory);
         _database = new SqliteDatabase(Path.Combine(_directory, "trackmatch.db"));
         await _database.InitializeAsync(TestContext.Current.CancellationToken);
+        await new SqliteLibraryRepository(_database).CreateAsync(
+            "Test Library",
+            [_directory],
+            TestContext.Current.CancellationToken);
         var trackRepository = new SqliteTrackRepository(_database);
         _trackIdA = await trackRepository.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         _trackIdB = await trackRepository.UpsertMetadataAsync(CreateMetadata("b.flac"), TestContext.Current.CancellationToken);
