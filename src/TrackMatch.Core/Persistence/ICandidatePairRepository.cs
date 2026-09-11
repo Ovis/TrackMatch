@@ -11,5 +11,10 @@ public interface ICandidatePairRepository
         IReadOnlyCollection<CandidatePair> pairs,
         CancellationToken cancellationToken = default);
 
+    Task ReplaceForTracksAsync(
+        IReadOnlyCollection<long> trackIds,
+        IReadOnlyCollection<CandidatePair> pairs,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default);
 }
