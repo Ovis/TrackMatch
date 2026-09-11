@@ -3,12 +3,19 @@ using TrackMatch.Core.Scanning;
 namespace TrackMatch.Infrastructure.Scanning;
 
 /// <summary>
-/// 指定ディレクトリ以下のFLACファイルを再帰的に走査する。
+/// 指定ディレクトリ以下の正式対応Audio Fileを再帰的に走査する。
 /// </summary>
-public sealed class FlacLibraryScanner(IAudioMetadataReader metadataReader) : ILibraryScanner
+public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : ILibraryScanner
 {
+    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".flac",
+        ".mp3",
+    };
+
     private readonly IAudioMetadataReader _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
 
+    /// <inheritdoc />
     public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
@@ -29,7 +36,8 @@ public sealed class FlacLibraryScanner(IAudioMetadataReader metadataReader) : IL
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!string.Equals(Path.GetExtension(path), ".flac", StringComparison.OrdinalIgnoreCase))
+            // Backendが偶然DecodeできるFormatを正式対応扱いしないため、Scanner入口でExtensionを固定する。
+            if (!SupportedExtensions.Contains(Path.GetExtension(path)))
             {
                 continue;
             }
@@ -41,6 +49,7 @@ public sealed class FlacLibraryScanner(IAudioMetadataReader metadataReader) : IL
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
+                // 1 Fileの破損でLibrary全体を中断せず、Current RunのAnalysis Errorとして返す。
                 result = LibraryScanResult.Failure(path, exception.Message);
             }
 

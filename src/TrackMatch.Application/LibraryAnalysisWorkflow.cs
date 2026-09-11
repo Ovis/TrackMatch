@@ -42,7 +42,7 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 指定Rootを増分走査し、変更されたFLACのメタデータとFingerprintを更新する。
+    /// 指定Rootを増分走査し、変更された対応Audio FileのメタデータとFingerprintを更新する。
     /// </summary>
     /// <remarks>
     /// CLI/GUIをLibrary選択方式へ移行するまでの互換API。新規処理では<see cref="ScanLibraryAsync"/>を使用する。
@@ -183,7 +183,7 @@ public sealed class LibraryAnalysisWorkflow
 
     private IncrementalLibraryScanService CreateScanService(SqliteDatabase database)
         => new(
-            new FlacLibraryScanner(new FlacMetadataReader()),
+            new AudioLibraryScanner(new AudioMetadataReaderDispatcher()),
             new SqliteTrackRepository(database),
             new SqliteScanSessionRepository(database),
             new FpcalcFingerprintExtractor(_fpcalcPath),

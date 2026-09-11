@@ -22,6 +22,7 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
 
     private static ReadOnlySpan<byte> FlacMagic => "fLaC"u8;
 
+    /// <inheritdoc />
     public AudioTrackMetadata Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -42,7 +43,7 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
             throw new InvalidDataException("FLACシグネチャが見つからない。");
         }
 
-        TimeSpan? duration = null;
+        FlacStreamInfo? audioInfo = null;
         Dictionary<string, List<string>>? comments = null;
         var isLastBlock = false;
         var blockIndex = 0;
@@ -71,7 +72,7 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
                     }
 
                     stream.ReadExactly(streamInfo);
-                    duration = ReadDuration(streamInfo);
+                    audioInfo = ReadStreamInfo(streamInfo);
                     break;
 
                 case VorbisCommentBlockType:
@@ -88,7 +89,7 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
             blockIndex++;
         }
 
-        if (duration is null)
+        if (audioInfo is null)
         {
             throw new InvalidDataException("STREAMINFOを読み取れなかった。");
         }
@@ -97,16 +98,22 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
             fileInfo.FullName,
             fileInfo.Length,
             fileInfo.LastWriteTimeUtc,
-            duration.Value,
+            audioInfo.Duration,
             GetValues(comments, "ARTIST"),
             GetFirstValue(comments, "TITLE"),
             GetFirstValue(comments, "ALBUM"),
             ParseNumber(GetFirstValue(comments, "TRACKNUMBER")),
             ParseNumber(GetFirstValue(comments, "DISCNUMBER")),
-            GetValues(comments, "GENRE"));
+            GetValues(comments, "GENRE"),
+            Format: "FLAC",
+            Codec: "FLAC",
+            BitrateKbps: CalculateBitrateKbps(fileInfo.Length, audioInfo.Duration),
+            SampleRateHz: audioInfo.SampleRate,
+            BitDepth: audioInfo.BitDepth,
+            Channels: audioInfo.Channels);
     }
 
-    private static TimeSpan ReadDuration(ReadOnlySpan<byte> streamInfo)
+    private static FlacStreamInfo ReadStreamInfo(ReadOnlySpan<byte> streamInfo)
     {
         var sampleRate = (streamInfo[10] << 12) | (streamInfo[11] << 4) | (streamInfo[12] >> 4);
         if (sampleRate == 0)
@@ -114,13 +121,26 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
             throw new InvalidDataException("STREAMINFOのサンプルレートが0である。");
         }
 
+        var channels = ((streamInfo[12] >> 1) & 0x07) + 1;
+        var bitDepth = (((streamInfo[12] & 0x01) << 4) | (streamInfo[13] >> 4)) + 1;
         var totalSamples = ((ulong)(streamInfo[13] & 0x0f) << 32)
             | ((ulong)streamInfo[14] << 24)
             | ((ulong)streamInfo[15] << 16)
             | ((ulong)streamInfo[16] << 8)
             | streamInfo[17];
+        var duration = TimeSpan.FromSeconds((double)totalSamples / sampleRate);
 
-        return TimeSpan.FromSeconds((double)totalSamples / sampleRate);
+        return new FlacStreamInfo(duration, sampleRate, bitDepth, channels);
+    }
+
+    private static int? CalculateBitrateKbps(long fileSize, TimeSpan duration)
+    {
+        if (fileSize < 0 || duration <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        return checked((int)Math.Round(fileSize * 8d / duration.TotalSeconds / 1000d));
     }
 
     private static Dictionary<string, List<string>> ReadVorbisComments(ReadOnlySpan<byte> payload)
@@ -224,4 +244,6 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
         var numberPart = separatorIndex > 0 ? value[..separatorIndex] : value;
         return uint.TryParse(numberPart.Trim(), out var number) ? number : null;
     }
+
+    private sealed record FlacStreamInfo(TimeSpan Duration, int SampleRate, int BitDepth, int Channels);
 }
