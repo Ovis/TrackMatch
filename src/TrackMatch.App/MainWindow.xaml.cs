@@ -56,6 +56,9 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e)
+        => await _viewModel.AnalyzeLibraryAsync();
+
     private void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog

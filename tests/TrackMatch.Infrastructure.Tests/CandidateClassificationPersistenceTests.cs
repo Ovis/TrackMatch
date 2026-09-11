@@ -76,6 +76,45 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         Assert.Equal(["Soundtrack"], row.GenresB);
     }
 
+    [Fact]
+    public async Task ReviewReportRepository_ReturnsComparisonWithoutClassification()
+    {
+        var trackRepository = new SqliteTrackRepository(_database);
+        var idA = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "unclassified-a.flac"), "Artist", "Same", "Album 1", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var idB = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "unclassified-b.flac"), "Artist", "Same", "Album 2", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var pair = CandidatePairKey.Create(idA, idB);
+
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 0)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [new CandidateComparison(
+                pair.TrackIdA,
+                pair.TrackIdB,
+                1.0,
+                0,
+                TimeSpan.Zero,
+                100,
+                TimeSpan.FromSeconds(12.5),
+                1.0,
+                1.0,
+                1.0)],
+            TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
+            .GetAsync(TestContext.Current.CancellationToken));
+
+        Assert.Null(row.Kind);
+        Assert.Null(row.Reason);
+        Assert.Equal(1.0, row.Similarity, 6);
+        Assert.Equal("Same", row.TitleA);
+        Assert.Equal("Same", row.TitleB);
+    }
+
     private static AudioTrackMetadata Metadata(
         string path,
         string artist,

@@ -1,7 +1,7 @@
 using System.Text.Json;
+using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
-using TrackMatch.Core.Comparison;
 using TrackMatch.Infrastructure.Persistence;
 
 internal static class CandidateCommands
@@ -60,18 +60,8 @@ internal static class CandidateCommands
             };
             options.Validate();
 
-            var database = new SqliteDatabase(databasePath);
-            await database.InitializeAsync();
-            var reviewRepository = new SqliteCandidateReviewRepository(database);
-            var sketcher = new FingerprintSegmentSketcher();
-            var service = new CandidateGenerationService(
-                new SqliteFingerprintCatalogRepository(database),
-                new SqliteFingerprintSegmentSketchRepository(database),
-                new SqliteCandidatePairRepository(database),
-                reviewRepository,
-                sketcher,
-                new CandidatePairGenerator(sketcher));
-            var result = await service.GenerateAsync(algorithm, options);
+            var workflow = new LibraryAnalysisWorkflow(databasePath, fingerprintAlgorithm: algorithm);
+            var result = await workflow.GenerateCandidatesAsync(options);
 
             Console.WriteLine($"Tracks: {result.TrackCount}");
             Console.WriteLine($"Segments: {result.SegmentCount}");
@@ -139,18 +129,10 @@ internal static class CandidateCommands
 
         try
         {
-            var database = new SqliteDatabase(databasePath);
-            await database.InitializeAsync();
-            var comparisonRepository = new SqliteCandidateComparisonRepository(database);
-
             if (profilePath is null)
             {
-                var service = new CandidateAnalysisService(
-                    new SqliteFingerprintCatalogRepository(database),
-                    new SqliteCandidatePairRepository(database),
-                    comparisonRepository,
-                    new FingerprintComparer());
-                var result = await service.AnalyzeAsync(algorithm);
+                var workflow = new LibraryAnalysisWorkflow(databasePath, fingerprintAlgorithm: algorithm);
+                var result = await workflow.AnalyzeCandidatesAsync();
 
                 Console.WriteLine($"Candidates: {result.TotalCandidates}");
                 Console.WriteLine($"Compared: {result.ComparedCandidates}");
@@ -158,6 +140,10 @@ internal static class CandidateCommands
                 Console.WriteLine($"Skipped: {result.SkippedCandidates}");
                 return result.SkippedCandidates == 0 ? 0 : 2;
             }
+
+            var database = new SqliteDatabase(databasePath);
+            await database.InitializeAsync();
+            var comparisonRepository = new SqliteCandidateComparisonRepository(database);
 
             // 閾値調整は繰り返し行うため、再分類では保存済みの詳細比較値を再利用しraw Fingerprint比較をやり直さない。
             var profileJson = File.ReadAllText(profilePath);

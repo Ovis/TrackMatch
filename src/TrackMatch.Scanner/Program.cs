@@ -1,14 +1,12 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using TrackMatch.Application;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Probe;
-using TrackMatch.Core.Scanning;
-using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Chromaprint;
 using TrackMatch.Infrastructure.Persistence;
-using TrackMatch.Infrastructure.Scanning;
 
 return await RunAsync(args);
 
@@ -100,17 +98,9 @@ static async Task<int> RunScanAsync(string[] args)
 
     try
     {
-        // 通常利用ではGUIと同じ標準DBを使い、初回scanがDB作成とライブラリ登録を担う。
-        // --dbは検証用DBなどへ明示的に切り替える場合の上書き手段として残す。
-        var database = new SqliteDatabase(databasePath);
-        await database.InitializeAsync();
-        var service = new IncrementalLibraryScanService(
-            new FlacLibraryScanner(new FlacMetadataReader()),
-            new SqliteTrackRepository(database),
-            new SqliteScanSessionRepository(database),
-            new FpcalcFingerprintExtractor(fpcalcPath),
-            fingerprintAlgorithm: 2);
-        var result = await service.ScanAsync(rootPath);
+        // CLIとGUIで同じWorkflowを使い、Fingerprint生成条件やDB構成が入口によってずれないようにする。
+        var workflow = new LibraryAnalysisWorkflow(databasePath, fpcalcPath);
+        var result = await workflow.ScanAsync(rootPath);
         foreach (var error in result.Errors)
         {
             Console.Error.WriteLine($"ERROR\t{error.Stage}\t{error.Path}\t{error.Message}");
