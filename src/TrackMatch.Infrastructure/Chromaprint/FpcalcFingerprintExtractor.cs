@@ -9,9 +9,7 @@ namespace TrackMatch.Infrastructure.Chromaprint;
 /// </summary>
 public sealed class FpcalcFingerprintExtractor(string fpcalcPath = "fpcalc") : IFingerprintExtractor
 {
-    private readonly string _fpcalcPath = string.IsNullOrWhiteSpace(fpcalcPath)
-        ? throw new ArgumentException("fpcalcのパスを指定する必要がある。", nameof(fpcalcPath))
-        : fpcalcPath;
+    private readonly string _fpcalcPath = FpcalcPathResolver.Resolve(fpcalcPath);
 
     public async Task<AudioFingerprint> ExtractAsync(string path, CancellationToken cancellationToken = default)
     {
@@ -52,7 +50,7 @@ public sealed class FpcalcFingerprintExtractor(string fpcalcPath = "fpcalc") : I
         catch (System.ComponentModel.Win32Exception exception)
         {
             throw new InvalidOperationException(
-                $"fpcalcを起動できない。PATHまたは指定パスを確認する: {_fpcalcPath}",
+                $"fpcalcを起動できない。同梱ファイル、PATHまたは指定パスを確認する: {_fpcalcPath}",
                 exception);
         }
 
