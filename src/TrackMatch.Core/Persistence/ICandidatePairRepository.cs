@@ -29,5 +29,22 @@ public interface ICandidatePairRepository
         await ReplaceAllAsync(preserved.Concat(pairs).ToArray(), cancellationToken);
     }
 
+    async Task DeleteAsync(
+        IReadOnlyCollection<CandidatePairKey> pairKeys,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pairKeys);
+        if (pairKeys.Count == 0)
+        {
+            return;
+        }
+
+        var excluded = pairKeys.ToHashSet();
+        var preserved = (await GetAllAsync(cancellationToken))
+            .Where(pair => !excluded.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
+            .ToArray();
+        await ReplaceAllAsync(preserved, cancellationToken);
+    }
+
     Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default);
 }
