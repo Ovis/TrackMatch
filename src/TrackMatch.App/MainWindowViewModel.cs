@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using TrackMatch.App.Playback;
+using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
@@ -21,6 +22,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private string _trashRoot = string.Empty;
     private CandidateReviewItemViewModel? _selectedCandidate;
     private string _statusText = "候補を読み込んでいます。";
+    private string _analysisStatusText = "ライブラリ分析は未実行";
     private string _playbackStatusText = "停止中";
     private string _trashStatusText = "Trash処理は未実行";
     private bool _isBusy;
@@ -51,6 +53,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
             _databasePath = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(CanAnalyzeLibrary));
+            OnPropertyChanged(nameof(CanProcessTrash));
         }
     }
 
@@ -66,6 +70,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
             _libraryRoot = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(CanAnalyzeLibrary));
             OnPropertyChanged(nameof(CanProcessTrash));
         }
     }
@@ -106,6 +111,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public bool HasSelection => SelectedCandidate is not null && !IsBusy;
 
+    public bool CanAnalyzeLibrary => !IsBusy
+        && !string.IsNullOrWhiteSpace(DatabasePath)
+        && !string.IsNullOrWhiteSpace(LibraryRoot);
+
     public bool CanProcessTrash => !IsBusy
         && !string.IsNullOrWhiteSpace(LibraryRoot)
         && !string.IsNullOrWhiteSpace(TrashRoot)
@@ -122,6 +131,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             }
 
             _statusText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string AnalysisStatusText
+    {
+        get => _analysisStatusText;
+        private set
+        {
+            if (_analysisStatusText == value)
+            {
+                return;
+            }
+
+            _analysisStatusText = value;
             OnPropertyChanged();
         }
     }
@@ -169,6 +193,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             _isBusy = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(CanAnalyzeLibrary));
             OnPropertyChanged(nameof(CanProcessTrash));
         }
     }
@@ -187,11 +212,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         if (!File.Exists(DatabasePath))
         {
-            // GUIはレビュー済みデータを参照する役割に留め、初回DB作成はScannerのscanに任せる。
-            // 先にGUIを起動しただけで空DBが生成されると、ライブラリ未登録なのか空なのか判別しづらくなるため作成しない。
+            // GUIは通常の分析入口も持つため、DBが無い状態では空DBを作らずライブラリ指定を案内する。
             Candidates.Clear();
             SelectedCandidate = null;
-            StatusText = "まだライブラリがスキャンされていません。Scannerで初回scanを実行してください。";
+            StatusText = "まだライブラリがスキャンされていません。Library Rootを指定してスキャン・分析を実行してください。";
             OnPropertyChanged(nameof(CanProcessTrash));
             return;
         }
@@ -201,7 +225,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         {
             var database = new SqliteDatabase(DatabasePath);
             await database.InitializeAsync();
-            var rows = await new SqliteCandidateClassificationRepository(database).GetReportAsync();
+            var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync();
 
             Candidates.Clear();
             foreach (var row in rows)
@@ -219,6 +243,58 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// 指定ライブラリを増分スキャンし、候補生成と詳細比較まで一括実行する。
+    /// </summary>
+    public async Task AnalyzeLibraryAsync()
+    {
+        if (!CanAnalyzeLibrary)
+        {
+            AnalysisStatusText = "Library RootとDatabaseを指定してください。";
+            return;
+        }
+
+        StopPlayback();
+        IsBusy = true;
+        var succeeded = false;
+        try
+        {
+            var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
+            var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
+            var progress = new Progress<LibraryAnalysisStage>(stage =>
+            {
+                AnalysisStatusText = stage switch
+                {
+                    LibraryAnalysisStage.Scanning => "スキャン中...",
+                    LibraryAnalysisStage.GeneratingCandidates => "候補生成中...",
+                    LibraryAnalysisStage.AnalyzingCandidates => "詳細比較中...",
+                    _ => AnalysisStatusText,
+                };
+            });
+
+            var result = await workflow.RunAsync(LibraryRoot, progress);
+            var scan = result.Scan.Summary;
+            AnalysisStatusText =
+                $"完了: Scan {scan.TotalFiles}曲 (追加 {scan.AddedFiles} / 更新 {scan.UpdatedFiles} / Error {scan.ErrorCount}) / " +
+                $"候補更新 {result.Generation.Pairs.Count} / 詳細比較 {result.Analysis.ComparedCandidates} / 再利用 {result.Analysis.ReusedCandidates}";
+            succeeded = true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            AnalysisStatusText = $"分析失敗: {exception.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (succeeded)
+        {
+            // 分析結果を別操作なしで確認できるよう、詳細比較完了後に一覧も更新する。
+            await LoadAsync();
         }
     }
 
