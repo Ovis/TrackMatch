@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using TrackMatch.App.Playback;
+using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
@@ -14,15 +15,18 @@ using TrackMatch.Infrastructure.Trash;
 namespace TrackMatch.App;
 
 /// <summary>
-/// Library選択、分析進捗、候補レビュー画面の状態を管理する。
+/// Library選択、表示Filter、分析進捗、候補レビュー画面の状態を管理する。
 /// </summary>
 public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ITrackPlaybackService _playbackService;
+    private readonly JsonAppSettingsStore _settingsStore = new();
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
     private readonly List<IncrementalScanError> _analysisErrors = [];
+    private readonly List<CandidateReviewItemViewModel> _allCandidates = [];
     private readonly string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CancellationTokenSource? _analysisCancellation;
+    private TrackMatchAppSettings _settings = TrackMatchAppSettings.Default;
     private Library? _selectedLibrary;
     private CandidateReviewItemViewModel? _selectedCandidate;
     private string _trashRoot = string.Empty;
@@ -30,6 +34,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private string _analysisStatusText = "ライブラリ分析は未実行";
     private string _playbackStatusText = "停止中";
     private string _trashStatusText = "Trash処理は未実行";
+    private int _similarityDisplayLowerBoundPercent = 70;
+    private bool _settingsLoaded;
     private bool _isLoading;
     private bool _isAnalyzing;
     private bool _isCancellingAnalysis;
@@ -47,6 +53,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<Library> Libraries { get; } = [];
 
+    /// <summary>
+    /// Similarity表示下限を満たすCandidateだけを保持する表示用Collection。
+    /// </summary>
     public ObservableCollection<CandidateReviewItemViewModel> Candidates { get; } = [];
 
     public string DatabasePath => _databasePath;
@@ -92,7 +101,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public string TrashRoot
     {
         get => _trashRoot;
-        set
+        private set
         {
             if (_trashRoot == value)
             {
@@ -102,6 +111,27 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             _trashRoot = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(CanProcessTrash));
+        }
+    }
+
+    /// <summary>
+    /// Candidate一覧へ表示するSimilarityの下限を百分率で取得・設定する。
+    /// </summary>
+    public int SimilarityDisplayLowerBoundPercent
+    {
+        get => _similarityDisplayLowerBoundPercent;
+        set
+        {
+            var normalized = Math.Clamp(value, 0, 100);
+            if (_similarityDisplayLowerBoundPercent == normalized)
+            {
+                return;
+            }
+
+            _similarityDisplayLowerBoundPercent = normalized;
+            OnPropertyChanged();
+            ApplyCandidateFilter();
+            _ = SaveSettingsSafeAsync();
         }
     }
 
@@ -191,7 +221,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>
-    /// Library一覧と選択Libraryの候補を読み込む。
+    /// App設定、Library一覧、選択Libraryの候補を読み込む。
     /// </summary>
     public async Task LoadAsync(long? preferredLibraryId = null)
     {
@@ -199,6 +229,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         IsLoading = true;
         try
         {
+            if (!_settingsLoaded)
+            {
+                _settings = await _settingsStore.LoadAsync();
+                _settingsLoaded = true;
+                _similarityDisplayLowerBoundPercent = _settings.SimilarityDisplayLowerBoundPercent;
+                TrashRoot = _settings.TrashRoot ?? string.Empty;
+                OnPropertyChanged(nameof(SimilarityDisplayLowerBoundPercent));
+            }
+
             var management = new LibraryManagementService(DatabasePath);
             var libraries = await management.GetLibrariesAsync();
             Libraries.Clear();
@@ -207,12 +246,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 Libraries.Add(library);
             }
 
-            var selectedId = preferredLibraryId ?? SelectedLibrary?.Id;
+            var selectedId = preferredLibraryId ?? SelectedLibrary?.Id ?? _settings.LastSelectedLibraryId;
             SelectedLibrary = libraries.FirstOrDefault(item => item.Id == selectedId) ?? libraries.FirstOrDefault();
             await LoadCandidatesCoreAsync();
+            await SaveSettingsSafeAsync();
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
+            _allCandidates.Clear();
             Candidates.Clear();
             SelectedCandidate = null;
             StatusText = $"読み込み失敗: {exception.Message}";
@@ -238,11 +279,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             await LoadCandidatesCoreAsync();
+            await SaveSettingsSafeAsync();
         }
         finally
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Trash RootをApp-wide設定として更新する。
+    /// </summary>
+    public async Task SetTrashRootAsync(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        TrashRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        await SaveSettingsSafeAsync();
     }
 
     /// <summary>
@@ -396,6 +448,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task LoadCandidatesCoreAsync()
     {
+        _allCandidates.Clear();
         Candidates.Clear();
         SelectedCandidate = null;
         var library = SelectedLibrary;
@@ -408,20 +461,51 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         var database = new SqliteDatabase(DatabasePath);
         await database.InitializeAsync();
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(library.Id);
-        foreach (var row in rows)
+        _allCandidates.AddRange(rows.Select(row => new CandidateReviewItemViewModel(row)));
+        ApplyCandidateFilter();
+    }
+
+    /// <summary>
+    /// 現在のSimilarity下限で表示Collectionだけを再構築する。
+    /// </summary>
+    private void ApplyCandidateFilter()
+    {
+        var library = SelectedLibrary;
+        var previous = SelectedCandidate;
+        var minimum = SimilarityDisplayLowerBoundPercent / 100d;
+        var visible = _allCandidates
+            .Where(item => item.Row.Similarity >= minimum)
+            .ToArray();
+
+        // 選択中CandidateがFilter外になる場合、旧Audioを流し続けないことを先に保証する。
+        if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
         {
-            Candidates.Add(new CandidateReviewItemViewModel(row));
+            StopPlayback();
+        }
+
+        Candidates.Clear();
+        foreach (var item in visible)
+        {
+            Candidates.Add(item);
         }
 
         CandidateReviewItemViewModel? selection = null;
-        if (_sessionSelections.TryGetValue(library.Id, out var remembered))
+        if (library is not null && _sessionSelections.TryGetValue(library.Id, out var remembered))
         {
             selection = Candidates.FirstOrDefault(item =>
                 item.TrackIdA == remembered.TrackIdA && item.TrackIdB == remembered.TrackIdB);
         }
 
+        if (selection is null && previous is not null)
+        {
+            selection = Candidates.FirstOrDefault(item => SameCandidate(item, previous));
+        }
+
         SelectedCandidate = selection ?? Candidates.FirstOrDefault();
-        StatusText = $"{library.Name} — 未レビュー候補: {Candidates.Count}件";
+        if (library is not null)
+        {
+            StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {_allCandidates.Count}件（Similarity {SimilarityDisplayLowerBoundPercent}%以上）";
+        }
     }
 
     private void PlaySelectedTrack(bool isTrackA)
@@ -462,16 +546,44 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             await database.InitializeAsync();
             await new SqliteCandidateReviewRepository(database).SaveAsync(new CandidateReview(
                 CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null, keepTrackId));
-            var index = Candidates.IndexOf(selected);
+
+            var visibleIndex = Candidates.IndexOf(selected);
+            _allCandidates.RemoveAll(item => SameCandidate(item, selected));
             Candidates.Remove(selected);
-            SelectedCandidate = Candidates.Count == 0 ? null : Candidates[Math.Min(index, Candidates.Count - 1)];
-            StatusText = $"レビューを保存しました。残り {Candidates.Count}件";
+            SelectedCandidate = Candidates.Count == 0 ? null : Candidates[Math.Min(visibleIndex, Candidates.Count - 1)];
+            StatusText = SelectedLibrary is null
+                ? $"レビューを保存しました。残り {Candidates.Count}件"
+                : $"{SelectedLibrary.Name} — 表示 {Candidates.Count} / 未レビュー {_allCandidates.Count}件（Similarity {SimilarityDisplayLowerBoundPercent}%以上）";
         }
         finally
         {
             IsLoading = false;
         }
     }
+
+    private async Task SaveSettingsSafeAsync()
+    {
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
+        _settings = new TrackMatchAppSettings(
+            SelectedLibrary?.Id,
+            SimilarityDisplayLowerBoundPercent,
+            string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot);
+        try
+        {
+            await _settingsStore.SaveAsync(_settings);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            StatusText = $"設定保存失敗: {exception.Message}";
+        }
+    }
+
+    private static bool SameCandidate(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
+        => left.TrackIdA == right.TrackIdA && left.TrackIdB == right.TrackIdB;
 
     private string FormatAnalysisSummary(string prefix, IReadOnlyCollection<ScanSessionSummary> summaries)
     {
