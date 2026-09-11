@@ -93,6 +93,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
+        if (!File.Exists(DatabasePath))
+        {
+            // GUIはレビュー済みデータを参照する役割に留め、初回DB作成はScannerのscanに任せる。
+            // 先にGUIを起動しただけで空DBが生成されると、ライブラリ未登録なのか空なのか判別しづらくなるため作成しない。
+            Candidates.Clear();
+            SelectedCandidate = null;
+            StatusText = "まだライブラリがスキャンされていません。Scannerで初回scanを実行してください。";
+            return;
+        }
+
         IsBusy = true;
         try
         {
