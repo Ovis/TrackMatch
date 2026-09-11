@@ -78,7 +78,7 @@ static async Task<int> RunScanAsync(string[] args)
     }
 
     var rootPath = args[1];
-    string? databasePath = null;
+    var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
     for (var i = 2; i < args.Length; i++)
     {
@@ -100,11 +100,8 @@ static async Task<int> RunScanAsync(string[] args)
 
     try
     {
-        if (databasePath is null)
-        {
-            return RunLegacyScan(rootPath);
-        }
-
+        // 通常利用ではGUIと同じ標準DBを使い、初回scanがDB作成とライブラリ登録を担う。
+        // --dbは検証用DBなどへ明示的に切り替える場合の上書き手段として残す。
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
         var service = new IncrementalLibraryScanService(
@@ -135,41 +132,6 @@ static async Task<int> RunScanAsync(string[] args)
         Console.Error.WriteLine(exception.Message);
         return 2;
     }
-}
-
-static int RunLegacyScan(string rootPath)
-{
-    var scanner = new FlacLibraryScanner(new FlacMetadataReader());
-    var total = 0;
-    var succeeded = 0;
-    var failed = 0;
-
-    foreach (var result in scanner.Scan(rootPath))
-    {
-        total++;
-        if (!result.IsSuccess)
-        {
-            failed++;
-            Console.Error.WriteLine($"ERROR\t{result.Path}\t{result.ErrorMessage}");
-            continue;
-        }
-
-        succeeded++;
-        var metadata = result.Metadata!;
-        Console.WriteLine(string.Join(
-            '\t',
-            metadata.Path,
-            metadata.Duration.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture),
-            string.Join("; ", metadata.Artists),
-            metadata.Title ?? string.Empty,
-            metadata.Album ?? string.Empty,
-            metadata.TrackNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-            metadata.DiscNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-            string.Join("; ", metadata.Genres)));
-    }
-
-    Console.Error.WriteLine($"Scanned: {total}, Success: {succeeded}, Failed: {failed}");
-    return failed == 0 ? 0 : 2;
 }
 
 static async Task<int> RunCompareAsync(string[] args)
@@ -434,15 +396,16 @@ static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  TrackMatch.Scanner scan <folder> [--db <trackmatch.db>] [--fpcalc <path>]");
-    Console.Error.WriteLine("  TrackMatch.Scanner generate-candidates --db <trackmatch.db> [--algorithm <n>] [--segment-length <items>] [--stride <items>] [--max-distance <0..3>]");
-    Console.Error.WriteLine("  TrackMatch.Scanner analyze-candidates --db <trackmatch.db> [--algorithm <n>] [--profile <thresholds.json>] [--format csv|text] [--output <path>]");
-    Console.Error.WriteLine("  TrackMatch.Scanner review-candidate --db <trackmatch.db> --track-a <id> --track-b <id> [--decision not-duplicate|duplicate] [--keep <id>] [--note <text>]");
-    Console.Error.WriteLine("  TrackMatch.Scanner trash-reviewed --db <trackmatch.db> --library-root <folder> --trash-root <folder> [--execute]");
+    Console.Error.WriteLine("  TrackMatch.Scanner generate-candidates [--db <trackmatch.db>] [--algorithm <n>] [--segment-length <items>] [--stride <items>] [--max-distance <0..3>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner analyze-candidates [--db <trackmatch.db>] [--algorithm <n>] [--profile <thresholds.json>] [--format csv|text] [--output <path>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner review-candidate [--db <trackmatch.db>] --track-a <id> --track-b <id> [--decision not-duplicate|duplicate] [--keep <id>] [--note <text>]");
+    Console.Error.WriteLine("  TrackMatch.Scanner trash-reviewed [--db <trackmatch.db>] --library-root <folder> --trash-root <folder> [--execute]");
     Console.Error.WriteLine("  TrackMatch.Scanner compare <file-a> <file-b> [--csv] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner probe <pairs.csv> [--output <results.csv>] [--fpcalc <path>]");
     Console.Error.WriteLine("  TrackMatch.Scanner analyze-probe <results.csv>");
     Console.Error.WriteLine("  TrackMatch.Scanner classify-probe <results.csv> --profile <thresholds.json>");
     Console.Error.WriteLine();
+    Console.Error.WriteLine($"DBを省略した場合は標準DBを使用する: {TrackMatchDataPaths.DefaultDatabasePath}");
     Console.Error.WriteLine("trash-reviewedは既定でdry-runし、ConfirmedDuplicateのReject側を確認する。実移動には--executeが必要である。");
     Console.Error.WriteLine("fpcalcは--fpcalc、TRACKMATCH_FPCALC環境変数、またはPATHで指定できる。");
 }
