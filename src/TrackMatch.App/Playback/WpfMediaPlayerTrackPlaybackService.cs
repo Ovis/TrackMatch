@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Media;
 
 namespace TrackMatch.App.Playback;
