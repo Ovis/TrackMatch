@@ -11,10 +11,23 @@ public interface ICandidatePairRepository
         IReadOnlyCollection<CandidatePair> pairs,
         CancellationToken cancellationToken = default);
 
-    Task ReplaceForTracksAsync(
+    async Task ReplaceForTracksAsync(
         IReadOnlyCollection<long> trackIds,
         IReadOnlyCollection<CandidatePair> pairs,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trackIds);
+        ArgumentNullException.ThrowIfNull(pairs);
+        var affected = trackIds.ToHashSet();
+        if (affected.Count == 0)
+        {
+            return;
+        }
+
+        var preserved = (await GetAllAsync(cancellationToken))
+            .Where(pair => !affected.Contains(pair.TrackIdA) && !affected.Contains(pair.TrackIdB));
+        await ReplaceAllAsync(preserved.Concat(pairs).ToArray(), cancellationToken);
+    }
 
     Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default);
 }
