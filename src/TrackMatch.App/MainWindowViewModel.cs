@@ -4,7 +4,9 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using TrackMatch.App.Playback;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
+using TrackMatch.Infrastructure.Trash;
 
 namespace TrackMatch.App;
 
@@ -15,9 +17,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ITrackPlaybackService _playbackService;
     private string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
+    private string _libraryRoot = string.Empty;
+    private string _trashRoot = string.Empty;
     private CandidateReviewItemViewModel? _selectedCandidate;
     private string _statusText = "候補を読み込んでいます。";
     private string _playbackStatusText = "停止中";
+    private string _trashStatusText = "Trash処理は未実行";
     private bool _isBusy;
     private bool _disposed;
 
@@ -49,6 +54,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public string LibraryRoot
+    {
+        get => _libraryRoot;
+        set
+        {
+            if (_libraryRoot == value)
+            {
+                return;
+            }
+
+            _libraryRoot = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanProcessTrash));
+        }
+    }
+
+    public string TrashRoot
+    {
+        get => _trashRoot;
+        set
+        {
+            if (_trashRoot == value)
+            {
+                return;
+            }
+
+            _trashRoot = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanProcessTrash));
+        }
+    }
+
     public CandidateReviewItemViewModel? SelectedCandidate
     {
         get => _selectedCandidate;
@@ -68,6 +105,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public bool HasSelection => SelectedCandidate is not null && !IsBusy;
+
+    public bool CanProcessTrash => !IsBusy
+        && !string.IsNullOrWhiteSpace(LibraryRoot)
+        && !string.IsNullOrWhiteSpace(TrashRoot)
+        && File.Exists(DatabasePath);
 
     public string StatusText
     {
@@ -99,6 +141,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public string TrashStatusText
+    {
+        get => _trashStatusText;
+        private set
+        {
+            if (_trashStatusText == value)
+            {
+                return;
+            }
+
+            _trashStatusText = value;
+            OnPropertyChanged();
+        }
+    }
+
     public bool IsBusy
     {
         get => _isBusy;
@@ -112,6 +169,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             _isBusy = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(CanProcessTrash));
         }
     }
 
@@ -134,6 +192,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             Candidates.Clear();
             SelectedCandidate = null;
             StatusText = "まだライブラリがスキャンされていません。Scannerで初回scanを実行してください。";
+            OnPropertyChanged(nameof(CanProcessTrash));
             return;
         }
 
@@ -192,6 +251,48 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public Task ConfirmDuplicateKeepBAsync()
         => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdB);
+
+    /// <summary>
+    /// 重複レビューで破棄対象になったトラックについて、Trash移動の事前確認または実移動を行う。
+    /// </summary>
+    /// <param name="execute">trueの場合は実際に移動し、falseの場合はDry-runのみ行う</param>
+    public async Task<RejectedTrackTrashResult?> ProcessTrashAsync(bool execute)
+    {
+        if (!CanProcessTrash)
+        {
+            TrashStatusText = "Library Root、Trash Root、既存DBを指定してください。";
+            return null;
+        }
+
+        StopPlayback();
+        IsBusy = true;
+        try
+        {
+            var database = new SqliteDatabase(DatabasePath);
+            await database.InitializeAsync();
+            var tracks = new SqliteTrackRepository(database);
+            var service = new RejectedTrackTrashService(
+                new SqliteCandidateReviewRepository(database),
+                new SqliteTrackLookupRepository(database),
+                tracks,
+                new LocalTrackFileOperations());
+            var result = await service.ProcessAsync(LibraryRoot, TrashRoot, execute);
+
+            TrashStatusText = execute
+                ? $"Trash移動完了: {result.MovedCount}件 / Blocked: {result.BlockedCount}件"
+                : $"Dry-run: 移動可能 {result.ReadyCount}件 / Blocked: {result.BlockedCount}件";
+            return result;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            TrashStatusText = $"Trash処理失敗: {exception.Message}";
+            return null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
 
     /// <inheritdoc />
     public void Dispose()
