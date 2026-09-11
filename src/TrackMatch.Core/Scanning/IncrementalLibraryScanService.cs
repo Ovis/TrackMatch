@@ -4,7 +4,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Core.Scanning;
 
 /// <summary>
-/// ファイルシステムと保存済みTrackを照合し、変更されたFLACだけをDBへ反映する。
+/// ファイルシステムと保存済みTrackを照合し、変更された対応Audio FileだけをDBへ反映する。
 /// </summary>
 public sealed class IncrementalLibraryScanService(
     ILibraryScanner scanner,
@@ -70,6 +70,7 @@ public sealed class IncrementalLibraryScanService(
                 {
                     trackId = stored!.Id;
                     await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                    // Missingから復活した場合も旧Fingerprintを無条件には信用せず、通常の変更と同様に再生成する。
                     await trackRepository.DeleteFingerprintAsync(trackId, cancellationToken);
                     updated++;
                 }

@@ -62,6 +62,12 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
         Assert.Equal("New title", stored.Metadata.Title);
         Assert.Equal(["Artist A", "Artist B"], stored.Metadata.Artists);
         Assert.Equal(["J-POPS"], stored.Metadata.Genres);
+        Assert.Equal("FLAC", stored.Metadata.Format);
+        Assert.Equal("FLAC", stored.Metadata.Codec);
+        Assert.Equal(900, stored.Metadata.BitrateKbps);
+        Assert.Equal(96000, stored.Metadata.SampleRateHz);
+        Assert.Equal(24, stored.Metadata.BitDepth);
+        Assert.Equal(2, stored.Metadata.Channels);
         Assert.Equal(_libraryId, stored.LibraryId);
         Assert.Equal(_rootId, stored.RootId);
         Assert.Equal("テスト.flac", stored.RelativePath);
@@ -142,5 +148,11 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
             "Album",
             1,
             1,
-            ["J-POPS"]);
+            ["J-POPS"],
+            Format: "FLAC",
+            Codec: "FLAC",
+            BitrateKbps: 900,
+            SampleRateHz: 96000,
+            BitDepth: 24,
+            Channels: 2);
 }

@@ -12,6 +12,7 @@ public sealed class FlacMetadataReaderTests
             comments:
             [
                 "ARTIST=Artist A",
+                "ARTIST=Artist B",
                 "TITLE=Track Title",
                 "ALBUM=Album Title",
                 "TRACKNUMBER=5/12",
@@ -25,15 +26,18 @@ public sealed class FlacMetadataReaderTests
             var metadata = new FlacMetadataReader().Read(path);
 
             Assert.Equal(TimeSpan.FromSeconds(125), metadata.Duration);
-            Assert.Single(metadata.Artists);
-            Assert.Equal("Artist A", metadata.Artists[0]);
+            Assert.Equal(["Artist A", "Artist B"], metadata.Artists);
             Assert.Equal("Track Title", metadata.Title);
             Assert.Equal("Album Title", metadata.Album);
             Assert.Equal((uint)5, metadata.TrackNumber);
             Assert.Equal((uint)2, metadata.DiscNumber);
-            Assert.Equal(2, metadata.Genres.Count);
-            Assert.Equal("J-POPS", metadata.Genres[0]);
-            Assert.Equal("Anime", metadata.Genres[1]);
+            Assert.Equal(["J-POPS", "Anime"], metadata.Genres);
+            Assert.Equal("FLAC", metadata.Format);
+            Assert.Equal("FLAC", metadata.Codec);
+            Assert.Equal(44100, metadata.SampleRateHz);
+            Assert.Equal(16, metadata.BitDepth);
+            Assert.Equal(2, metadata.Channels);
+            Assert.NotNull(metadata.BitrateKbps);
         }
         finally
         {
