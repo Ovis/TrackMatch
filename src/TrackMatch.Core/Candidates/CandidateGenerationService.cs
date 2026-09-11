@@ -99,6 +99,9 @@ public sealed class CandidateGenerationService(
                 .Concat(inactiveTrackIds)
                 .ToArray();
             await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds, pairs, cancellationToken);
+
+            // レビューはFingerprint更新と独立して発生するため、無変更実行でも新規レビュー済みペアを候補集合から除外する。
+            await candidatePairRepository.DeleteAsync(excluded.ToArray(), cancellationToken);
         }
 
         return new CandidateGenerationResult(
