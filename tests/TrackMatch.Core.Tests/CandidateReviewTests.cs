@@ -51,11 +51,14 @@ public sealed class CandidateReviewTests
         var pairRepository = new FakeCandidatePairRepository();
         var reviewRepository = new FakeCandidateReviewRepository(
             new HashSet<CandidatePairKey> { CandidatePairKey.Create(1, 2) });
+        var sketcher = new FingerprintSegmentSketcher();
         var service = new CandidateGenerationService(
             fingerprints,
+            new FakeSketchRepository(),
             pairRepository,
             reviewRepository,
-            new CandidatePairGenerator(new FingerprintSegmentSketcher()));
+            sketcher,
+            new CandidatePairGenerator(sketcher));
 
         var result = await service.GenerateAsync(2, new CandidateGenerationOptions(), TestContext.Current.CancellationToken);
 
@@ -64,13 +67,35 @@ public sealed class CandidateReviewTests
     }
 
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values)
-        => new(id, 2, new AudioFingerprint($"{id}.flac", TimeSpan.FromMinutes(4), values));
+        => new(id, 2, new AudioFingerprint($"{id}.flac", TimeSpan.FromMinutes(4), values), DateTime.UnixEpoch.AddSeconds(id));
 
     private sealed class FakeFingerprintCatalogRepository(IReadOnlyList<StoredFingerprint> items)
         : IFingerprintCatalogRepository
     {
         public Task<IReadOnlyList<StoredFingerprint>> GetActiveAsync(int algorithm, CancellationToken cancellationToken = default)
             => Task.FromResult(items);
+    }
+
+    private sealed class FakeSketchRepository : IFingerprintSegmentSketchRepository
+    {
+        private readonly Dictionary<long, DateTime> _states = [];
+        private readonly Dictionary<long, IReadOnlyCollection<FingerprintSegmentSketch>> _sketches = [];
+
+        public Task<IReadOnlyDictionary<long, DateTime>> GetTrackStatesAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<long, DateTime>>(_states);
+
+        public Task<IReadOnlyList<FingerprintSegmentSketch>> GetAllAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<FingerprintSegmentSketch>>(_sketches.Values.SelectMany(items => items).ToArray());
+
+        public Task ReplaceTrackAsync(StoredFingerprint fingerprint, CandidateGenerationOptions options, IReadOnlyCollection<FingerprintSegmentSketch> sketches, CancellationToken cancellationToken = default)
+        {
+            _states[fingerprint.TrackId] = fingerprint.ExtractedAtUtc;
+            _sketches[fingerprint.TrackId] = sketches.ToArray();
+            return Task.CompletedTask;
+        }
+
+        public Task PruneAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeCandidatePairRepository : ICandidatePairRepository
