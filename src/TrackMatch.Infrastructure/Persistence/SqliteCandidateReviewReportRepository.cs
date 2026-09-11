@@ -11,11 +11,17 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase database)
 {
     /// <summary>
-    /// 未レビューの詳細比較結果をTrackメタデータ付きで取得する。
+    /// 指定Libraryの未レビュー詳細比較結果をTrackメタデータ付きで取得する。
     /// </summary>
     public async Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
+        long libraryId,
         CancellationToken cancellationToken = default)
     {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
         const string sql = """
             SELECT x.TrackIdA, x.TrackIdB, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
@@ -24,13 +30,23 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
                    a.Album AS AlbumA, b.Album AS AlbumB,
-                   a.GenresJson AS GenresJsonA, b.GenresJson AS GenresJsonB
+                   a.GenresJson AS GenresJsonA, b.GenresJson AS GenresJsonB,
+                   a.DurationTicks AS DurationTicksA, b.DurationTicks AS DurationTicksB,
+                   a.FileSize AS FileSizeA, b.FileSize AS FileSizeB,
+                   a.Format AS FormatA, b.Format AS FormatB,
+                   a.Codec AS CodecA, b.Codec AS CodecB,
+                   a.BitrateKbps AS BitrateKbpsA, b.BitrateKbps AS BitrateKbpsB,
+                   a.SampleRateHz AS SampleRateHzA, b.SampleRateHz AS SampleRateHzB,
+                   a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
+                   a.Channels AS ChannelsA, b.Channels AS ChannelsB
             FROM CandidateComparisons x
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
             INNER JOIN Tracks a ON a.Id = x.TrackIdA
             INNER JOIN Tracks b ON b.Id = x.TrackIdB
-            WHERE NOT EXISTS (
+            WHERE a.LibraryId = @LibraryId
+              AND b.LibraryId = @LibraryId
+              AND NOT EXISTS (
                 SELECT 1
                 FROM CandidateReviews r
                 WHERE r.TrackIdA = x.TrackIdA
@@ -47,6 +63,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
     }
@@ -84,8 +101,26 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             row.AlbumA,
             row.AlbumB,
             Deserialize(row.GenresJsonA),
-            Deserialize(row.GenresJsonB));
+            Deserialize(row.GenresJsonB),
+            TimeSpan.FromTicks(row.DurationTicksA),
+            TimeSpan.FromTicks(row.DurationTicksB),
+            row.FileSizeA,
+            row.FileSizeB,
+            row.FormatA,
+            row.FormatB,
+            row.CodecA,
+            row.CodecB,
+            ToInt(row.BitrateKbpsA),
+            ToInt(row.BitrateKbpsB),
+            ToInt(row.SampleRateHzA),
+            ToInt(row.SampleRateHzB),
+            ToInt(row.BitDepthA),
+            ToInt(row.BitDepthB),
+            ToInt(row.ChannelsA),
+            ToInt(row.ChannelsB));
     }
+
+    private static int? ToInt(long? value) => value is null ? null : checked((int)value.Value);
 
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
@@ -111,5 +146,21 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? AlbumA,
         string? AlbumB,
         string GenresJsonA,
-        string GenresJsonB);
+        string GenresJsonB,
+        long DurationTicksA,
+        long DurationTicksB,
+        long FileSizeA,
+        long FileSizeB,
+        string? FormatA,
+        string? FormatB,
+        string? CodecA,
+        string? CodecB,
+        long? BitrateKbpsA,
+        long? BitrateKbpsB,
+        long? SampleRateHzA,
+        long? SampleRateHzB,
+        long? BitDepthA,
+        long? BitDepthB,
+        long? ChannelsA,
+        long? ChannelsB);
 }
