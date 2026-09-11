@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
 
@@ -93,43 +94,78 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RemoveRootAsync_AllowsRemovalAfterAddingReplacement()
+    public async Task RemoveRootAsync_DeletesTracksBelongingToRemovedRoot()
     {
         var library = await _repository.CreateAsync(
             "Music",
             [@"D:\Music"],
             TestContext.Current.CancellationToken);
+        var removedRoot = Assert.Single(library.Roots);
         var replacement = await _repository.AddRootAsync(
             library.Id,
             @"E:\Music",
             TestContext.Current.CancellationToken);
+        var tracks = new SqliteTrackRepository(_database);
+        var trackId = await tracks.UpsertMetadataAsync(
+            CreateMetadata(@"D:\Music\Album\track.flac"),
+            TestContext.Current.CancellationToken);
 
         await _repository.RemoveRootAsync(
             library.Id,
-            Assert.Single(library.Roots).Id,
+            removedRoot.Id,
             TestContext.Current.CancellationToken);
 
         var stored = Assert.IsType<TrackMatch.Core.Libraries.Library>(
             await _repository.GetAsync(library.Id, TestContext.Current.CancellationToken));
         var root = Assert.Single(stored.Roots);
         Assert.Equal(replacement.Id, root.Id);
+        Assert.Null(await tracks.GetByPathAsync(@"D:\Music\Album\track.flac", TestContext.Current.CancellationToken));
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Tracks WHERE Id = $trackId;";
+        command.Parameters.AddWithValue("$trackId", trackId);
+        Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task DeleteAsync_DeletesLibraryAndRoots()
+    public async Task DeleteAsync_DeletesLibraryRootsAndTracks()
     {
         var library = await _repository.CreateAsync(
             "Music",
             [@"D:\Music", @"E:\Imported"],
+            TestContext.Current.CancellationToken);
+        var tracks = new SqliteTrackRepository(_database);
+        await tracks.UpsertMetadataAsync(
+            CreateMetadata(@"D:\Music\track.flac"),
             TestContext.Current.CancellationToken);
 
         await _repository.DeleteAsync(library.Id, TestContext.Current.CancellationToken);
 
         Assert.Null(await _repository.GetAsync(library.Id, TestContext.Current.CancellationToken));
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM LibraryRoots WHERE LibraryId = $libraryId;";
-        command.Parameters.AddWithValue("$libraryId", library.Id);
-        Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryRoots WHERE LibraryId = $libraryId;", library.Id));
+        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM Tracks WHERE LibraryId = $libraryId;", library.Id));
     }
+
+    private static async Task<long> ScalarAsync(SqliteConnection connection, string sql, long libraryId)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$libraryId", libraryId);
+        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+    }
+
+    private static AudioTrackMetadata CreateMetadata(string path)
+        => new(
+            path,
+            100,
+            new DateTime(2026, 9, 12, 0, 0, 0, DateTimeKind.Utc),
+            TimeSpan.FromMinutes(4),
+            ["Artist"],
+            "Title",
+            "Album",
+            1,
+            1,
+            ["J-POPS"]);
 }

@@ -19,7 +19,7 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source)]);
+        var tracks = new FakeTrackRepository([Stored(2, source, root)]);
         var files = new FakeFileOperations([source]);
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
 
@@ -43,7 +43,7 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(10, 20), CandidateReviewDecision.ConfirmedDuplicate, null, 10),
         ]);
-        var tracks = new FakeTrackRepository([Stored(20, source)]);
+        var tracks = new FakeTrackRepository([Stored(20, source, root)]);
         var files = new FakeFileOperations([source]);
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
 
@@ -68,8 +68,8 @@ public sealed class RejectedTrackTrashServiceTests
         ]);
         var tracks = new FakeTrackRepository(
         [
-            Stored(2, Path.Combine(root, "2.flac")),
-            Stored(3, Path.Combine(root, "3.flac")),
+            Stored(2, Path.Combine(root, "2.flac"), root),
+            Stored(3, Path.Combine(root, "3.flac"), root),
         ]);
         var files = new FakeFileOperations(
         [
@@ -112,7 +112,7 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source)]);
+        var tracks = new FakeTrackRepository([Stored(2, source, root)]);
         var files = new FakeFileOperations([source, destination]);
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
 
@@ -123,7 +123,7 @@ public sealed class RejectedTrackTrashServiceTests
         Assert.Empty(files.Moves);
     }
 
-    private static StoredTrack Stored(long id, string path, bool isMissing = false)
+    private static StoredTrack Stored(long id, string path, string root, bool isMissing = false)
         => new(
             id,
             new AudioTrackMetadata(
@@ -137,7 +137,10 @@ public sealed class RejectedTrackTrashServiceTests
                 1,
                 1,
                 ["J-POPS"]),
-            isMissing);
+            isMissing,
+            1,
+            1,
+            Path.GetRelativePath(root, path));
 
     private sealed class FakeReviewRepository(IReadOnlyList<CandidateReview> reviews) : ICandidateReviewRepository
     {

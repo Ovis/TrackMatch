@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text.Json;
 using Dapper;
+using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Persistence;
@@ -18,16 +19,24 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
+        var fullPath = Path.GetFullPath(metadata.Path);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var ownership = await ResolveOwnershipAsync(connection, fullPath, cancellationToken);
+
         const string upsertSql = """
             INSERT INTO Tracks (
-                Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+                LibraryId, RootId, RelativePath, Path,
+                FileSize, LastWriteTimeUtcTicks, DurationTicks,
                 ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
                 IsMissing, UpdatedAtUtcTicks)
             VALUES (
-                @Path, @FileSize, @LastWriteTimeUtcTicks, @DurationTicks,
+                @LibraryId, @RootId, @RelativePath, @Path,
+                @FileSize, @LastWriteTimeUtcTicks, @DurationTicks,
                 @ArtistsJson, @Title, @Album, @TrackNumber, @DiscNumber, @GenresJson,
                 0, @UpdatedAtUtcTicks)
-            ON CONFLICT(Path) DO UPDATE SET
+            ON CONFLICT(RootId, RelativePath) DO UPDATE SET
+                LibraryId = excluded.LibraryId,
+                Path = excluded.Path,
                 FileSize = excluded.FileSize,
                 LastWriteTimeUtcTicks = excluded.LastWriteTimeUtcTicks,
                 DurationTicks = excluded.DurationTicks,
@@ -43,7 +52,10 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
         var parameters = new
         {
-            Path = Path.GetFullPath(metadata.Path),
+            ownership.LibraryId,
+            RootId = ownership.Id,
+            ownership.RelativePath,
+            Path = fullPath,
             metadata.FileSize,
             LastWriteTimeUtcTicks = metadata.LastWriteTimeUtc.Ticks,
             DurationTicks = metadata.Duration.Ticks,
@@ -56,7 +68,6 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             UpdatedAtUtcTicks = DateTime.UtcNow.Ticks,
         };
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             upsertSql,
@@ -65,8 +76,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             cancellationToken: cancellationToken));
 
         var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT Id FROM Tracks WHERE Path = @Path COLLATE NOCASE;",
-            new { parameters.Path },
+            "SELECT Id FROM Tracks WHERE RootId = @RootId AND RelativePath = @RelativePath COLLATE NOCASE;",
+            new { parameters.RootId, parameters.RelativePath },
             transaction,
             cancellationToken: cancellationToken));
 
@@ -81,7 +92,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         const string sql = """
-            SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+            SELECT Id, LibraryId, RootId, RelativePath, Path,
+                   FileSize, LastWriteTimeUtcTicks, DurationTicks,
                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
             FROM Tracks
             WHERE Path = @Path COLLATE NOCASE;
@@ -102,19 +114,19 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
-        var parameters = CreateRootPathParameters(rootPath);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var root = await ResolveRegisteredRootAsync(connection, rootPath, cancellationToken);
         const string sql = """
-            SELECT Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+            SELECT Id, LibraryId, RootId, RelativePath, Path,
+                   FileSize, LastWriteTimeUtcTicks, DurationTicks,
                    ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, IsMissing
             FROM Tracks
-            WHERE Path = @RootPath COLLATE NOCASE
-               OR Path LIKE @Prefix ESCAPE '\' COLLATE NOCASE;
+            WHERE RootId = @RootId;
             """;
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<TrackRow>(new CommandDefinition(
             sql,
-            parameters,
+            new { RootId = root.Id },
             cancellationToken: cancellationToken));
         return rows.Select(ToStoredTrack).ToArray();
     }
@@ -125,20 +137,19 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
-        var parameters = CreateRootPathParameters(rootPath);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var root = await ResolveRegisteredRootAsync(connection, rootPath, cancellationToken);
         const string sql = """
             SELECT t.Id
             FROM Tracks t
             LEFT JOIN Fingerprints f ON f.TrackId = t.Id
             WHERE f.TrackId IS NULL
-              AND (t.Path = @RootPath COLLATE NOCASE
-                   OR t.Path LIKE @Prefix ESCAPE '\' COLLATE NOCASE);
+              AND t.RootId = @RootId;
             """;
 
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var ids = await connection.QueryAsync<long>(new CommandDefinition(
             sql,
-            parameters,
+            new { RootId = root.Id },
             cancellationToken: cancellationToken));
         return ids.ToHashSet();
     }
@@ -243,12 +254,48 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             : new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), DecodeFingerprint(row.ValuesBlob));
     }
 
-    private static object CreateRootPathParameters(string rootPath)
+    private static async Task<TrackOwnership> ResolveOwnershipAsync(
+        SqliteConnection connection,
+        string fullPath,
+        CancellationToken cancellationToken)
+    {
+        var roots = (await connection.QueryAsync<RootRow>(new CommandDefinition(
+            "SELECT Id, LibraryId, Path FROM LibraryRoots;",
+            cancellationToken: cancellationToken))).ToArray();
+
+        foreach (var root in roots.OrderByDescending(item => item.Path.Length))
+        {
+            var relativePath = Path.GetRelativePath(root.Path, fullPath);
+            if (relativePath == "."
+                || relativePath == ".."
+                || relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                || Path.IsPathRooted(relativePath))
+            {
+                continue;
+            }
+
+            return new TrackOwnership(root.Id, root.LibraryId, relativePath);
+        }
+
+        throw new InvalidOperationException($"Trackが登録済みLibrary Rootの配下にありません: {fullPath}");
+    }
+
+    private static async Task<RootRow> ResolveRegisteredRootAsync(
+        SqliteConnection connection,
+        string rootPath,
+        CancellationToken cancellationToken)
     {
         var fullRootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        // LIKEのワイルドカードは末尾に後付けし、ルートパス自身に含まれる%, _のみをエスケープする。
-        var prefix = EscapeLike(fullRootPath + Path.DirectorySeparatorChar) + "%";
-        return new { RootPath = fullRootPath, Prefix = prefix };
+        var roots = await connection.QueryAsync<RootRow>(new CommandDefinition(
+            "SELECT Id, LibraryId, Path FROM LibraryRoots;",
+            cancellationToken: cancellationToken));
+        var root = roots.SingleOrDefault(item =>
+            string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(item.Path)),
+                fullRootPath,
+                StringComparison.OrdinalIgnoreCase));
+
+        return root ?? throw new InvalidOperationException($"Library Rootが登録されていません: {fullRootPath}");
     }
 
     private static StoredTrack ToStoredTrack(TrackRow row)
@@ -265,13 +312,14 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             row.DiscNumber is null ? null : checked((uint)row.DiscNumber.Value),
             DeserializeList(row.GenresJson));
 
-        return new StoredTrack(row.Id, metadata, row.IsMissing != 0);
+        return new StoredTrack(
+            row.Id,
+            metadata,
+            row.IsMissing != 0,
+            row.LibraryId,
+            row.RootId,
+            row.RelativePath);
     }
-
-    private static string EscapeLike(string value)
-        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("%", "\\%", StringComparison.Ordinal)
-            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static IReadOnlyList<string> DeserializeList(string json)
         => JsonSerializer.Deserialize<string[]>(json)
@@ -306,6 +354,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
     private sealed record TrackRow(
         long Id,
+        long LibraryId,
+        long RootId,
+        string RelativePath,
         string Path,
         long FileSize,
         long LastWriteTimeUtcTicks,
@@ -318,5 +369,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         string GenresJson,
         long IsMissing);
 
+    private sealed record RootRow(long Id, long LibraryId, string Path);
+    private sealed record TrackOwnership(long Id, long LibraryId, string RelativePath);
     private sealed record FingerprintRow(string Path, long DurationTicks, byte[] ValuesBlob);
 }

@@ -51,6 +51,7 @@ public sealed class SqliteDatabase
                 LibraryId INTEGER NOT NULL,
                 Path TEXT NOT NULL,
                 PathKey TEXT NOT NULL UNIQUE,
+                UNIQUE (Id, LibraryId),
                 FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE
             );
 
@@ -58,7 +59,10 @@ public sealed class SqliteDatabase
 
             CREATE TABLE IF NOT EXISTS Tracks (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                Path TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                LibraryId INTEGER NOT NULL,
+                RootId INTEGER NOT NULL,
+                RelativePath TEXT NOT NULL COLLATE NOCASE,
+                Path TEXT NOT NULL COLLATE NOCASE,
                 FileSize INTEGER NOT NULL,
                 LastWriteTimeUtcTicks INTEGER NOT NULL,
                 DurationTicks INTEGER NOT NULL,
@@ -69,9 +73,14 @@ public sealed class SqliteDatabase
                 DiscNumber INTEGER NULL,
                 GenresJson TEXT NOT NULL,
                 IsMissing INTEGER NOT NULL DEFAULT 0 CHECK (IsMissing IN (0, 1)),
-                UpdatedAtUtcTicks INTEGER NOT NULL
+                UpdatedAtUtcTicks INTEGER NOT NULL,
+                UNIQUE (RootId, RelativePath),
+                FOREIGN KEY (RootId, LibraryId) REFERENCES LibraryRoots (Id, LibraryId) ON DELETE CASCADE
             );
 
+            CREATE INDEX IF NOT EXISTS IX_Tracks_LibraryId ON Tracks (LibraryId);
+            CREATE INDEX IF NOT EXISTS IX_Tracks_RootId ON Tracks (RootId);
+            CREATE INDEX IF NOT EXISTS IX_Tracks_Path ON Tracks (Path COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks ON Tracks (LastWriteTimeUtcTicks);
 
             CREATE TABLE IF NOT EXISTS Fingerprints (

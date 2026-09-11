@@ -8,4 +8,7 @@ namespace TrackMatch.Core.Persistence;
 public sealed record StoredTrack(
     long Id,
     AudioTrackMetadata Metadata,
-    bool IsMissing);
+    bool IsMissing,
+    long LibraryId,
+    long RootId,
+    string RelativePath);
