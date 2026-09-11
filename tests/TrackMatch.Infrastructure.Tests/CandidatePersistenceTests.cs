@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
+using TrackMatch.Core.Persistence;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
 
@@ -44,6 +45,28 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
 
         var stored = Assert.Single(fingerprints);
         Assert.Equal(activeId, stored.TrackId);
+    }
+
+    [Fact]
+    public async Task FingerprintSegmentSketchRepository_ReturnsStoredFingerprintTimestamp()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var path = Path.Combine(_directory, "sketch.flac");
+        var trackId = await tracks.UpsertMetadataAsync(CreateMetadata(path), TestContext.Current.CancellationToken);
+        var extractedAtUtc = new DateTime(2026, 9, 11, 6, 0, 0, DateTimeKind.Utc);
+        var storedFingerprint = new StoredFingerprint(trackId, 2, CreateFingerprint(path), extractedAtUtc);
+        var options = new CandidateGenerationOptions();
+        var repository = new SqliteFingerprintSegmentSketchRepository(_database);
+
+        await repository.ReplaceTrackAsync(
+            storedFingerprint,
+            options,
+            [new FingerprintSegmentSketch(trackId, 0, 0x12345678u)],
+            TestContext.Current.CancellationToken);
+
+        var states = await repository.GetTrackStatesAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.Equal(extractedAtUtc, states[trackId]);
     }
 
     [Fact]
