@@ -56,10 +56,12 @@ jobs:
             throw 'fpcalc.exe was not found in the Chromaprint archive.'
           }
 
+          # ScannerのAppContext.BaseDirectoryからfpcalc/fpcalc.exeとして解決できる配置にする。
           $sourceDir = $fpcalc.Directory.FullName
-          New-Item -ItemType Directory -Path artifacts/package/fpcalc -Force | Out-Null
-          Copy-Item "$sourceDir/*" artifacts/package/fpcalc -Recurse -Force
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/acoustid/chromaprint/v$version/LICENSE.md" -OutFile artifacts/package/fpcalc/LICENSE.md
+          $destination = "artifacts/package/Scanner/fpcalc"
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Copy-Item "$sourceDir/*" $destination -Recurse -Force
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/acoustid/chromaprint/v$version/LICENSE.md" -OutFile "$destination/LICENSE.md"
 
       - name: Create release archive
         shell: pwsh
