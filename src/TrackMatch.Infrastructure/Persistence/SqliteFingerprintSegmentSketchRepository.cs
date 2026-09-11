@@ -15,15 +15,12 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
         CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT
-                TrackId,
-                CAST(MAX(FingerprintExtractedAtUtcTicks) AS INTEGER) AS FingerprintExtractedAtUtcTicks
+            SELECT DISTINCT TrackId, FingerprintExtractedAtUtcTicks
             FROM CandidateSegmentSketches
             WHERE Algorithm = @Algorithm
               AND SegmentLengthItems = @SegmentLengthItems
               AND SegmentStrideItems = @SegmentStrideItems
-              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance
-            GROUP BY TrackId;
+              AND MaximumSegmentHashDistance = @MaximumSegmentHashDistance;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -31,9 +28,15 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             sql,
             CreateConfigParameters(algorithm, options),
             cancellationToken: cancellationToken));
-        return rows.ToDictionary(
-            row => row.TrackId,
-            row => new DateTime(row.FingerprintExtractedAtUtcTicks, DateTimeKind.Utc));
+
+        // Microsoft.Data.SqliteではMAX等の集約式が元カラムのINTEGER型情報を保持せず、
+        // DapperがByte[]としてmaterializeしようとする場合がある。
+        // 実カラムをそのまま取得し、同一Trackに複数世代の状態が残っていても最新時刻をC#側で選ぶ。
+        return rows
+            .GroupBy(row => row.TrackId)
+            .ToDictionary(
+                group => group.Key,
+                group => new DateTime(group.Max(row => row.FingerprintExtractedAtUtcTicks), DateTimeKind.Utc));
     }
 
     public async Task<IReadOnlyList<FingerprintSegmentSketch>> GetAllAsync(
@@ -152,7 +155,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(SqliteDatabase data
             MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
         };
 
-    // SQLiteの集約式は型メタデータが失われる場合があるため、SQL側でINTEGERへCASTした値をlongで受ける。
     private sealed record SketchStateRow(long TrackId, long FingerprintExtractedAtUtcTicks);
     private sealed record SketchRow(long TrackId, long SegmentIndex, long Hash);
 }
