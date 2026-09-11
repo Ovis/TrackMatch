@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Infrastructure.Persistence;
@@ -144,7 +145,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             var review = new CandidateReview(
                 CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB),
                 decision,
-                note: null,
+                Note: null,
                 keepTrackId);
             await repository.SaveAsync(review);
 
