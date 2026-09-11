@@ -13,7 +13,7 @@ public interface ITrackPlaybackService : IDisposable
     /// <summary>
     /// メディア再生に失敗したときに発生する。
     /// </summary>
-    event EventHandler<string>? PlaybackFailed;
+    event Action<string>? PlaybackFailed;
 
     /// <summary>
     /// 指定した音声ファイルを先頭から再生する。
