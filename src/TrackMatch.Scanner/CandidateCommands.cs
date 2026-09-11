@@ -8,7 +8,7 @@ internal static class CandidateCommands
 {
     public static async Task<int> RunGenerateAsync(string[] args)
     {
-        string? databasePath = null;
+        var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
         var algorithm = 2;
         var segmentLength = 256;
         var stride = 128;
@@ -50,12 +50,6 @@ internal static class CandidateCommands
             return 1;
         }
 
-        if (string.IsNullOrWhiteSpace(databasePath))
-        {
-            Console.Error.WriteLine("--db <trackmatch.db> は必須である。");
-            return 1;
-        }
-
         try
         {
             var options = new CandidateGenerationOptions
@@ -90,7 +84,7 @@ internal static class CandidateCommands
 
     public static async Task<int> RunAnalyzeAsync(string[] args)
     {
-        string? databasePath = null;
+        var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
         string? profilePath = null;
         string? outputPath = null;
         var outputFormat = CandidateReportFormat.Csv;
@@ -129,12 +123,6 @@ internal static class CandidateCommands
             }
 
             Console.Error.WriteLine($"不明または値が不正なオプション: {args[i]}");
-            return 1;
-        }
-
-        if (string.IsNullOrWhiteSpace(databasePath))
-        {
-            Console.Error.WriteLine("--db <trackmatch.db> は必須である。");
             return 1;
         }
 
@@ -196,7 +184,7 @@ internal static class CandidateCommands
 
     public static async Task<int> RunReviewAsync(string[] args)
     {
-        string? databasePath = null;
+        var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
         string? note = null;
         long? trackIdA = null;
         long? trackIdB = null;
@@ -245,9 +233,9 @@ internal static class CandidateCommands
             return 1;
         }
 
-        if (string.IsNullOrWhiteSpace(databasePath) || trackIdA is null || trackIdB is null)
+        if (trackIdA is null || trackIdB is null)
         {
-            Console.Error.WriteLine("--db、--track-a、--track-b は必須である。");
+            Console.Error.WriteLine("--track-a、--track-b は必須である。");
             return 1;
         }
 
