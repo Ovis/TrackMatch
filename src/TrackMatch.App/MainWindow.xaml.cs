@@ -11,6 +11,15 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
+        Loaded += MainWindow_Loaded;
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // 通常利用ではDBファイルを意識させず、Scannerと共有する標準DBを起動時にそのまま開く。
+        // 参照ボタンは既存DBを調査する場合などの明示的な切り替え手段として残す。
+        Loaded -= MainWindow_Loaded;
+        await _viewModel.LoadAsync();
     }
 
     private async void BrowseDatabase_Click(object sender, RoutedEventArgs e)
