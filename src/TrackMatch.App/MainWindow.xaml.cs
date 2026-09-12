@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using TrackMatch.App.Diagnostics;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;
@@ -16,12 +17,22 @@ namespace TrackMatch.App;
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan OffsetStep = TimeSpan.FromMilliseconds(10);
-    private readonly MainWindowViewModel _viewModel = new(new NAudioSynchronizedPlaybackService());
+    private readonly MainWindowViewModel _viewModel;
     private readonly DispatcherTimer _playbackTimer;
 
     public MainWindow()
     {
+        AppFileLogger.Info("MainWindow constructor started.");
         InitializeComponent();
+        AppFileLogger.Info("MainWindow InitializeComponent completed.");
+
+        AppFileLogger.Info("Creating synchronized playback service.");
+        var playbackService = new NAudioSynchronizedPlaybackService();
+        AppFileLogger.Info("Synchronized playback service created.");
+
+        _viewModel = new MainWindowViewModel(playbackService);
+        AppFileLogger.Info("MainWindowViewModel created.");
+
         DataContext = _viewModel;
         _playbackTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -30,30 +41,53 @@ public partial class MainWindow : Window
         _playbackTimer.Tick += PlaybackTimer_Tick;
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
+        AppFileLogger.Info("MainWindow constructor completed.");
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
+        AppFileLogger.Info("MainWindow Loaded started.");
         _playbackTimer.Start();
-        await _viewModel.LoadAsync();
 
-        // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
-        if (_viewModel.Libraries.Count == 0)
+        try
         {
-            var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
-            var dialog = new NewLibraryDialog(service) { Owner = this };
-            if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
+            await _viewModel.LoadAsync();
+            AppFileLogger.Info($"MainWindowViewModel LoadAsync completed. Libraries={_viewModel.Libraries.Count}");
+
+            // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
+            if (_viewModel.Libraries.Count == 0)
             {
-                await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
+                AppFileLogger.Info("No libraries found. Opening NewLibraryDialog.");
+                var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
+                var dialog = new NewLibraryDialog(service) { Owner = this };
+                if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
+                {
+                    AppFileLogger.Info($"Library created. LibraryId={dialog.CreatedLibrary.Id}");
+                    await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
+                    AppFileLogger.Info("Reload after library creation completed.");
+                }
+                else
+                {
+                    AppFileLogger.Info("NewLibraryDialog closed without creating a library.");
+                }
             }
+
+            AppFileLogger.Info("MainWindow Loaded completed.");
+        }
+        catch (Exception exception)
+        {
+            AppFileLogger.Error("MainWindow Loaded failed.", exception);
+            throw;
         }
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        AppFileLogger.Info("MainWindow closing.");
         _playbackTimer.Stop();
         _viewModel.Dispose();
+        AppFileLogger.Info("MainWindow closed and ViewModel disposed.");
     }
 
     private void PlaybackTimer_Tick(object? sender, EventArgs e)
