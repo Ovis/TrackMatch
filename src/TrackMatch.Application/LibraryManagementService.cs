@@ -1,4 +1,5 @@
 using TrackMatch.Core.Libraries;
+using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
 
 namespace TrackMatch.Application;
@@ -6,11 +7,25 @@ namespace TrackMatch.Application;
 /// <summary>
 /// GUIから利用するLibrary/Root管理操作を1つの境界へ集約する。
 /// </summary>
-public sealed class LibraryManagementService(string databasePath)
+public sealed class LibraryManagementService
 {
-    private readonly string _databasePath = string.IsNullOrWhiteSpace(databasePath)
-        ? throw new ArgumentException("Database path is required.", nameof(databasePath))
-        : databasePath;
+    private readonly string _databasePath;
+    private readonly string? _trashRoot;
+
+    /// <summary>
+    /// Library管理Serviceを生成する。
+    /// </summary>
+    /// <param name="databasePath">TrackMatch SQLite DB Path</param>
+    /// <param name="trashRoot">設定済みApp-wide Trash Root。未設定ならnull</param>
+    public LibraryManagementService(string databasePath, string? trashRoot = null)
+    {
+        _databasePath = string.IsNullOrWhiteSpace(databasePath)
+            ? throw new ArgumentException("Database path is required.", nameof(databasePath))
+            : databasePath;
+        _trashRoot = string.IsNullOrWhiteSpace(trashRoot)
+            ? null
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(trashRoot));
+    }
 
     /// <summary>
     /// Library一覧をRoot込みで取得する。
@@ -29,6 +44,7 @@ public sealed class LibraryManagementService(string databasePath)
         IReadOnlyCollection<string> rootPaths,
         CancellationToken cancellationToken = default)
     {
+        ValidateAgainstTrash(rootPaths);
         var database = await OpenDatabaseAsync(cancellationToken);
         return await new SqliteLibraryRepository(database).CreateAsync(name, rootPaths, cancellationToken);
     }
@@ -43,10 +59,11 @@ public sealed class LibraryManagementService(string databasePath)
     }
 
     /// <summary>
-    /// LibraryへRootを追加する。
+    /// Trash Rootとの配置を検証してLibraryへRootを追加する。
     /// </summary>
     public async Task<LibraryRoot> AddRootAsync(long libraryId, string rootPath, CancellationToken cancellationToken = default)
     {
+        ValidateAgainstTrash([rootPath]);
         var database = await OpenDatabaseAsync(cancellationToken);
         return await new SqliteLibraryRepository(database).AddRootAsync(libraryId, rootPath, cancellationToken);
     }
@@ -88,7 +105,7 @@ public sealed class LibraryManagementService(string databasePath)
     }
 
     /// <summary>
-    /// Root保存場所変更の適用前Previewを作成する。
+    /// Trash Rootとの配置を検証し、Root保存場所変更の適用前Previewを作成する。
     /// </summary>
     public async Task<LibraryRootRemapPreview> PreviewRootRemapAsync(
         long libraryId,
@@ -96,13 +113,14 @@ public sealed class LibraryManagementService(string databasePath)
         string newRootPath,
         CancellationToken cancellationToken = default)
     {
+        ValidateAgainstTrash([newRootPath]);
         var database = await OpenDatabaseAsync(cancellationToken);
         return await new SqliteLibraryRootRemapService(database)
             .PreviewAsync(libraryId, rootId, newRootPath, cancellationToken);
     }
 
     /// <summary>
-    /// Preview済みRoot保存場所変更を適用する。
+    /// Trash Rootとの配置を再検証し、Preview済みRoot保存場所変更を適用する。
     /// </summary>
     public async Task<LibraryRootRemapResult> RemapRootAsync(
         long libraryId,
@@ -110,9 +128,18 @@ public sealed class LibraryManagementService(string databasePath)
         string newRootPath,
         CancellationToken cancellationToken = default)
     {
+        ValidateAgainstTrash([newRootPath]);
         var database = await OpenDatabaseAsync(cancellationToken);
         return await new SqliteLibraryRootRemapService(database)
             .ApplyAsync(libraryId, rootId, newRootPath, cancellationToken);
+    }
+
+    private void ValidateAgainstTrash(IEnumerable<string> rootPaths)
+    {
+        if (_trashRoot is not null)
+        {
+            TrashPathRules.ValidateRootSeparation(_trashRoot, rootPaths);
+        }
     }
 
     private async Task<SqliteDatabase> OpenDatabaseAsync(CancellationToken cancellationToken)

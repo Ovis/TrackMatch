@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;
+using TrackMatch.Core.Trash;
 
 namespace TrackMatch.App;
 
@@ -40,7 +41,7 @@ public partial class MainWindow : Window
         // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
         if (_viewModel.Libraries.Count == 0)
         {
-            var service = new LibraryManagementService(_viewModel.DatabasePath);
+            var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
             var dialog = new NewLibraryDialog(service) { Owner = this };
             if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
             {
@@ -69,7 +70,7 @@ public partial class MainWindow : Window
     private async void ManageLibraries_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new LibraryManagementDialog(
-            new LibraryManagementService(_viewModel.DatabasePath),
+            new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot),
             _viewModel.SelectedLibrary?.Id)
         {
             Owner = this,
@@ -96,14 +97,13 @@ public partial class MainWindow : Window
 
     private async void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
+        try
         {
-            Title = "Trashのルートフォルダを選択",
-            Multiselect = false,
-        };
-        if (dialog.ShowDialog(this) == true)
+            await PickAndSetTrashRootAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
         {
-            await _viewModel.SetTrashRootAsync(dialog.FolderName);
+            MessageBox.Show(this, exception.Message, "Trash Root設定失敗", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -111,15 +111,21 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (!await EnsureTrashRootAsync())
+            {
+                return;
+            }
+
             var result = await _viewModel.ProcessTrashAsync(execute: false);
             if (result is null)
             {
                 return;
             }
 
+            var collisions = result.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
             MessageBox.Show(
                 this,
-                $"移動可能: {result.ReadyCount}件\nBlocked: {result.BlockedCount}件\n\n実際のファイル移動はまだ行っていません。",
+                $"移動可能: {result.ReadyCount}件\nCollision: {collisions}件\nBlocked: {result.BlockedCount}件\n\n実際のファイル移動はまだ行っていません。",
                 "Trash Dry-run",
                 MessageBoxButton.OK,
                 result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
@@ -132,21 +138,53 @@ public partial class MainWindow : Window
 
     private async void ExecuteTrash_Click(object sender, RoutedEventArgs e)
     {
-        var confirmation = MessageBox.Show(
-            this,
-            "ConfirmedDuplicateで破棄対象にしたファイルをTrashへ移動します。\n元ファイルの場所から実際に移動されます。続行しますか？",
-            "Trashへ移動",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
-        if (confirmation != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
         try
         {
-            var result = await _viewModel.ProcessTrashAsync(execute: true);
+            if (!await EnsureTrashRootAsync())
+            {
+                return;
+            }
+
+            var preview = await _viewModel.ProcessTrashAsync(execute: false);
+            if (preview is null)
+            {
+                return;
+            }
+
+            var collisionBehavior = TrashDestinationCollisionBehavior.Skip;
+            var collisions = preview.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
+            if (collisions > 0)
+            {
+                var collisionChoice = MessageBox.Show(
+                    this,
+                    $"Trash側に同じPathのファイルが {collisions} 件あります。\n\nはい: Track (2).flac のような最小Available番号で別名移動\nいいえ: Collisionしたファイルをスキップ\nキャンセル: Trash処理を中止",
+                    "Destination Collision",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.Cancel);
+                if (collisionChoice == MessageBoxResult.Cancel)
+                {
+                    return;
+                }
+
+                collisionBehavior = collisionChoice == MessageBoxResult.Yes
+                    ? TrashDestinationCollisionBehavior.Rename
+                    : TrashDestinationCollisionBehavior.Skip;
+            }
+
+            var confirmation = MessageBox.Show(
+                this,
+                "ConfirmedDuplicateで破棄対象にしたファイルをTrashへ移動します。\n元ファイルの場所から実際に移動されます。続行しますか？",
+                "Trashへ移動",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            var result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
             if (result is null)
             {
                 return;
@@ -154,7 +192,7 @@ public partial class MainWindow : Window
 
             MessageBox.Show(
                 this,
-                $"移動完了: {result.MovedCount}件\nBlocked: {result.BlockedCount}件",
+                $"移動完了: {result.MovedCount}件\nBlocked / Skipped: {result.BlockedCount}件",
                 "Trash移動結果",
                 MessageBoxButton.OK,
                 result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
@@ -163,6 +201,35 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>
+    /// Trash Root未設定時だけFolder Pickerを表示し、設定後は呼出元のTrash操作をそのまま続行できるようにする。
+    /// </summary>
+    private async Task<bool> EnsureTrashRootAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot))
+        {
+            return true;
+        }
+
+        return await PickAndSetTrashRootAsync();
+    }
+
+    private async Task<bool> PickAndSetTrashRootAsync()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Trashのルートフォルダを選択",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return false;
+        }
+
+        await _viewModel.SetTrashRootAsync(dialog.FolderName);
+        return true;
     }
 
     private void PlaybackPlayPause_Click(object sender, RoutedEventArgs e)

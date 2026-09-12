@@ -152,11 +152,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CanManageLibraries => !IsLoading && !IsAnalyzing;
 
-    // TrashのLibrary-wide再設計は後続PRで行う。移行中は単一Root Libraryだけ従来処理を許可する。
+    // Trash Root未設定でも操作開始時のFolder Pickerで設定して続行できるため、ここではLibrary選択だけを要件にする。
     public bool CanProcessTrash => !IsLoading
         && !IsAnalyzing
-        && SelectedLibrary?.Roots.Count == 1
-        && !string.IsNullOrWhiteSpace(TrashRoot)
+        && SelectedLibrary is not null
         && File.Exists(DatabasePath);
 
     public string StatusText
@@ -237,7 +236,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(SimilarityDisplayLowerBoundPercent));
             }
 
-            var management = new LibraryManagementService(DatabasePath);
+            var management = new LibraryManagementService(DatabasePath, TrashRoot);
             var libraries = await management.GetLibrariesAsync();
             Libraries.Clear();
             foreach (var library in libraries)
@@ -287,12 +286,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
-    /// Trash RootをApp-wide設定として更新する。
+    /// 全Library Rootとの整合性を検証してTrash RootをApp-wide設定として更新する。
     /// </summary>
     public async Task SetTrashRootAsync(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        TrashRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        TrashPathRules.ValidateRootSeparation(
+            normalized,
+            Libraries.SelectMany(library => library.Roots).Select(root => root.Path));
+        TrashRoot = normalized;
         await SaveSettingsSafeAsync();
     }
 
@@ -354,7 +357,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(AnalysisErrorCount));
         }
 
-        // Scan中は開始時Snapshotを維持し、完了・Cancel・失敗後に初めてDBから一覧を入れ替える。
         IsLoading = true;
         try
         {
@@ -392,12 +394,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public Task ConfirmDuplicateKeepBAsync() => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdB);
 
-    public async Task<RejectedTrackTrashResult?> ProcessTrashAsync(bool execute)
+    /// <summary>
+    /// 選択LibraryのReject TrackをApp-wide TrashへPreviewまたは移動する。
+    /// </summary>
+    public async Task<RejectedTrackTrashResult?> ProcessTrashAsync(
+        bool execute,
+        TrashDestinationCollisionBehavior collisionBehavior = TrashDestinationCollisionBehavior.Skip)
     {
-        var root = SelectedLibrary?.Roots.SingleOrDefault();
-        if (!CanProcessTrash || root is null)
+        var library = SelectedLibrary;
+        if (!CanProcessTrash || library is null)
         {
-            TrashStatusText = "Trash処理は現在、Rootが1つのLibraryでのみ利用できます。";
+            TrashStatusText = "Libraryを選択してください。";
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(TrashRoot))
+        {
+            TrashStatusText = "Trash Rootを設定してください。";
             return null;
         }
 
@@ -405,6 +418,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         IsLoading = true;
         try
         {
+            TrashPathRules.ValidateRootSeparation(
+                TrashRoot,
+                Libraries.SelectMany(item => item.Roots).Select(root => root.Path));
+
             var database = new SqliteDatabase(DatabasePath);
             await database.InitializeAsync();
             var tracks = new SqliteTrackRepository(database);
@@ -413,7 +430,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 new SqliteTrackLookupRepository(database),
                 tracks,
                 new LocalTrackFileOperations());
-            var result = await service.ProcessAsync(root.Path, TrashRoot, execute);
+            var result = await service.ProcessAsync(library.Id, TrashRoot, execute, collisionBehavior);
             TrashStatusText = execute
                 ? $"Trash移動完了: {result.MovedCount}件 / Blocked: {result.BlockedCount}件"
                 : $"Dry-run: 移動可能 {result.ReadyCount}件 / Blocked: {result.BlockedCount}件";
@@ -469,7 +486,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             .Where(item => item.Row.Similarity >= minimum)
             .ToArray();
 
-        // 選択中CandidateがFilter外になる場合、旧Audioを流し続けないことを先に保証する。
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
         {
             StopPlayback();
