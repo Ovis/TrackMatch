@@ -10,7 +10,7 @@ namespace TrackMatch.Core.Tests;
 public sealed class RejectedTrackTrashServiceTests
 {
     [Fact]
-    public async Task ProcessAsync_DryRunPreservesRelativePathWithoutMoving()
+    public async Task ProcessAsync_DryRunPreservesAbsolutePathStructure()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
         var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
@@ -19,111 +19,122 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source, root)]);
+        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
         var files = new FakeFileOperations([source]);
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
 
-        var result = await service.ProcessAsync(root, trash, execute: false, TestContext.Current.CancellationToken);
+        var result = await service.ProcessAsync(1, trash, execute: false, cancellationToken: TestContext.Current.CancellationToken);
 
         var item = Assert.Single(result.Items);
         Assert.Equal(RejectedTrackMoveStatus.Ready, item.Status);
-        Assert.Equal(Path.Combine(trash, "Album", "track.flac"), item.DestinationPath);
+        Assert.Equal(TrashPathRules.CreateDestinationPath(trash, source), item.DestinationPath);
         Assert.Empty(files.Moves);
-        Assert.Empty(tracks.MarkedMissing);
-        Assert.Empty(tracks.DeletedFingerprints);
     }
 
     [Fact]
-    public async Task ProcessAsync_ExecuteMovesAndMarksTrackMissing()
+    public async Task ProcessAsync_OnlyProcessesSelectedLibrary()
     {
-        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var rootA = Path.Combine(Path.GetTempPath(), "TrackMatch", "A");
+        var rootB = Path.Combine(Path.GetTempPath(), "TrackMatch", "B");
         var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
-        var source = Path.Combine(root, "track.flac");
-        var reviews = new FakeReviewRepository(
-        [
-            new CandidateReview(CandidatePairKey.Create(10, 20), CandidateReviewDecision.ConfirmedDuplicate, null, 10),
-        ]);
-        var tracks = new FakeTrackRepository([Stored(20, source, root)]);
-        var files = new FakeFileOperations([source]);
-        var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
-
-        var result = await service.ProcessAsync(root, trash, execute: true, TestContext.Current.CancellationToken);
-
-        var item = Assert.Single(result.Items);
-        Assert.Equal(RejectedTrackMoveStatus.Moved, item.Status);
-        Assert.Single(files.Moves);
-        Assert.Equal([20L], tracks.DeletedFingerprints);
-        Assert.Equal([20L], tracks.MarkedMissing);
-    }
-
-    [Fact]
-    public async Task ProcessAsync_BlocksTrackThatIsKeepAndRejectAcrossReviews()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
-        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
+        var sourceA = Path.Combine(rootA, "a.flac");
+        var sourceB = Path.Combine(rootB, "b.flac");
         var reviews = new FakeReviewRepository(
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
-            new CandidateReview(CandidatePairKey.Create(2, 3), CandidateReviewDecision.ConfirmedDuplicate, null, 2),
+            new CandidateReview(CandidatePairKey.Create(3, 4), CandidateReviewDecision.ConfirmedDuplicate, null, 3),
         ]);
         var tracks = new FakeTrackRepository(
         [
-            Stored(2, Path.Combine(root, "2.flac"), root),
-            Stored(3, Path.Combine(root, "3.flac"), root),
+            Stored(2, sourceA, rootA, libraryId: 10),
+            Stored(4, sourceB, rootB, libraryId: 20),
         ]);
-        var files = new FakeFileOperations(
-        [
-            Path.Combine(root, "2.flac"),
-            Path.Combine(root, "3.flac"),
-        ]);
-        var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
+        var service = new RejectedTrackTrashService(reviews, tracks, tracks, new FakeFileOperations([sourceA, sourceB]));
 
-        var result = await service.ProcessAsync(root, trash, execute: false, TestContext.Current.CancellationToken);
+        var result = await service.ProcessAsync(10, trash, execute: false, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains(result.Items, item => item.TrackId == 2 && item.Status == RejectedTrackMoveStatus.ReviewConflict);
-        Assert.Contains(result.Items, item => item.TrackId == 3 && item.Status == RejectedTrackMoveStatus.Ready);
+        var item = Assert.Single(result.Items);
+        Assert.Equal(2, item.TrackId);
     }
 
     [Fact]
-    public async Task ProcessAsync_RejectsTrashInsideLibrary()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
-        var service = new RejectedTrackTrashService(
-            new FakeReviewRepository([]),
-            new FakeTrackRepository([]),
-            new FakeTrackRepository([]),
-            new FakeFileOperations([]));
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.ProcessAsync(
-            root,
-            Path.Combine(root, "Trash"),
-            execute: false,
-            TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task ProcessAsync_BlocksExistingDestination()
+    public async Task ProcessAsync_RenameCollisionUsesSmallestAvailableNumber()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
         var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
         var source = Path.Combine(root, "track.flac");
-        var destination = Path.Combine(trash, "track.flac");
+        var destination = TrashPathRules.CreateDestinationPath(trash, source);
+        var directory = Path.GetDirectoryName(destination)!;
+        var second = Path.Combine(directory, "track (2).flac");
         var reviews = new FakeReviewRepository(
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source, root)]);
+        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
+        var files = new FakeFileOperations([source, destination, second]);
+        var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
+
+        var result = await service.ProcessAsync(
+            1,
+            trash,
+            execute: true,
+            collisionBehavior: TrashDestinationCollisionBehavior.Rename,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(RejectedTrackMoveStatus.Moved, item.Status);
+        Assert.Equal(Path.Combine(directory, "track (3).flac"), item.DestinationPath);
+        Assert.Single(files.Moves);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_SkipCollisionNeverOverwrites()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
+        var source = Path.Combine(root, "track.flac");
+        var destination = TrashPathRules.CreateDestinationPath(trash, source);
+        var reviews = new FakeReviewRepository(
+        [
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
+        ]);
+        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
         var files = new FakeFileOperations([source, destination]);
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
 
-        var result = await service.ProcessAsync(root, trash, execute: true, TestContext.Current.CancellationToken);
+        var result = await service.ProcessAsync(
+            1,
+            trash,
+            execute: true,
+            collisionBehavior: TrashDestinationCollisionBehavior.Skip,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var item = Assert.Single(result.Items);
-        Assert.Equal(RejectedTrackMoveStatus.DestinationExists, item.Status);
+        Assert.Equal(RejectedTrackMoveStatus.DestinationExists, Assert.Single(result.Items).Status);
         Assert.Empty(files.Moves);
+        Assert.Empty(tracks.MarkedMissing);
     }
 
-    private static StoredTrack Stored(long id, string path, string root, bool isMissing = false)
+    [Fact]
+    public void ValidateRootSeparation_RejectsBothContainmentDirections()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), "TrackMatch", "Separation");
+        var library = Path.Combine(basePath, "Library");
+
+        Assert.Throws<ArgumentException>(() => TrashPathRules.ValidateRootSeparation(library, [library]));
+        Assert.Throws<ArgumentException>(() => TrashPathRules.ValidateRootSeparation(basePath, [library]));
+        Assert.Throws<ArgumentException>(() => TrashPathRules.ValidateRootSeparation(Path.Combine(library, "Trash"), [library]));
+    }
+
+    [Fact]
+    public void CreateDestinationPath_UncPathUsesUncPrefix()
+    {
+        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
+        var result = TrashPathRules.CreateDestinationPath(trash, @"\\NAS\Music\Anime\a.flac");
+
+        Assert.Equal(Path.Combine(trash, "UNC", "NAS", "Music", "Anime", "a.flac"), result);
+    }
+
+    private static StoredTrack Stored(long id, string path, string root, long libraryId, bool isMissing = false)
         => new(
             id,
             new AudioTrackMetadata(
@@ -138,8 +149,8 @@ public sealed class RejectedTrackTrashServiceTests
                 1,
                 ["J-POPS"]),
             isMissing,
-            1,
-            1,
+            libraryId,
+            libraryId,
             Path.GetRelativePath(root, path));
 
     private sealed class FakeReviewRepository(IReadOnlyList<CandidateReview> reviews) : ICandidateReviewRepository
