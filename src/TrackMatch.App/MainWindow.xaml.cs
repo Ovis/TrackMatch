@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
@@ -18,6 +19,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan OffsetStep = TimeSpan.FromMilliseconds(10);
     private readonly MainWindowViewModel _viewModel = new(new NAudioSynchronizedPlaybackService());
     private readonly DispatcherTimer _playbackTimer;
+    private bool _isPlaybackSeekPointerActive;
 
     public MainWindow()
     {
@@ -28,6 +30,8 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(50),
         };
         _playbackTimer.Tick += PlaybackTimer_Tick;
+        PlaybackSeekSlider.PreviewMouseLeftButtonDown += PlaybackSeekSlider_PreviewMouseLeftButtonDown;
+        AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }
@@ -35,6 +39,11 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
+
+        // WPF Sliderの既定動作はトラッククリック時にLargeChange分だけ移動する。
+        // 再生位置と音量はクリック位置へ直接移動する方が操作意図に一致するため、この画面のSliderへ統一して適用する。
+        EnableMoveToPointForSliders(this);
+
         _playbackTimer.Start();
         await _viewModel.LoadAsync();
 
@@ -57,7 +66,14 @@ public partial class MainWindow : Window
     }
 
     private void PlaybackTimer_Tick(object? sender, EventArgs e)
-        => _viewModel.Playback.RefreshPosition();
+    {
+        // Slider操作中に再生位置を50ms周期で上書きするとThumbが再生位置へ引き戻されるため、
+        // ポインター操作が終わるまでは表示更新を止め、MouseUpで確定した位置から再開する。
+        if (!_isPlaybackSeekPointerActive)
+        {
+            _viewModel.Playback.RefreshPosition();
+        }
+    }
 
     private async void LibraryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -238,8 +254,23 @@ public partial class MainWindow : Window
     private void PlaybackStop_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.Stop();
 
+    private void PlaybackSeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _isPlaybackSeekPointerActive = true;
+
     private void PlaybackSeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-        => _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+    {
+        _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+        _isPlaybackSeekPointerActive = false;
+    }
+
+    private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Left && !PlaybackSeekSlider.IsMouseCaptureWithin)
+        {
+            // Slider外でボタンを離した場合にも更新抑止状態を残さない。
+            _isPlaybackSeekPointerActive = false;
+        }
+    }
 
     private void PlaybackSeekSlider_KeyUp(object sender, KeyEventArgs e)
     {
@@ -299,6 +330,23 @@ public partial class MainWindow : Window
 
     private void ResetOffset_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.ResetOffsetToAnalysis();
+
+    /// <summary>
+    /// Main Window配下のSliderを、トラッククリック時にクリック位置へ直接移動する操作へ統一する。
+    /// </summary>
+    private static void EnableMoveToPointForSliders(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is Slider slider)
+            {
+                slider.IsMoveToPointEnabled = true;
+            }
+
+            EnableMoveToPointForSliders(child);
+        }
+    }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
 
