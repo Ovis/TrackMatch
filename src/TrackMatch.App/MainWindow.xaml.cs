@@ -26,10 +26,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
-        _playbackTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(50),
-        };
+        _playbackTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _playbackTimer.Tick += PlaybackTimer_Tick;
         PlaybackSeekSlider.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_PreviewMouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
@@ -40,23 +37,15 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
-
-        // WPF Sliderの既定動作はトラッククリック時にLargeChange分だけ移動する。
-        // 再生位置と音量はクリック位置へ直接移動する方が操作意図に一致するため、この画面のSliderへ統一して適用する。
         EnableMoveToPointForSliders(this);
-
         _playbackTimer.Start();
         await _viewModel.LoadAsync();
-
-        // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
         if (_viewModel.Libraries.Count == 0)
         {
             var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
             var dialog = new NewLibraryDialog(service) { Owner = this };
             if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
-            {
                 await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
-            }
         }
     }
 
@@ -68,217 +57,102 @@ public partial class MainWindow : Window
 
     private void PlaybackTimer_Tick(object? sender, EventArgs e)
     {
-        // Slider操作中に再生位置を50ms周期で上書きするとThumbが再生位置へ引き戻されるため、
-        // ポインター操作が終わるまでは表示更新を止め、MouseUpで確定した位置から再開する。
-        if (!_isPlaybackSeekPointerActive)
-        {
-            _viewModel.Playback.RefreshPosition();
-        }
+        // Slider操作中に50ms周期の再生位置更新を入れるとThumbが旧位置へ戻るため、操作完了まで更新を止める。
+        if (!_isPlaybackSeekPointerActive) _viewModel.Playback.RefreshPosition();
     }
 
     private async void LibraryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LibraryComboBox.SelectedItem is Library library)
-        {
-            await _viewModel.SelectLibraryAsync(library);
-        }
+        if (LibraryComboBox.SelectedItem is Library library) await _viewModel.SelectLibraryAsync(library);
     }
 
     private async void ManageLibraries_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new LibraryManagementDialog(
             new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot),
-            _viewModel.SelectedLibrary?.Id)
-        {
-            Owner = this,
-        };
+            _viewModel.SelectedLibrary?.Id,
+            _viewModel.TrashRoot) { Owner = this };
         dialog.ShowDialog();
+        if (!string.Equals(dialog.SelectedTrashRoot, _viewModel.TrashRoot, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(dialog.SelectedTrashRoot))
+        {
+            try { await _viewModel.SetTrashRootAsync(dialog.SelectedTrashRoot); }
+            catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+            { MessageBox.Show(this, exception.Message, "Trash Root設定失敗", MessageBoxButton.OK, MessageBoxImage.Error); }
+        }
         await _viewModel.LoadAsync(dialog.SelectedLibraryId);
     }
 
-    private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.AnalyzeLibraryAsync();
-
-    private void CancelAnalysis_Click(object sender, RoutedEventArgs e)
-        => _viewModel.CancelAnalysis();
+    private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e) => await _viewModel.AnalyzeLibraryAsync();
+    private void CancelAnalysis_Click(object sender, RoutedEventArgs e) => _viewModel.CancelAnalysis();
 
     private void ShowAnalysisErrors_Click(object sender, RoutedEventArgs e)
     {
-        if (_viewModel.AnalysisErrors.Count == 0)
-        {
-            return;
-        }
-
-        new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
+        if (_viewModel.AnalysisErrors.Count > 0) new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
     }
 
-    private async void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
+    private void CandidateTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        try
+        if (!ReferenceEquals(e.Source, CandidateTabs)) return;
+        _viewModel.CandidateListMode = CandidateTabs.SelectedIndex switch
         {
-            await PickAndSetTrashRootAsync();
-        }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
-        {
-            MessageBox.Show(this, exception.Message, "Trash Root設定失敗", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private async void PreviewTrash_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!await EnsureTrashRootAsync())
-            {
-                return;
-            }
-
-            var result = await _viewModel.ProcessTrashAsync(execute: false);
-            if (result is null)
-            {
-                return;
-            }
-
-            var collisions = result.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
-            MessageBox.Show(
-                this,
-                $"移動可能: {result.ReadyCount}件\nCollision: {collisions}件\nBlocked: {result.BlockedCount}件\n\n実際のファイル移動はまだ行っていません。",
-                "Trash Dry-run",
-                MessageBoxButton.OK,
-                result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+            1 => CandidateReviewListMode.Reviewed,
+            2 => CandidateReviewListMode.All,
+            _ => CandidateReviewListMode.Unreviewed,
+        };
     }
 
     private async void ExecuteTrash_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            if (!await EnsureTrashRootAsync())
-            {
-                return;
-            }
-
+            if (!await EnsureTrashRootAsync()) return;
             var preview = await _viewModel.ProcessTrashAsync(execute: false);
-            if (preview is null)
-            {
-                return;
-            }
-
+            if (preview is null) return;
             var collisionBehavior = TrashDestinationCollisionBehavior.Skip;
             var collisions = preview.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
             if (collisions > 0)
             {
-                var collisionChoice = MessageBox.Show(
-                    this,
+                var collisionChoice = MessageBox.Show(this,
                     $"Trash側に同じPathのファイルが {collisions} 件あります。\n\nはい: Track (2).flac のような最小Available番号で別名移動\nいいえ: Collisionしたファイルをスキップ\nキャンセル: Trash処理を中止",
-                    "Destination Collision",
-                    MessageBoxButton.YesNoCancel,
-                    MessageBoxImage.Warning,
-                    MessageBoxResult.Cancel);
-                if (collisionChoice == MessageBoxResult.Cancel)
-                {
-                    return;
-                }
-
-                collisionBehavior = collisionChoice == MessageBoxResult.Yes
-                    ? TrashDestinationCollisionBehavior.Rename
-                    : TrashDestinationCollisionBehavior.Skip;
+                    "Destination Collision", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+                if (collisionChoice == MessageBoxResult.Cancel) return;
+                collisionBehavior = collisionChoice == MessageBoxResult.Yes ? TrashDestinationCollisionBehavior.Rename : TrashDestinationCollisionBehavior.Skip;
             }
 
-            var confirmation = MessageBox.Show(
-                this,
-                "ConfirmedDuplicateで破棄対象にしたファイルをTrashへ移動します。\n元ファイルの場所から実際に移動されます。続行しますか？",
-                "Trashへ移動",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning,
-                MessageBoxResult.No);
-            if (confirmation != MessageBoxResult.Yes)
-            {
-                return;
-            }
-
+            var confirmation = MessageBox.Show(this,
+                $"レビュー済みの破棄対象 {preview.ReadyCount} 件をTrashへ移動します。\n元ファイルの場所から実際に移動されます。続行しますか？",
+                "Trashへ移動", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes) return;
             var result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
-            if (result is null)
-            {
-                return;
-            }
-
-            MessageBox.Show(
-                this,
-                $"移動完了: {result.MovedCount}件\nBlocked / Skipped: {result.BlockedCount}件",
-                "Trash移動結果",
-                MessageBoxButton.OK,
-                result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            if (result is not null)
+                MessageBox.Show(this, $"移動完了: {result.MovedCount}件\nBlocked / Skipped: {result.BlockedCount}件", "Trash移動結果", MessageBoxButton.OK,
+                    result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception exception)
-        {
-            MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        { MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
-    /// <summary>
-    /// Trash Root未設定時だけFolder Pickerを表示し、設定後は呼出元のTrash操作をそのまま続行できるようにする。
-    /// </summary>
     private async Task<bool> EnsureTrashRootAsync()
     {
-        if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot))
-        {
-            return true;
-        }
-
-        return await PickAndSetTrashRootAsync();
-    }
-
-    private async Task<bool> PickAndSetTrashRootAsync()
-    {
-        var dialog = new OpenFolderDialog
-        {
-            Title = "Trashのルートフォルダを選択",
-            Multiselect = false,
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return false;
-        }
-
+        if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot)) return true;
+        var dialog = new OpenFolderDialog { Title = "Trashのルートフォルダを選択", Multiselect = false };
+        if (dialog.ShowDialog(this) != true) return false;
         await _viewModel.SetTrashRootAsync(dialog.FolderName);
         return true;
     }
 
-    private void PlaybackPlayPause_Click(object sender, RoutedEventArgs e)
-        => _viewModel.Playback.TogglePlayPause();
-
-    private void PlaybackStop_Click(object sender, RoutedEventArgs e)
-        => _viewModel.Playback.Stop();
+    private void PlaybackPlayPause_Click(object sender, RoutedEventArgs e) => _viewModel.Playback.TogglePlayPause();
+    private void PlaybackStop_Click(object sender, RoutedEventArgs e) => _viewModel.Playback.Stop();
 
     private void PlaybackSeekSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-        {
-            return;
-        }
-
-        // MouseDownからMouseUpまで再生位置の定期更新を止める。
-        // トラッククリック時もWPFがValueを確定する前にタイマーで旧位置を書き戻さないようにする。
+        if (e.ChangedButton != MouseButton.Left) return;
         _isPlaybackSeekPointerActive = true;
-
-        if (IsWithinThumb(e.OriginalSource as DependencyObject))
-        {
-            return;
-        }
-
-        // IsMoveToPointEnabledによるValue更新はPreviewMouseDownより後で行われるため、
-        // 現在の入力イベントが完了した後にSeekする。Input優先度ならBackgroundの50ms更新より先に実行される。
+        if (IsWithinThumb(e.OriginalSource as DependencyObject)) return;
+        // IsMoveToPointEnabledがValueを確定した後、Backgroundの位置更新より先にSeekする。
         Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
         {
-            if (_isPlaybackSeekPointerActive)
-            {
-                _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
-            }
+            if (_isPlaybackSeekPointerActive) _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
         });
     }
 
@@ -290,110 +164,51 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton == MouseButton.Left
-            && !PlaybackSeekSlider.IsMouseOver
-            && !PlaybackSeekSlider.IsMouseCaptureWithin)
-        {
-            // Slider外でボタンを離した場合にも更新抑止状態を残さない。
+        if (e.ChangedButton == MouseButton.Left && !PlaybackSeekSlider.IsMouseOver && !PlaybackSeekSlider.IsMouseCaptureWithin)
             _isPlaybackSeekPointerActive = false;
-        }
     }
 
     private void PlaybackSeekSlider_KeyUp(object sender, KeyEventArgs e)
     {
         if (e.Key is Key.Left or Key.Right or Key.Home or Key.End or Key.PageUp or Key.PageDown)
-        {
             _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
-        }
     }
 
-    private void PlaybackPositionTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            _viewModel.Playback.CommitPositionText(PlaybackPositionTextBox.Text);
-            e.Handled = true;
-        }
-    }
-
-    private void PlaybackPositionTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-        => _viewModel.Playback.CommitPositionText(PlaybackPositionTextBox.Text);
-
-    private void OffsetAMinus_Click(object sender, RoutedEventArgs e)
-        => _viewModel.Playback.AdjustOffset(isTrackA: true, -OffsetStep);
-
-    private void OffsetAPlus_Click(object sender, RoutedEventArgs e)
-        => _viewModel.Playback.AdjustOffset(isTrackA: true, OffsetStep);
-
-    private void OffsetBMinus_Click(object sender, RoutedEventArgs e)
+    private void RelativeOffsetMinus_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.AdjustOffset(isTrackA: false, -OffsetStep);
 
-    private void OffsetBPlus_Click(object sender, RoutedEventArgs e)
+    private void RelativeOffsetPlus_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.AdjustOffset(isTrackA: false, OffsetStep);
 
-    private void OffsetATextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            _viewModel.Playback.CommitOffsetText(isTrackA: true, OffsetATextBox.Text);
-            e.Handled = true;
-        }
-    }
+    private void ResetOffset_Click(object sender, RoutedEventArgs e) => _viewModel.Playback.ResetOffsetToAnalysis();
 
-    private void OffsetATextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-        => _viewModel.Playback.CommitOffsetText(isTrackA: true, OffsetATextBox.Text);
-
-    private void OffsetBTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            _viewModel.Playback.CommitOffsetText(isTrackA: false, OffsetBTextBox.Text);
-            e.Handled = true;
-        }
-    }
-
-    private void OffsetBTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-        => _viewModel.Playback.CommitOffsetText(isTrackA: false, OffsetBTextBox.Text);
-
-    private void ResetOffset_Click(object sender, RoutedEventArgs e)
-        => _viewModel.Playback.ResetOffsetToAnalysis();
-
-    /// <summary>
-    /// Main Window配下のSliderを、トラッククリック時にクリック位置へ直接移動する操作へ統一する。
-    /// </summary>
     private static void EnableMoveToPointForSliders(DependencyObject root)
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is Slider slider)
-            {
-                slider.IsMoveToPointEnabled = true;
-            }
-
+            if (child is Slider slider) slider.IsMoveToPointEnabled = true;
             EnableMoveToPointForSliders(child);
         }
     }
 
-    /// <summary>
-    /// クリック元がSliderのThumb内部かを判定する。Thumb操作はWPF標準のドラッグ処理へ任せる。
-    /// </summary>
     private static bool IsWithinThumb(DependencyObject? source)
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
-        {
-            if (current is Thumb)
-            {
-                return true;
-            }
-        }
-
+            if (current is Thumb) return true;
         return false;
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
-
     private async void KeepA_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepAAsync();
-
     private async void KeepB_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepBAsync();
+
+    private async void ClearReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.CanClearReview) return;
+        var confirmation = MessageBox.Show(this,
+            "この候補のレビュー結果を削除して未レビューへ戻します。\nTrashへ移動済みのファイルは自動では元に戻りません。続行しますか？",
+            "レビューを未確定に戻す", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirmation == MessageBoxResult.Yes) await _viewModel.ClearReviewAsync();
+    }
 }
