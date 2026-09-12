@@ -1,6 +1,8 @@
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;
@@ -12,12 +14,19 @@ namespace TrackMatch.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private readonly MainWindowViewModel _viewModel = new(new WpfMediaPlayerTrackPlaybackService());
+    private static readonly TimeSpan OffsetStep = TimeSpan.FromMilliseconds(10);
+    private readonly MainWindowViewModel _viewModel = new(new NAudioSynchronizedPlaybackService());
+    private readonly DispatcherTimer _playbackTimer;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = _viewModel;
+        _playbackTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(50),
+        };
+        _playbackTimer.Tick += PlaybackTimer_Tick;
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }
@@ -25,6 +34,7 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
+        _playbackTimer.Start();
         await _viewModel.LoadAsync();
 
         // 初回利用でLibraryが無い場合だけ作成Dialogを自動表示する。Cancel時は空のMain Windowをそのまま利用できる。
@@ -40,7 +50,13 @@ public partial class MainWindow : Window
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
-        => _viewModel.Dispose();
+    {
+        _playbackTimer.Stop();
+        _viewModel.Dispose();
+    }
+
+    private void PlaybackTimer_Tick(object? sender, EventArgs e)
+        => _viewModel.Playback.RefreshPosition();
 
     private async void LibraryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -149,11 +165,73 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PlayA_Click(object sender, RoutedEventArgs e) => _viewModel.PlayTrackA();
+    private void PlaybackPlayPause_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.TogglePlayPause();
 
-    private void StopPlayback_Click(object sender, RoutedEventArgs e) => _viewModel.StopPlayback();
+    private void PlaybackStop_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.Stop();
 
-    private void PlayB_Click(object sender, RoutedEventArgs e) => _viewModel.PlayTrackB();
+    private void PlaybackSeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        => _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+
+    private void PlaybackSeekSlider_KeyUp(object sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Left or Key.Right or Key.Home or Key.End or Key.PageUp or Key.PageDown)
+        {
+            _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+        }
+    }
+
+    private void PlaybackPositionTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            _viewModel.Playback.CommitPositionText(PlaybackPositionTextBox.Text);
+            e.Handled = true;
+        }
+    }
+
+    private void PlaybackPositionTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        => _viewModel.Playback.CommitPositionText(PlaybackPositionTextBox.Text);
+
+    private void OffsetAMinus_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.AdjustOffset(isTrackA: true, -OffsetStep);
+
+    private void OffsetAPlus_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.AdjustOffset(isTrackA: true, OffsetStep);
+
+    private void OffsetBMinus_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.AdjustOffset(isTrackA: false, -OffsetStep);
+
+    private void OffsetBPlus_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.AdjustOffset(isTrackA: false, OffsetStep);
+
+    private void OffsetATextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            _viewModel.Playback.CommitOffsetText(isTrackA: true, OffsetATextBox.Text);
+            e.Handled = true;
+        }
+    }
+
+    private void OffsetATextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        => _viewModel.Playback.CommitOffsetText(isTrackA: true, OffsetATextBox.Text);
+
+    private void OffsetBTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            _viewModel.Playback.CommitOffsetText(isTrackA: false, OffsetBTextBox.Text);
+            e.Handled = true;
+        }
+    }
+
+    private void OffsetBTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        => _viewModel.Playback.CommitOffsetText(isTrackA: false, OffsetBTextBox.Text);
+
+    private void ResetOffset_Click(object sender, RoutedEventArgs e)
+        => _viewModel.Playback.ResetOffsetToAnalysis();
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
 

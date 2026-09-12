@@ -42,6 +42,10 @@ public sealed class CandidateReviewItemViewModel(CandidateReviewReportRow row)
 
     public string DurationRatio => Row.DurationRatio.ToString("P2");
 
+    public string BestOffset => $"{Row.BestOffset.TotalSeconds:+0.000;-0.000;0.000} s";
+
+    public string MatchedDuration => FormatDuration(Row.MatchedDuration);
+
     public string DurationA => FormatDuration(Row.DurationA);
 
     public string DurationB => FormatDuration(Row.DurationB);
