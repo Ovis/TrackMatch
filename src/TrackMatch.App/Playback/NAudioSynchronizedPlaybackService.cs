@@ -26,6 +26,8 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
     private WasapiPlayer? _player;
     private SoundFileReader? _readerA;
     private SoundFileReader? _readerB;
+    private FileStream? _streamA;
+    private FileStream? _streamB;
     private SynchronizedPairSampleProvider? _pairProvider;
     private TimeSpan _pipelineStartPosition;
     private bool _disposed;
@@ -181,8 +183,10 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
             // Candidate切替時は前Candidateの一時状態を持ち越さない。
             _pathA = Path.GetFullPath(pathA);
             _pathB = Path.GetFullPath(pathB);
-            using (var readerA = new SoundFileReader(_pathA))
-            using (var readerB = new SoundFileReader(_pathB))
+            using (var streamA = OpenAudioStream(_pathA))
+            using (var streamB = OpenAudioStream(_pathB))
+            using (var readerA = new SoundFileReader(streamA))
+            using (var readerB = new SoundFileReader(streamB))
             {
                 _durationA = readerA.TotalTime;
                 _durationB = readerB.TotalTime;
@@ -218,7 +222,7 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
                 _state = PlaybackStateKind.Playing;
                 _player!.Play();
             }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException or NotSupportedException or DllNotFoundException)
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or NotSupportedException or DllNotFoundException or SoundFileException)
             {
                 DisposePipelineUnsafe();
                 _state = PlaybackStateKind.Stopped;
@@ -327,10 +331,17 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
             .Build();
         var sampleRate = player.DeviceMixFormat.SampleRate;
 
-        var readerA = new SoundFileReader(_pathA!);
-        var readerB = new SoundFileReader(_pathB!);
+        FileStream? streamA = null;
+        FileStream? streamB = null;
+        SoundFileReader? readerA = null;
+        SoundFileReader? readerB = null;
         try
         {
+            streamA = OpenAudioStream(_pathA!);
+            streamB = OpenAudioStream(_pathB!);
+            readerA = new SoundFileReader(streamA);
+            readerB = new SoundFileReader(streamB);
+
             var commonFrame = PlaybackTimeline.ToFrame(commonPosition, sampleRate);
             var offsetAFrame = PlaybackTimeline.ToFrame(_offsets.A, sampleRate);
             var offsetBFrame = PlaybackTimeline.ToFrame(_offsets.B, sampleRate);
@@ -365,6 +376,8 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
             player.Init(pair.ToWaveProvider());
             _readerA = readerA;
             _readerB = readerB;
+            _streamA = streamA;
+            _streamB = streamB;
             _pairProvider = pair;
             _player = player;
             _pipelineStartPosition = PlaybackTimeline.FromFrame(commonFrame, sampleRate);
@@ -372,8 +385,10 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
         }
         catch
         {
-            readerA.Dispose();
-            readerB.Dispose();
+            readerA?.Dispose();
+            readerB?.Dispose();
+            streamA?.Dispose();
+            streamB?.Dispose();
             player.Dispose();
             throw;
         }
@@ -465,6 +480,17 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
         _readerB?.Dispose();
         _readerA = null;
         _readerB = null;
+        _streamA?.Dispose();
+        _streamB?.Dispose();
+        _streamA = null;
+        _streamB = null;
+    }
+
+    private static FileStream OpenAudioStream(string path)
+    {
+        // Windows版libsndfileのsf_openへPathを直接渡すとUnicode Pathを正しく開けない場合がある。
+        // .NET側でFileStreamを開いてvirtual I/Oへ渡すことで、日本語等を含むPathをOSのUnicode APIで解決する。
+        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
     }
 
     private void OnPlaybackStopped(object? sender, StoppedEventArgs e)
