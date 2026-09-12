@@ -2,11 +2,13 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using TrackMatch.App.Playback;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
+using TrackMatch.Core.Playback;
 using TrackMatch.Core.Scanning;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
@@ -19,7 +21,6 @@ namespace TrackMatch.App;
 /// </summary>
 public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
-    private readonly ITrackPlaybackService _playbackService;
     private readonly JsonAppSettingsStore _settingsStore = new();
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
     private readonly List<IncrementalScanError> _analysisErrors = [];
@@ -32,7 +33,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private string _trashRoot = string.Empty;
     private string _statusText = "候補を読み込んでいます。";
     private string _analysisStatusText = "ライブラリ分析は未実行";
-    private string _playbackStatusText = "停止中";
     private string _trashStatusText = "Trash処理は未実行";
     private int _similarityDisplayLowerBoundPercent = 70;
     private bool _settingsLoaded;
@@ -44,11 +44,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// 候補レビュー画面のViewModelを生成する。
     /// </summary>
-    public MainWindowViewModel(ITrackPlaybackService playbackService)
+    /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
+    public MainWindowViewModel(ISynchronizedPlaybackService playbackService)
     {
-        _playbackService = playbackService ?? throw new ArgumentNullException(nameof(playbackService));
-        _playbackService.PlaybackEnded += OnPlaybackEnded;
-        _playbackService.PlaybackFailed += OnPlaybackFailed;
+        Playback = new SynchronizedPlaybackControlsViewModel(
+            playbackService ?? throw new ArgumentNullException(nameof(playbackService)));
     }
 
     public ObservableCollection<Library> Libraries { get; } = [];
@@ -57,6 +57,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// Similarity表示下限を満たすCandidateだけを保持する表示用Collection。
     /// </summary>
     public ObservableCollection<CandidateReviewItemViewModel> Candidates { get; } = [];
+
+    /// <summary>
+    /// Candidate A/Bの同期Playback操作状態を取得する。
+    /// </summary>
+    public SynchronizedPlaybackControlsViewModel Playback { get; }
 
     public string DatabasePath => _databasePath;
 
@@ -89,8 +94,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            StopPlayback();
             _selectedCandidate = value;
+            Playback.LoadCandidate(value);
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(CanReview));
@@ -164,12 +169,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _analysisStatusText;
         private set => SetField(ref _analysisStatusText, value);
-    }
-
-    public string PlaybackStatusText
-    {
-        get => _playbackStatusText;
-        private set => SetField(ref _playbackStatusText, value);
     }
 
     public string TrashStatusText
@@ -382,15 +381,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         _analysisCancellation.Cancel();
     }
 
-    public void PlayTrackA() => PlaySelectedTrack(isTrackA: true);
-
-    public void PlayTrackB() => PlaySelectedTrack(isTrackA: false);
-
-    public void StopPlayback()
-    {
-        _playbackService.Stop();
-        PlaybackStatusText = "停止中";
-    }
+    /// <summary>
+    /// 同期Playbackを停止し、Common Positionを先頭へ戻す。
+    /// </summary>
+    public void StopPlayback() => Playback.Stop();
 
     public Task MarkNotDuplicateAsync() => SaveReviewAsync(CandidateReviewDecision.NotDuplicate, null);
 
@@ -441,9 +435,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         _disposed = true;
         _analysisCancellation?.Cancel();
         _analysisCancellation?.Dispose();
-        _playbackService.PlaybackEnded -= OnPlaybackEnded;
-        _playbackService.PlaybackFailed -= OnPlaybackFailed;
-        _playbackService.Dispose();
+        Playback.Dispose();
     }
 
     private async Task LoadCandidatesCoreAsync()
@@ -505,28 +497,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         if (library is not null)
         {
             StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {_allCandidates.Count}件（Similarity {SimilarityDisplayLowerBoundPercent}%以上）";
-        }
-    }
-
-    private void PlaySelectedTrack(bool isTrackA)
-    {
-        var selected = SelectedCandidate;
-        if (selected is null || IsLoading)
-        {
-            return;
-        }
-
-        var path = isTrackA ? selected.Row.PathA : selected.Row.PathB;
-        var title = isTrackA ? selected.TitleA : selected.TitleB;
-        var side = isTrackA ? "A" : "B";
-        try
-        {
-            _playbackService.Play(path);
-            PlaybackStatusText = $"再生中: {side} / {title}";
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException)
-        {
-            PlaybackStatusText = $"再生失敗: {exception.Message}";
         }
     }
 
@@ -612,10 +582,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CanManageLibraries));
         OnPropertyChanged(nameof(CanProcessTrash));
     }
-
-    private void OnPlaybackEnded(object? sender, EventArgs e) => PlaybackStatusText = "再生終了";
-
-    private void OnPlaybackFailed(string message) => PlaybackStatusText = $"再生失敗: {message}";
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
