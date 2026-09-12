@@ -8,6 +8,12 @@
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="NAudio" Version="3.1.0" />
+    <PackageReference Include="NAudio.SoundFile" Version="3.1.0" />
+    <PackageReference Include="R128Net" Version="1.1.0" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TrackMatch.Infrastructure.Tests" />
   </ItemGroup>
 </Project>

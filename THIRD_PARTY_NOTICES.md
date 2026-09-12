@@ -51,7 +51,7 @@ Chromaprint 1.6.1の公式Windows x86-64パッケージは、Chromaprintの`pack
 
 この構成ではFFmpegが`fpcalc.exe`へ静的リンクされるため、TrackMatchのReleaseではLGPL 2.1に基づく再配布条件を満たせるよう、対応するソースコードとビルドスクリプトも同じReleaseから取得できるようにする。
 
-## Releaseに含めるライセンスと対応ソース
+## 公式Windowsバイナリに関するライセンスと対応ソース
 
 Windows向けTrackMatch ZIPには次を収録する。
 
@@ -70,3 +70,15 @@ Windows向けTrackMatch ZIPには次を収録する。
 これらは、TrackMatchが再配布する第三者バイナリに対応するソースとビルド情報を、バイナリと同じ配布場所から取得可能にするためのものである。
 
 TrackMatchはこれら第三者コンポーネントを改変していない。各コンポーネントにはそれぞれのライセンス条件が適用され、TrackMatch本体のライセンスをそれらへ置き換えるものではない。
+
+## R128Net
+
+- Component: R128Net 1.1.0
+- Upstream: https://github.com/routersys/R128Net
+- License: MIT License
+- Copyright: Copyright (c) 2026 routersys
+- TrackMatchによる変更: なし
+
+TrackMatchはIntegrated Loudness、Loudness Range、True PeakなどのEBU R128 / ITU-R BS.1770系測定にR128Netを利用する。R128Netはlibebur128をC#へ移植したmanaged libraryであり、TrackMatchはNuGet packageを通常の.NET依存ライブラリとして参照する。
+
+R128NetのNuGet packageには、上流が参照するlibebur128のthird-party noticeも含まれる。TrackMatchはR128Netの測定値を利用し、クリッピング疑い・スペクトル特徴・同一曲A/B比較などTrackMatch固有の判定は別途TrackMatch側で行う。
