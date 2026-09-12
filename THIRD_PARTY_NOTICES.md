@@ -1,6 +1,29 @@
 # Third-party notices
 
-TrackMatchのWindows向けGitHub Releaseには、AcoustIDプロジェクトが配布するChromaprint 1.6.1の`fpcalc.exe`を、改変せずに同梱する。
+TrackMatchのWindows向けGitHub Releaseには、AcoustIDプロジェクトが配布するChromaprint 1.6.1の`fpcalc.exe`と、libsndfileプロジェクトが配布するlibsndfile 1.2.2の`sndfile.dll`を、いずれも改変せずに同梱する。
+
+## libsndfile
+
+- Component: libsndfile 1.2.2
+- Upstream: https://github.com/libsndfile/libsndfile
+- Binary asset: `libsndfile-1.2.2-win64.zip`
+- Binary asset SHA-256: `2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f`
+- TrackMatchに同梱するファイル: `sndfile.dll`
+- TrackMatchによる変更: なし
+- License: GNU Lesser General Public License 2.1 or later
+
+TrackMatchは`NAudio.SoundFile`を介してlibsndfileを実行時に動的ロードする。`NAudio.SoundFile`自身はlibsndfileのnative binaryをNuGet packageへ同梱しないため、Windows向けTrackMatch Releaseではlibsndfile公式Windows x64配布物の`sndfile.dll`をTrackMatch本体と同じディレクトリへ配置する。
+
+`sndfile.dll`はTrackMatch本体へ静的リンクせず独立した共有ライブラリとして配布する。利用者は、ABI互換のある変更版libsndfileへ`sndfile.dll`を差し替えて利用できる。
+
+Windows向けTrackMatch ZIPには次を収録する。
+
+- `libsndfile-LGPL-2.1.txt` — libsndfile 1.2.2の`COPYING`に収録されているGNU LGPL 2.1全文
+- `THIRD_PARTY_NOTICES.md`（この文書）
+
+さらに、同じGitHub Releaseへ次の対応ソースを別ファイルとして添付する。
+
+- `libsndfile-1.2.2.tar.xz` — 同梱`sndfile.dll`に対応するlibsndfile 1.2.2の公式ソース配布物
 
 ## Chromaprint / fpcalc
 
@@ -35,13 +58,15 @@ Windows向けTrackMatch ZIPには次を収録する。
 - `THIRD_PARTY_NOTICES.md`（この文書）
 - `fpcalc/LICENSE.md`（Chromaprint 1.6.1公式ライセンス文書）
 - `fpcalc/LGPL-2.1.txt`（GNU LGPL 2.1全文）
+- `libsndfile-LGPL-2.1.txt`（libsndfile 1.2.2のGNU LGPL 2.1全文）
 
 さらに、同じGitHub Releaseへ次の対応ソースを別ファイルとして添付する。
 
 - `chromaprint-1.6.1.tar.gz` — 同梱`fpcalc.exe`に対応するChromaprintソース。`fpcalc`自身のソースと公式パッケージ生成スクリプトを含む
 - `ffmpeg-8.0.tar.xz` — 静的リンクされたFFmpeg 8.0のソース
 - `ffmpeg-build-v8.0-1.tar.gz` — AcoustIDがFFmpeg 8.0バイナリを生成するために使用したビルドスクリプト
+- `libsndfile-1.2.2.tar.xz` — 同梱`sndfile.dll`に対応するlibsndfileソース
 
-これらは、TrackMatchが再配布する公式`fpcalc.exe`に対応するソースとビルド情報を、バイナリと同じ配布場所から取得可能にするためのものである。
+これらは、TrackMatchが再配布する第三者バイナリに対応するソースとビルド情報を、バイナリと同じ配布場所から取得可能にするためのものである。
 
 TrackMatchはこれら第三者コンポーネントを改変していない。各コンポーネントにはそれぞれのライセンス条件が適用され、TrackMatch本体のライセンスをそれらへ置き換えるものではない。

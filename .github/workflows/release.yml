@@ -13,6 +13,8 @@ env:
   CHROMAPRINT_SHA256: '735d6182b38e9f364b84ce6f4ccd682c75e2851de89735711d6b762d12b92a4e'
   FFMPEG_VERSION: '8.0'
   FFMPEG_BUILD_TAG: 'v8.0-1'
+  LIBSNDFILE_VERSION: '1.2.2'
+  LIBSNDFILE_WIN64_SHA256: '2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f'
 
 jobs:
   release:
@@ -40,6 +42,33 @@ jobs:
           dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained false -o artifacts/package
           dotnet publish src/TrackMatch.Scanner/TrackMatch.Scanner.csproj -c Release -r win-x64 --self-contained false -o artifacts/package
           Copy-Item THIRD_PARTY_NOTICES.md artifacts/package/THIRD_PARTY_NOTICES.md
+
+      - name: Download and verify libsndfile
+        shell: pwsh
+        run: |
+          # NAudio.SoundFileはlibsndfile本体をNuGetに含めないため、公式Windows x64バイナリを配布物へ明示的に同梱する。
+          $version = $env:LIBSNDFILE_VERSION
+          $archive = "artifacts/libsndfile-$version-win64.zip"
+          $url = "https://github.com/libsndfile/libsndfile/releases/download/$version/libsndfile-$version-win64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:LIBSNDFILE_WIN64_SHA256) {
+            throw "libsndfile archive SHA-256 mismatch. Expected $env:LIBSNDFILE_WIN64_SHA256, actual $actual"
+          }
+
+          $extractDir = "artifacts/libsndfile"
+          Expand-Archive $archive -DestinationPath $extractDir -Force
+          $sndfile = Get-ChildItem $extractDir -Filter sndfile.dll -Recurse | Select-Object -First 1
+          if (-not $sndfile) {
+            throw 'sndfile.dll was not found in the libsndfile Windows archive.'
+          }
+
+          # NAudio.SoundFileはAppContext.BaseDirectoryからsndfile.dllを解決できるため、実行ファイルと同じ階層へ配置する。
+          Copy-Item $sndfile.FullName artifacts/package/sndfile.dll -Force
+
+          # LGPL本文もバイナリと同じZIP内に置き、利用者がライセンス条件をオフラインでも確認できるようにする。
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/libsndfile/libsndfile/$version/COPYING" -OutFile "artifacts/package/libsndfile-LGPL-2.1.txt"
 
       - name: Download and verify Chromaprint fpcalc
         shell: pwsh
@@ -84,9 +113,35 @@ jobs:
           $ffmpegBuildSource = "artifacts/ffmpeg-build-$env:FFMPEG_BUILD_TAG.tar.gz"
           Invoke-WebRequest -Uri "https://github.com/acoustid/ffmpeg-build/archive/refs/tags/$env:FFMPEG_BUILD_TAG.tar.gz" -OutFile $ffmpegBuildSource
 
+          # libsndfileは共有DLLとして動的ロードするが、同じ配布場所から対応ソースを取得できる状態も維持する。
+          $libsndfileSource = "artifacts/libsndfile-$env:LIBSNDFILE_VERSION.tar.xz"
+          Invoke-WebRequest -Uri "https://github.com/libsndfile/libsndfile/releases/download/$env:LIBSNDFILE_VERSION/libsndfile-$env:LIBSNDFILE_VERSION.tar.xz" -OutFile $libsndfileSource
+
           "CHROMAPRINT_SOURCE=$chromaprintSource" >> $env:GITHUB_ENV
           "FFMPEG_SOURCE=$ffmpegSource" >> $env:GITHUB_ENV
           "FFMPEG_BUILD_SOURCE=$ffmpegBuildSource" >> $env:GITHUB_ENV
+          "LIBSNDFILE_SOURCE=$libsndfileSource" >> $env:GITHUB_ENV
+
+      - name: Verify release payload
+        shell: pwsh
+        run: |
+          # Release作成前に、実行時必須のnative依存とライセンス文書が最終配布ディレクトリへ入っていることを保証する。
+          $required = @(
+            'artifacts/package/TrackMatch.App.exe',
+            'artifacts/package/TrackMatch.Scanner.exe',
+            'artifacts/package/sndfile.dll',
+            'artifacts/package/libsndfile-LGPL-2.1.txt',
+            'artifacts/package/THIRD_PARTY_NOTICES.md',
+            'artifacts/package/fpcalc/fpcalc.exe',
+            'artifacts/package/fpcalc/LICENSE.md',
+            'artifacts/package/fpcalc/LGPL-2.1.txt'
+          )
+
+          foreach ($path in $required) {
+            if (-not (Test-Path $path -PathType Leaf)) {
+              throw "Required release file is missing: $path"
+            }
+          }
 
       - name: Create release archive
         shell: pwsh
@@ -106,5 +161,6 @@ jobs:
             $env:CHROMAPRINT_SOURCE `
             $env:FFMPEG_SOURCE `
             $env:FFMPEG_BUILD_SOURCE `
+            $env:LIBSNDFILE_SOURCE `
             --generate-notes `
             --title 'TrackMatch ${{ github.ref_name }}'
