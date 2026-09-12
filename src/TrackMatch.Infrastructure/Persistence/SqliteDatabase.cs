@@ -188,6 +188,55 @@ public sealed class SqliteDatabase
                 FOREIGN KEY (KeepTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS TrackQualityAnalyses (
+                TrackId INTEGER PRIMARY KEY,
+                AnalysisVersion INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                IntegratedLoudnessLufs REAL NULL,
+                TruePeakDbtp REAL NULL,
+                LoudnessRangeLu REAL NULL,
+                PeakToLoudnessRatioDb REAL NULL,
+                PeakNearSampleCount INTEGER NOT NULL DEFAULT 0,
+                ClippingRunCount INTEGER NOT NULL DEFAULT 0,
+                ClippingTotalDurationTicks INTEGER NOT NULL DEFAULT 0,
+                ClippingLongestDurationTicks INTEGER NOT NULL DEFAULT 0,
+                LeftRightLevelDifferenceDb REAL NULL,
+                EffectiveUpperFrequencyHz REAL NULL,
+                HasHighFrequencyCutoff INTEGER NULL CHECK (HasHighFrequencyCutoff IS NULL OR HasHighFrequencyCutoff IN (0, 1)),
+                HighFrequencyCutoffHz REAL NULL,
+                HighFrequencyEnergyRatio REAL NULL,
+                HighFrequencyConsistency REAL NULL,
+                AnalyzedAtUtcTicks INTEGER NULL,
+                FailureReason TEXT NULL,
+                FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_TrackQualityAnalyses_Status ON TrackQualityAnalyses (Status);
+            CREATE INDEX IF NOT EXISTS IX_TrackQualityAnalyses_AnalysisVersion ON TrackQualityAnalyses (AnalysisVersion);
+
+            CREATE TABLE IF NOT EXISTS CandidateQualityComparisons (
+                TrackIdA INTEGER NOT NULL,
+                TrackIdB INTEGER NOT NULL,
+                ComparisonVersion INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                MatchedLoudnessDifferenceLu REAL NULL,
+                GainDifferenceMeanDb REAL NULL,
+                GainDifferenceStandardDeviationDb REAL NULL,
+                PeakToLoudnessRatioDifferenceDb REAL NULL,
+                LoudnessRangeDifferenceLu REAL NULL,
+                IsPrimarilyGainDifference INTEGER NULL CHECK (IsPrimarilyGainDifference IS NULL OR IsPrimarilyGainDifference IN (0, 1)),
+                RelativeHighFrequencyDifference REAL NULL,
+                ComparedAtUtcTicks INTEGER NULL,
+                FailureReason TEXT NULL,
+                PRIMARY KEY (TrackIdA, TrackIdB),
+                CHECK (TrackIdA < TrackIdB),
+                FOREIGN KEY (TrackIdA, TrackIdB)
+                    REFERENCES CandidateComparisons (TrackIdA, TrackIdB) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_Status ON CandidateQualityComparisons (Status);
+            CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_ComparisonVersion ON CandidateQualityComparisons (ComparisonVersion);
+
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 RootPath TEXT NOT NULL,
