@@ -37,7 +37,7 @@ public sealed class RelationshipClassifier
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.DuplicateCandidate,
-                "Similarity・両Coverage・DurationRatioが重複候補のしきい値を満たす。");
+                "音響一致度、一致範囲、再生時間の近さが、重複と判断する条件を満たしています。");
         }
 
         if (similarity >= _profile.ShortVersionMinimumSimilarity
@@ -47,18 +47,18 @@ public sealed class RelationshipClassifier
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.ShortVersionCandidate,
-                "短い側をほぼ覆う一方で長い側CoverageとDurationRatioが低く、Short Version候補の条件を満たす。");
+                "片方の音源の大部分が一致していますが、もう片方は一致範囲が狭く再生時間も異なるため、短縮版の候補です。");
         }
 
         if (similarity >= _profile.AlternateVersionMinimumSimilarity)
         {
             return new RelationshipClassificationResult(
                 AudioRelationshipKind.AlternateVersionCandidate,
-                "一定以上の音響類似度はあるが、重複候補またはShort Version候補の条件を満たさない。");
+                "音響的には似ていますが、重複または短縮版と判断する条件には当てはまりません。");
         }
 
         return new RelationshipClassificationResult(
             AudioRelationshipKind.NeedsReview,
-            "音響類似度が別バージョン候補のしきい値に達していない。");
+            "音響一致度が、別バージョン候補として自動判定する基準に達していません。");
     }
 }

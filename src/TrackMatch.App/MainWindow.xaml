@@ -1,7 +1,11 @@
 <Window x:Class="TrackMatch.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:playback="clr-namespace:TrackMatch.App.Playback"
         Title="TrackMatch" Height="1040" Width="1380" MinHeight="860" MinWidth="1120">
+    <Window.Resources>
+        <playback:PlaybackModeLabelConverter x:Key="PlaybackModeLabelConverter"/>
+    </Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -23,7 +27,7 @@
                 <ColumnDefinition Width="130"/><ColumnDefinition Width="8"/>
                 <ColumnDefinition Width="100"/><ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <TextBlock VerticalAlignment="Center" Text="Library"/>
+            <TextBlock VerticalAlignment="Center" Text="ライブラリ"/>
             <ComboBox x:Name="LibraryComboBox" Grid.Column="2" Height="30"
                       ItemsSource="{Binding Libraries}" SelectedItem="{Binding SelectedLibrary}"
                       DisplayMemberPath="Name" SelectionChanged="LibraryComboBox_SelectionChanged"/>
@@ -46,7 +50,8 @@
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="8"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <TextBlock VerticalAlignment="Center" Text="表示下限:"/>
+                    <TextBlock VerticalAlignment="Center" Text="一致度の表示下限:"
+                               ToolTip="この値以上の音響一致度を持つ候補だけを一覧に表示します。"/>
                     <TextBox Width="52" Height="26" Margin="8,0,4,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Right"
                              Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}"/>
                     <TextBlock VerticalAlignment="Center" Text="%"/>
@@ -57,7 +62,12 @@
                         <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="150"/>
                         <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
                         <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
-                        <DataGridTextColumn Header="一致度" Binding="{Binding Similarity}" Width="90"/>
+                        <DataGridTextColumn Binding="{Binding Similarity}" Width="100">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="音響一致度"
+                                           ToolTip="2つの音源の音響指紋がどの程度似ているかを表します。100%に近いほど音響的に一致します。"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid>
@@ -72,7 +82,7 @@
 
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <GroupBox Header="Track A" Padding="10">
+                    <GroupBox Header="音源 A" Padding="10">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleA}" TextWrapping="Wrap"/>
@@ -80,18 +90,18 @@
                                 <TextBlock Margin="0,4,0,0" Text="{Binding AlbumA}" TextWrapping="Wrap"/>
                                 <TextBlock Margin="0,4,0,0" Text="{Binding GenreA}" TextWrapping="Wrap"/>
                                 <Separator Margin="0,8"/>
-                                <TextBlock Text="{Binding DurationA, StringFormat=Duration: {0}}"/>
-                                <TextBlock Text="{Binding FormatCodecA, StringFormat=Format / Codec: {0}}"/>
-                                <TextBlock Text="{Binding FileSizeA, StringFormat=File size: {0}}"/>
-                                <TextBlock Text="{Binding BitrateA, StringFormat=Bitrate: {0}}"/>
-                                <TextBlock Text="{Binding SampleRateA, StringFormat=Sample rate: {0}}"/>
-                                <TextBlock Text="{Binding BitDepthA, StringFormat=Bit depth: {0}}"/>
-                                <TextBlock Text="{Binding ChannelsA, StringFormat=Channels: {0}}"/>
+                                <TextBlock Text="{Binding DurationA, StringFormat=再生時間: {0}}"/>
+                                <TextBlock Text="{Binding FormatCodecA, StringFormat=形式 / コーデック: {0}}"/>
+                                <TextBlock Text="{Binding FileSizeA, StringFormat=ファイルサイズ: {0}}"/>
+                                <TextBlock Text="{Binding BitrateA, StringFormat=ビットレート: {0}}"/>
+                                <TextBlock Text="{Binding SampleRateA, StringFormat=サンプルレート: {0}}"/>
+                                <TextBlock Text="{Binding BitDepthA, StringFormat=ビット深度: {0}}"/>
+                                <TextBlock Text="{Binding ChannelsA, StringFormat=チャンネル数: {0}}"/>
                                 <TextBlock Margin="0,8,0,0" Text="{Binding Row.PathA}" TextWrapping="Wrap" Opacity="0.7"/>
                             </StackPanel>
                         </ScrollViewer>
                     </GroupBox>
-                    <GroupBox Grid.Column="2" Header="Track B" Padding="10">
+                    <GroupBox Grid.Column="2" Header="音源 B" Padding="10">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding TitleB}" TextWrapping="Wrap"/>
@@ -99,13 +109,13 @@
                                 <TextBlock Margin="0,4,0,0" Text="{Binding AlbumB}" TextWrapping="Wrap"/>
                                 <TextBlock Margin="0,4,0,0" Text="{Binding GenreB}" TextWrapping="Wrap"/>
                                 <Separator Margin="0,8"/>
-                                <TextBlock Text="{Binding DurationB, StringFormat=Duration: {0}}"/>
-                                <TextBlock Text="{Binding FormatCodecB, StringFormat=Format / Codec: {0}}"/>
-                                <TextBlock Text="{Binding FileSizeB, StringFormat=File size: {0}}"/>
-                                <TextBlock Text="{Binding BitrateB, StringFormat=Bitrate: {0}}"/>
-                                <TextBlock Text="{Binding SampleRateB, StringFormat=Sample rate: {0}}"/>
-                                <TextBlock Text="{Binding BitDepthB, StringFormat=Bit depth: {0}}"/>
-                                <TextBlock Text="{Binding ChannelsB, StringFormat=Channels: {0}}"/>
+                                <TextBlock Text="{Binding DurationB, StringFormat=再生時間: {0}}"/>
+                                <TextBlock Text="{Binding FormatCodecB, StringFormat=形式 / コーデック: {0}}"/>
+                                <TextBlock Text="{Binding FileSizeB, StringFormat=ファイルサイズ: {0}}"/>
+                                <TextBlock Text="{Binding BitrateB, StringFormat=ビットレート: {0}}"/>
+                                <TextBlock Text="{Binding SampleRateB, StringFormat=サンプルレート: {0}}"/>
+                                <TextBlock Text="{Binding BitDepthB, StringFormat=ビット深度: {0}}"/>
+                                <TextBlock Text="{Binding ChannelsB, StringFormat=チャンネル数: {0}}"/>
                                 <TextBlock Margin="0,8,0,0" Text="{Binding Row.PathB}" TextWrapping="Wrap" Opacity="0.7"/>
                             </StackPanel>
                         </ScrollViewer>
@@ -116,17 +126,24 @@
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                        <TextBlock Text="Similarity"/><TextBlock Grid.Column="2" Text="{Binding Similarity}"/>
-                        <TextBlock Grid.Row="1" Text="Coverage A"/><TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding CoverageA}"/>
-                        <TextBlock Grid.Row="2" Text="Coverage B"/><TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding CoverageB}"/>
-                        <TextBlock Grid.Row="3" Text="Duration ratio"/><TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DurationRatio}"/>
-                        <TextBlock Grid.Row="4" Text="Best offset"/><TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding BestOffset}"/>
-                        <TextBlock Grid.Row="5" Text="Matched duration"/><TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding MatchedDuration}"/>
-                        <TextBlock Grid.Row="6" Text="Reason"/><TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding Reason}" TextWrapping="Wrap"/>
+                        <TextBlock Text="音響一致度" ToolTip="2つの音源の音響指紋がどの程度似ているかを表します。100%に近いほど音響的に一致します。"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Similarity}"/>
+                        <TextBlock Grid.Row="1" Text="Aの一致範囲" ToolTip="音源A全体のうち、音源Bと一致した区間が占める割合です。"/>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding CoverageA}"/>
+                        <TextBlock Grid.Row="2" Text="Bの一致範囲" ToolTip="音源B全体のうち、音源Aと一致した区間が占める割合です。"/>
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding CoverageB}"/>
+                        <TextBlock Grid.Row="3" Text="再生時間の近さ" ToolTip="短い方の再生時間を長い方で割った割合です。100%に近いほど2つの音源の長さが近くなります。"/>
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding DurationRatio}"/>
+                        <TextBlock Grid.Row="4" Text="最適オフセット" ToolTip="2つの音源が最も一致するように時間位置を合わせたときのずれです。"/>
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding BestOffset}"/>
+                        <TextBlock Grid.Row="5" Text="一致区間の長さ" ToolTip="音響比較で一致していると判断された区間の長さです。"/>
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding MatchedDuration}"/>
+                        <TextBlock Grid.Row="6" Text="判定理由" ToolTip="音響比較の各値から、この候補分類になった理由です。"/>
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding Reason}" TextWrapping="Wrap"/>
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Grid.Row="4" Header="同期A/B Playback" Padding="10"
+                <GroupBox Grid.Row="4" Header="A/B 同期再生" Padding="10"
                           DataContext="{Binding DataContext.Playback, RelativeSource={RelativeSource AncestorType=Window}}">
                     <Grid IsEnabled="{Binding CanControl}">
                         <Grid.RowDefinitions>
@@ -163,8 +180,15 @@
                             </Grid.ColumnDefinitions>
                             <Button Content="再生 / 一時停止" Click="PlaybackPlayPause_Click"/>
                             <Button Grid.Column="2" Content="停止" Click="PlaybackStop_Click"/>
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="Mode"/>
-                            <ComboBox Grid.Column="6" ItemsSource="{Binding Modes}" SelectedItem="{Binding SelectedMode}" DisplayMemberPath="Label"/>
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="再生モード"
+                                       ToolTip="A/Bのどちらを、どのような出力方法で聞くかを選択します。"/>
+                            <ComboBox Grid.Column="6" ItemsSource="{Binding Modes}" SelectedItem="{Binding SelectedMode}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Value, Converter={StaticResource PlaybackModeLabelConverter}}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                         </Grid>
 
                         <Grid Grid.Row="4">
@@ -179,12 +203,12 @@
                                 <ColumnDefinition Width="60"/><ColumnDefinition Width="18"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock VerticalAlignment="Center" Text="Offset A"/>
+                            <TextBlock VerticalAlignment="Center" Text="オフセット A" ToolTip="音源Aの再生開始位置を時間方向にずらします。"/>
                             <Button Grid.Column="2" Content="−10 ms" Click="OffsetAMinus_Click"/>
                             <TextBox x:Name="OffsetATextBox" Grid.Column="4" Height="26" VerticalContentAlignment="Center" HorizontalContentAlignment="Right"
                                      Text="{Binding OffsetAText, Mode=OneWay}" KeyDown="OffsetATextBox_KeyDown" LostKeyboardFocus="OffsetATextBox_LostKeyboardFocus"/>
                             <Button Grid.Column="6" Content="+10 ms" Click="OffsetAPlus_Click"/>
-                            <TextBlock Grid.Column="8" VerticalAlignment="Center" Text="Offset B"/>
+                            <TextBlock Grid.Column="8" VerticalAlignment="Center" Text="オフセット B" ToolTip="音源Bの再生開始位置を時間方向にずらします。"/>
                             <Button Grid.Column="10" Content="−10 ms" Click="OffsetBMinus_Click"/>
                             <TextBox x:Name="OffsetBTextBox" Grid.Column="12" Height="26" VerticalContentAlignment="Center" HorizontalContentAlignment="Right"
                                      Text="{Binding OffsetBText, Mode=OneWay}" KeyDown="OffsetBTextBox_KeyDown" LostKeyboardFocus="OffsetBTextBox_LostKeyboardFocus"/>
@@ -197,10 +221,10 @@
                                 <ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="54"/><ColumnDefinition Width="20"/>
                                 <ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="54"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock VerticalAlignment="Center" Text="A Volume"/>
+                            <TextBlock VerticalAlignment="Center" Text="A 音量"/>
                             <Slider Grid.Column="2" Minimum="0" Maximum="100" TickFrequency="10" Value="{Binding VolumeAPercent, UpdateSourceTrigger=PropertyChanged}"/>
                             <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding VolumeAPercent, StringFormat={}{0:0}%}"/>
-                            <TextBlock Grid.Column="6" VerticalAlignment="Center" Text="B Volume"/>
+                            <TextBlock Grid.Column="6" VerticalAlignment="Center" Text="B 音量"/>
                             <Slider Grid.Column="8" Minimum="0" Maximum="100" TickFrequency="10" Value="{Binding VolumeBPercent, UpdateSourceTrigger=PropertyChanged}"/>
                             <TextBlock Grid.Column="10" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding VolumeBPercent, StringFormat={}{0:0}%}"/>
                         </Grid>
@@ -216,15 +240,15 @@
             </Grid>
         </Grid>
 
-        <GroupBox Grid.Row="6" Header="レビュー済み重複のTrash移動" Padding="10">
+        <GroupBox Grid.Row="6" Header="レビュー済みの重複音源をごみ箱へ移動" Padding="10">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="90"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="Trash Root"/>
+                <TextBlock VerticalAlignment="Center" Text="ごみ箱のパス"/>
                 <TextBox Grid.Column="2" Height="28" VerticalContentAlignment="Center" IsReadOnly="True" Text="{Binding TrashRoot, Mode=OneWay}"/>
                 <Button Grid.Column="4" Height="28" Content="参照..." Click="BrowseTrashRoot_Click"/>
                 <StackPanel Grid.Column="6" Orientation="Horizontal">
-                    <Button Height="28" Padding="12,0" Content="Dry-run確認" IsEnabled="{Binding CanProcessTrash}" Click="PreviewTrash_Click"/>
-                    <Button Height="28" Margin="8,0,0,0" Padding="12,0" Content="Trashへ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click"/>
+                    <Button Height="28" Padding="12,0" Content="移動内容を確認" IsEnabled="{Binding CanProcessTrash}" Click="PreviewTrash_Click"/>
+                    <Button Height="28" Margin="8,0,0,0" Padding="12,0" Content="ごみ箱へ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click"/>
                 </StackPanel>
             </Grid>
         </GroupBox>
