@@ -7,7 +7,7 @@ namespace TrackMatch.App;
 /// <summary>
 /// 候補一覧と詳細表示に必要な値をUI向けに整形する。
 /// </summary>
-public sealed class CandidateReviewItemViewModel(CandidateReviewReportRow row)
+public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRow row)
 {
     public CandidateReviewReportRow Row { get; } = row;
 
