@@ -31,7 +31,7 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(50),
         };
         _playbackTimer.Tick += PlaybackTimer_Tick;
-        PlaybackSeekSlider.PreviewMouseLeftButtonDown += PlaybackSeekSlider_PreviewMouseLeftButtonDown;
+        PlaybackSeekSlider.AddHandler(Mouse.MouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_MouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
@@ -255,7 +255,7 @@ public partial class MainWindow : Window
     private void PlaybackStop_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.Stop();
 
-    private void PlaybackSeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void PlaybackSeekSlider_MouseDown(object sender, MouseButtonEventArgs e)
     {
         _isPlaybackSeekPointerActive = true;
 
@@ -264,26 +264,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        // IsMoveToPointEnabledだけに任せると、再生位置の50ms更新とWPF内部のValue更新順序が競合し、
-        // トラッククリック時に古い位置へSeekする場合がある。再生位置だけはクリック座標から値を確定し、即座にSeekする。
-        var width = PlaybackSeekSlider.ActualWidth;
-        if (width <= 0 || PlaybackSeekSlider.Maximum <= PlaybackSeekSlider.Minimum)
-        {
-            return;
-        }
-
-        var ratio = Math.Clamp(e.GetPosition(PlaybackSeekSlider).X / width, 0d, 1d);
-        if (PlaybackSeekSlider.IsDirectionReversed)
-        {
-            ratio = 1d - ratio;
-        }
-
-        var value = PlaybackSeekSlider.Minimum
-            + ((PlaybackSeekSlider.Maximum - PlaybackSeekSlider.Minimum) * ratio);
-        PlaybackSeekSlider.Value = value;
-        _viewModel.Playback.SeekSeconds(value);
+        // IsMoveToPointEnabledがValueを更新した後のBubbleイベントでSeekする。
+        // Slider.Valueをコードから書き換えるとOneWay Bindingを置き換える可能性があるため、WPF標準のValue更新結果だけを使用する。
+        _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
         _isPlaybackSeekPointerActive = false;
-        e.Handled = true;
     }
 
     private void PlaybackSeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
