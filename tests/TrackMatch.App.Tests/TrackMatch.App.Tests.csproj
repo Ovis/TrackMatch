@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\TrackMatch.App\TrackMatch.App.csproj" />
+    <ProjectReference Include="..\..\src\TrackMatch.Application\TrackMatch.Application.csproj" />
   </ItemGroup>
 </Project>
