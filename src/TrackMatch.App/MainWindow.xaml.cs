@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -255,7 +256,35 @@ public partial class MainWindow : Window
         => _viewModel.Playback.Stop();
 
     private void PlaybackSeekSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        => _isPlaybackSeekPointerActive = true;
+    {
+        _isPlaybackSeekPointerActive = true;
+
+        if (IsWithinThumb(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        // IsMoveToPointEnabledだけに任せると、再生位置の50ms更新とWPF内部のValue更新順序が競合し、
+        // トラッククリック時に古い位置へSeekする場合がある。再生位置だけはクリック座標から値を確定し、即座にSeekする。
+        var width = PlaybackSeekSlider.ActualWidth;
+        if (width <= 0 || PlaybackSeekSlider.Maximum <= PlaybackSeekSlider.Minimum)
+        {
+            return;
+        }
+
+        var ratio = Math.Clamp(e.GetPosition(PlaybackSeekSlider).X / width, 0d, 1d);
+        if (PlaybackSeekSlider.IsDirectionReversed)
+        {
+            ratio = 1d - ratio;
+        }
+
+        var value = PlaybackSeekSlider.Minimum
+            + ((PlaybackSeekSlider.Maximum - PlaybackSeekSlider.Minimum) * ratio);
+        PlaybackSeekSlider.Value = value;
+        _viewModel.Playback.SeekSeconds(value);
+        _isPlaybackSeekPointerActive = false;
+        e.Handled = true;
+    }
 
     private void PlaybackSeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
@@ -346,6 +375,22 @@ public partial class MainWindow : Window
 
             EnableMoveToPointForSliders(child);
         }
+    }
+
+    /// <summary>
+    /// クリック元がSliderのThumb内部かを判定する。Thumb操作はWPF標準のドラッグ処理へ任せる。
+    /// </summary>
+    private static bool IsWithinThumb(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is Thumb)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
