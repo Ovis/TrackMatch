@@ -31,7 +31,7 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(50),
         };
         _playbackTimer.Tick += PlaybackTimer_Tick;
-        PlaybackSeekSlider.AddHandler(Mouse.MouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_MouseDown), handledEventsToo: true);
+        PlaybackSeekSlider.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_PreviewMouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
@@ -255,8 +255,15 @@ public partial class MainWindow : Window
     private void PlaybackStop_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.Stop();
 
-    private void PlaybackSeekSlider_MouseDown(object sender, MouseButtonEventArgs e)
+    private void PlaybackSeekSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        // MouseDownからMouseUpまで再生位置の定期更新を止める。
+        // トラッククリック時もWPFがValueを確定する前にタイマーで旧位置を書き戻さないようにする。
         _isPlaybackSeekPointerActive = true;
 
         if (IsWithinThumb(e.OriginalSource as DependencyObject))
@@ -264,10 +271,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        // IsMoveToPointEnabledがValueを更新した後のBubbleイベントでSeekする。
-        // Slider.Valueをコードから書き換えるとOneWay Bindingを置き換える可能性があるため、WPF標準のValue更新結果だけを使用する。
-        _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
-        _isPlaybackSeekPointerActive = false;
+        // IsMoveToPointEnabledによるValue更新はPreviewMouseDownより後で行われるため、
+        // 現在の入力イベントが完了した後にSeekする。Input優先度ならBackgroundの50ms更新より先に実行される。
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            if (_isPlaybackSeekPointerActive)
+            {
+                _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+            }
+        });
     }
 
     private void PlaybackSeekSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -278,7 +290,9 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton == MouseButton.Left && !PlaybackSeekSlider.IsMouseCaptureWithin)
+        if (e.ChangedButton == MouseButton.Left
+            && !PlaybackSeekSlider.IsMouseOver
+            && !PlaybackSeekSlider.IsMouseCaptureWithin)
         {
             // Slider外でボタンを離した場合にも更新抑止状態を残さない。
             _isPlaybackSeekPointerActive = false;
