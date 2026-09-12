@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using NAudio.SoundFile;
 using TrackMatch.Core.Playback;
 
 namespace TrackMatch.App.Playback;
@@ -181,7 +182,7 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
             SyncFromService();
             StatusText = "停止中";
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or DllNotFoundException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or DllNotFoundException or ArgumentException or SoundFileException)
         {
             IsLoaded = false;
             ResetDisplay();
