@@ -1,5 +1,6 @@
 using System.IO;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Classification;
 
 namespace TrackMatch.App;
 
@@ -14,9 +15,16 @@ public sealed class CandidateReviewItemViewModel(CandidateReviewReportRow row)
 
     public long TrackIdB => Row.TrackIdB;
 
-    public string Kind => Row.Kind?.ToString() ?? "未分類";
+    public string Kind => Row.Kind switch
+    {
+        AudioRelationshipKind.DuplicateCandidate => "重複候補",
+        AudioRelationshipKind.ShortVersionCandidate => "短縮版候補",
+        AudioRelationshipKind.AlternateVersionCandidate => "別バージョン候補",
+        AudioRelationshipKind.NeedsReview => "要確認",
+        _ => "自動分類なし",
+    };
 
-    public string Reason => Row.Reason ?? "しきい値プロファイル未適用";
+    public string Reason => Row.Reason ?? "自動判定は未実施";
 
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);
 
