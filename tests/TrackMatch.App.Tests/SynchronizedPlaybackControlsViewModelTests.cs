@@ -6,8 +6,11 @@ using Xunit;
 
 namespace TrackMatch.App.Tests;
 
-public sealed class SynchronizedPlaybackControlsViewModelTests
+public sealed class SynchronizedPlaybackControlsViewModelTests : IDisposable
 {
+    private readonly string _pathA = Path.GetTempFileName();
+    private readonly string _pathB = Path.GetTempFileName();
+
     [Fact]
     public void LoadCandidate_AppliesBestOffsetAndResetsTemporaryState()
     {
@@ -23,8 +26,8 @@ public sealed class SynchronizedPlaybackControlsViewModelTests
 
         viewModel.LoadCandidate(candidate);
 
-        Assert.Equal("A.flac", service.LoadedPathA);
-        Assert.Equal("B.mp3", service.LoadedPathB);
+        Assert.Equal(_pathA, service.LoadedPathA);
+        Assert.Equal(_pathB, service.LoadedPathB);
         Assert.Equal(TimeSpan.FromMilliseconds(-740), service.LoadedBestOffset);
         Assert.Equal(TimeSpan.FromMilliseconds(740), service.Offsets.A);
         Assert.Equal(TimeSpan.Zero, service.Offsets.B);
@@ -100,7 +103,13 @@ public sealed class SynchronizedPlaybackControlsViewModelTests
         Assert.Equal(offsets, service.Offsets);
     }
 
-    private static CandidateReviewItemViewModel CreateCandidate(TimeSpan bestOffset)
+    public void Dispose()
+    {
+        File.Delete(_pathA);
+        File.Delete(_pathB);
+    }
+
+    private CandidateReviewItemViewModel CreateCandidate(TimeSpan bestOffset)
         => new(new CandidateReviewReportRow(
             1,
             2,
@@ -112,8 +121,8 @@ public sealed class SynchronizedPlaybackControlsViewModelTests
             1,
             bestOffset,
             TimeSpan.FromSeconds(120),
-            "A.flac",
-            "B.mp3",
+            _pathA,
+            _pathB,
             [],
             [],
             "A",
@@ -154,25 +163,15 @@ public sealed class SynchronizedPlaybackControlsViewModelTests
         }
 
         public string? LoadedPathA { get; private set; }
-
         public string? LoadedPathB { get; private set; }
-
         public TimeSpan LoadedBestOffset { get; private set; }
-
         public TimeSpan Position { get; private set; }
-
         public TimeSpan Duration { get; private set; }
-
         public PlaybackOffsets Offsets { get; private set; } = new(TimeSpan.Zero, TimeSpan.Zero);
-
         public SynchronizedPlaybackMode Mode { get; set; } = SynchronizedPlaybackMode.StereoOverlay;
-
         public float VolumeA { get; set; } = 1f;
-
         public float VolumeB { get; set; } = 1f;
-
         public bool IsPlaying { get; private set; }
-
         public bool IsPaused { get; private set; }
 
         public void Load(string pathA, string pathB, TimeSpan bestOffset)

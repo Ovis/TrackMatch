@@ -14,6 +14,8 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
     private readonly ISynchronizedPlaybackService _service;
     private readonly SynchronizationContext? _synchronizationContext;
     private TimeSpan _bestOffset;
+    private string? _pathA;
+    private string? _pathB;
     private bool _isLoaded;
     private bool _disposed;
     private double _positionSeconds;
@@ -165,15 +167,30 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
         if (candidate is null)
         {
             _bestOffset = TimeSpan.Zero;
+            _pathA = null;
+            _pathB = null;
             IsLoaded = false;
             ResetDisplay();
             return;
         }
 
+        _bestOffset = candidate.Row.BestOffset;
+        _pathA = candidate.Row.PathA;
+        _pathB = candidate.Row.PathB;
+
+        // Candidate一覧はスキャン時点のスナップショットなので、表示後にExplorer等からファイルが削除されることがある。
+        // 再生Serviceへ渡す前に確認し、通常の利用不可状態として扱うことでFileNotFoundExceptionを発生させない。
+        if (!TryGetSourceAvailabilityError(out var availabilityError))
+        {
+            IsLoaded = false;
+            ResetDisplay();
+            StatusText = $"再生準備失敗: {availabilityError}";
+            return;
+        }
+
         try
         {
-            _bestOffset = candidate.Row.BestOffset;
-            _service.Load(candidate.Row.PathA, candidate.Row.PathB, _bestOffset);
+            _service.Load(_pathA, _pathB, _bestOffset);
             IsLoaded = true;
             _volumeAPercent = 100d;
             _volumeBPercent = 100d;
@@ -184,6 +201,7 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or DllNotFoundException or ArgumentException or SoundFileException)
         {
+            // Exists確認直後に削除される競合やNAS切断は残るため、I/O例外の捕捉は保険として維持する。
             IsLoaded = false;
             ResetDisplay();
             StatusText = $"再生準備失敗: {exception.Message}";
@@ -205,6 +223,16 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
             _service.Pause();
             SyncFromService();
             StatusText = "一時停止中";
+            return;
+        }
+
+        // Candidate選択後に外部で削除された場合も、再生Pipelineを構築する前に検出する。
+        if (!TryGetSourceAvailabilityError(out var availabilityError))
+        {
+            _service.Stop();
+            IsLoaded = false;
+            ResetDisplay();
+            StatusText = $"再生失敗: {availabilityError}";
             return;
         }
 
@@ -353,6 +381,24 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
         _service.PlaybackEnded -= OnPlaybackEnded;
         _service.PlaybackFailed -= OnPlaybackFailed;
         _service.Dispose();
+    }
+
+    private bool TryGetSourceAvailabilityError(out string errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(_pathA) || !File.Exists(_pathA))
+        {
+            errorMessage = $"音源Aのファイルが見つかりません: {_pathA}";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_pathB) || !File.Exists(_pathB))
+        {
+            errorMessage = $"音源Bのファイルが見つかりません: {_pathB}";
+            return false;
+        }
+
+        errorMessage = string.Empty;
+        return true;
     }
 
     private void SyncFromService()

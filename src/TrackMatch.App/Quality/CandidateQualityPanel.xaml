@@ -1,0 +1,71 @@
+<UserControl x:Class="TrackMatch.App.Quality.CandidateQualityPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Loaded="CandidateQualityPanel_Loaded">
+    <GroupBox Header="音質比較" Padding="10">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="8"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="{Binding QualityStatusText}"/>
+                <Button Grid.Column="2" Padding="12,4" Content="音質を再解析"
+                        IsEnabled="{Binding CanReanalyzeQuality}" Click="Reanalyze_Click"/>
+            </Grid>
+
+            <ScrollViewer Grid.Row="2"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="True">
+                <StackPanel Margin="0,0,4,0">
+                    <Border Padding="10" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="3">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" FontSize="14"
+                                       Text="{Binding QualitySummaryLine1}" TextWrapping="Wrap"/>
+                            <TextBlock Margin="0,5,0,0" Text="{Binding QualitySummaryLine2}" TextWrapping="Wrap"/>
+                            <TextBlock Margin="0,5,0,0" Text="{Binding QualitySummaryLine3}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding QualityFindings}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock FontWeight="SemiBold" Text="{Binding Severity}"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Margin="0,10,0,4" FontWeight="SemiBold" Text="詳細な測定値"/>
+                    <DataGrid ItemsSource="{Binding QualityMeasurements}"
+                              AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                              CanUserAddRows="False" CanUserDeleteRows="False"
+                              VerticalScrollBarVisibility="Disabled"
+                              HorizontalScrollBarVisibility="Disabled"
+                              RowHeaderWidth="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="項目" Binding="{Binding Label}" Width="*" MinWidth="180"/>
+                            <DataGridTextColumn Header="A" Binding="{Binding ValueA}" Width="110"/>
+                            <DataGridTextColumn Header="B" Binding="{Binding ValueB}" Width="110"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </GroupBox>
+</UserControl>

@@ -28,10 +28,25 @@ public sealed class NAudioCandidateQualityAnalyzer : ICandidateQualityAnalyzer
         ArgumentNullException.ThrowIfNull(analysisA);
         ArgumentNullException.ThrowIfNull(analysisB);
 
+        var fullPathA = Path.GetFullPath(pathA);
+        var fullPathB = Path.GetFullPath(pathB);
+
+        // Candidate表示後に外部操作で片側だけ削除されるケースを通常状態として扱う。
+        // FileStream生成前にA/Bを確認し、欠落時はFileNotFoundExceptionを発生させず解析失敗へ変換する。
+        if (!File.Exists(fullPathA))
+        {
+            return CreateFailure(candidate, $"音源Aのファイルが見つかりません: {fullPathA}");
+        }
+
+        if (!File.Exists(fullPathB))
+        {
+            return CreateFailure(candidate, $"音源Bのファイルが見つかりません: {fullPathB}");
+        }
+
         try
         {
             return await Task.Run(
-                () => AnalyzeCore(candidate, pathA, pathB, analysisA, analysisB, cancellationToken),
+                () => AnalyzeCore(candidate, fullPathA, fullPathB, analysisA, analysisB, cancellationToken),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -40,6 +55,7 @@ public sealed class NAudioCandidateQualityAnalyzer : ICandidateQualityAnalyzer
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SoundFileException or NotSupportedException or ArgumentException or InvalidDataException)
         {
+            // Exists確認直後の削除やNAS切断などは競合として残るため、I/O例外の捕捉は保険として維持する。
             return CreateFailure(candidate, ex.Message);
         }
     }
@@ -122,7 +138,7 @@ public sealed class NAudioCandidateQualityAnalyzer : ICandidateQualityAnalyzer
 
     private static FileStream OpenAudioStream(string path)
         => new(
-            Path.GetFullPath(path),
+            path,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,

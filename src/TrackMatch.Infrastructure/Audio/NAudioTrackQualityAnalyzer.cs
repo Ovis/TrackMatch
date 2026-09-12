@@ -24,6 +24,13 @@ public sealed class NAudioTrackQualityAnalyzer : ITrackQualityAnalyzer
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var fullPath = Path.GetFullPath(path);
 
+        // Candidate表示後に利用者がExplorer等から音源を削除することは正常な操作としてあり得る。
+        // FileStreamを開いてFileNotFoundExceptionを発生させる前に検出し、解析失敗として扱う。
+        if (!File.Exists(fullPath))
+        {
+            return CreateFailure(trackId, QualityAnalysisStatus.Failed, $"音声ファイルが見つかりません: {fullPath}");
+        }
+
         try
         {
             return await Task.Run(
@@ -40,6 +47,7 @@ public sealed class NAudioTrackQualityAnalyzer : ITrackQualityAnalyzer
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SoundFileException or ArgumentException)
         {
+            // Exists確認後に削除・切断される競合は避けられないため、I/O例外の捕捉は保険として残す。
             return CreateFailure(trackId, QualityAnalysisStatus.Failed, ex.Message);
         }
     }
