@@ -203,6 +203,30 @@ public partial class MainWindow : Window
     private async void KeepA_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepAAsync();
     private async void KeepB_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepBAsync();
 
+    private void CandidateMore_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button)
+        {
+            return;
+        }
+
+        // 主要なレビュー3操作から低頻度操作を分離し、三点リーダーから必要な操作だけ提示する。
+        var clearReviewItem = new MenuItem
+        {
+            Header = "レビューを未確定に戻す",
+            IsEnabled = _viewModel.CanClearReview,
+        };
+        clearReviewItem.Click += ClearReview_Click;
+
+        var menu = new ContextMenu
+        {
+            PlacementTarget = button,
+            Placement = PlacementMode.Bottom,
+        };
+        menu.Items.Add(clearReviewItem);
+        menu.IsOpen = true;
+    }
+
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
     {
         if (!_viewModel.CanClearReview) return;
