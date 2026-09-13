@@ -82,8 +82,8 @@ public partial class MainWindow : Window
             catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
             {
                 new ConfirmationDialog(
-                    "Trash Root設定失敗",
-                    "Trash Rootを設定できませんでした",
+                    "ごみ箱フォルダ設定失敗",
+                    "ごみ箱フォルダを設定できませんでした",
                     exception.Message,
                     "閉じる",
                     kind: AppDialogKind.Error)
@@ -126,7 +126,7 @@ public partial class MainWindow : Window
             {
                 var collisionDialog = new ConfirmationDialog(
                     "移動先のファイル重複",
-                    $"Trash側に同じPathのファイルが {collisions} 件あります",
+                    $"ごみ箱側に同じパスのファイルが {collisions} 件あります",
                     "別名で移動するか、衝突したファイルだけスキップするかを選択してください。",
                     "別名で移動",
                     "スキップ",
@@ -144,8 +144,8 @@ public partial class MainWindow : Window
             }
 
             var confirmation = new ConfirmationDialog(
-                "Trashへ移動",
-                $"レビュー済みの破棄対象 {preview.ReadyCount} 件をTrashへ移動しますか？",
+                "ごみ箱へ移動",
+                $"レビュー済みの破棄対象 {preview.ReadyCount} 件をごみ箱へ移動しますか？",
                 "元ファイルの場所から実際に移動されます。",
                 "ごみ箱へ移動",
                 "キャンセル",
@@ -158,9 +158,9 @@ public partial class MainWindow : Window
             if (result is not null)
             {
                 new ConfirmationDialog(
-                    "Trash移動結果",
+                    "ごみ箱への移動結果",
                     $"移動完了: {result.MovedCount}件",
-                    $"Blocked / Skipped: {result.BlockedCount}件",
+                    $"移動不可 / スキップ: {result.BlockedCount}件",
                     "閉じる",
                     kind: result.BlockedCount == 0 ? AppDialogKind.Information : AppDialogKind.Warning)
                 { Owner = this }.ShowDialog();
@@ -169,8 +169,8 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             new ConfirmationDialog(
-                "Trash処理失敗",
-                "Trash処理を完了できませんでした",
+                "ごみ箱処理失敗",
+                "ごみ箱処理を完了できませんでした",
                 exception.Message,
                 "閉じる",
                 kind: AppDialogKind.Error)
@@ -181,7 +181,7 @@ public partial class MainWindow : Window
     private async Task<bool> EnsureTrashRootAsync()
     {
         if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot)) return true;
-        var dialog = new OpenFolderDialog { Title = "Trashのルートフォルダを選択", Multiselect = false };
+        var dialog = new OpenFolderDialog { Title = "ごみ箱フォルダを選択", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return false;
         await _viewModel.SetTrashRootAsync(dialog.FolderName);
         return true;
@@ -280,7 +280,7 @@ public partial class MainWindow : Window
         var confirmation = new ConfirmationDialog(
             "レビューを未確定に戻す",
             "この候補を未レビューへ戻しますか？",
-            "現在のレビュー結果を削除します。Trashへ移動済みのファイルは自動では元に戻りません。",
+            "現在のレビュー結果を削除します。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
             "未レビューへ戻す",
             "キャンセル",
             kind: AppDialogKind.Warning)
