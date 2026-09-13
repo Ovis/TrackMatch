@@ -27,13 +27,13 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             INSERT INTO Tracks (
                 LibraryId, RootId, RelativePath, Path,
                 FileSize, LastWriteTimeUtcTicks, DurationTicks,
-                ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
+                ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
                 Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels,
                 IsMissing, UpdatedAtUtcTicks)
             VALUES (
                 @LibraryId, @RootId, @RelativePath, @Path,
                 @FileSize, @LastWriteTimeUtcTicks, @DurationTicks,
-                @ArtistsJson, @Title, @Album, @TrackNumber, @DiscNumber, @GenresJson,
+                @ArtistsJson, @Title, @Album, @TrackNumber, @DiscNumber, @GenresJson, @Year,
                 @Format, @Codec, @BitrateKbps, @SampleRateHz, @BitDepth, @Channels,
                 0, @UpdatedAtUtcTicks)
             ON CONFLICT(RootId, RelativePath) DO UPDATE SET
@@ -48,6 +48,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
                 TrackNumber = excluded.TrackNumber,
                 DiscNumber = excluded.DiscNumber,
                 GenresJson = excluded.GenresJson,
+                Year = excluded.Year,
                 Format = excluded.Format,
                 Codec = excluded.Codec,
                 BitrateKbps = excluded.BitrateKbps,
@@ -73,6 +74,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             TrackNumber = metadata.TrackNumber is null ? (long?)null : metadata.TrackNumber.Value,
             DiscNumber = metadata.DiscNumber is null ? (long?)null : metadata.DiscNumber.Value,
             GenresJson = JsonSerializer.Serialize(metadata.Genres),
+            Year = metadata.Year is null ? (long?)null : metadata.Year.Value,
             metadata.Format,
             metadata.Codec,
             metadata.BitrateKbps,
@@ -108,7 +110,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         const string sql = """
             SELECT Id, LibraryId, RootId, RelativePath, Path,
                    FileSize, LastWriteTimeUtcTicks, DurationTicks,
-                   ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
+                   ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
                    Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing
             FROM Tracks
             WHERE Path = @Path COLLATE NOCASE;
@@ -134,7 +136,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         const string sql = """
             SELECT Id, LibraryId, RootId, RelativePath, Path,
                    FileSize, LastWriteTimeUtcTicks, DurationTicks,
-                   ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson,
+                   ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
                    Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing
             FROM Tracks
             WHERE RootId = @RootId;
@@ -332,7 +334,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             ToNullableInt(row.BitrateKbps),
             ToNullableInt(row.SampleRateHz),
             ToNullableInt(row.BitDepth),
-            ToNullableInt(row.Channels));
+            ToNullableInt(row.Channels),
+            row.Year is null ? null : checked((uint)row.Year.Value));
 
         return new StoredTrack(
             row.Id,
@@ -392,6 +395,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         long? TrackNumber,
         long? DiscNumber,
         string GenresJson,
+        long? Year,
         string? Format,
         string? Codec,
         long? BitrateKbps,
