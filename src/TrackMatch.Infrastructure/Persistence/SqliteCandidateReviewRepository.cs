@@ -57,7 +57,7 @@ public sealed class SqliteCandidateReviewRepository(
         const string selectionSql = """
             INSERT INTO CandidateReviewSelections (TrackIdA, TrackIdB, KeepTrackId)
             VALUES (@TrackIdA, @TrackIdB, @KeepTrackId)
-            ON CONFLICT(TrackIdA, TrackIdB) DO UPDATE SET
+            ON CONFLICT(TrackIdA,TrackIdB) DO UPDATE SET
                 KeepTrackId = excluded.KeepTrackId;
             """;
         const string deleteSelectionSql = """
@@ -83,6 +83,13 @@ public sealed class SqliteCandidateReviewRepository(
         await connection.ExecuteAsync(new CommandDefinition(selectionCommand, parameters, transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    public Task SaveAsync(
+        CandidateReview review,
+        long sourceLibraryId,
+        CancellationToken cancellationToken = default)
+        => new SqliteCandidateReviewRepository(database, sourceLibraryId).SaveAsync(review, cancellationToken);
 
     /// <inheritdoc />
     public async Task DeleteAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
@@ -123,6 +130,13 @@ public sealed class SqliteCandidateReviewRepository(
     }
 
     /// <inheritdoc />
+    public Task DeleteAsync(
+        CandidatePairKey pair,
+        long sourceLibraryId,
+        CancellationToken cancellationToken = default)
+        => new SqliteCandidateReviewRepository(database, sourceLibraryId).DeleteAsync(pair, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -147,7 +161,7 @@ public sealed class SqliteCandidateReviewRepository(
         return rows.Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)).ToHashSet();
     }
 
-    private async Task ArchiveAsync(
+    private static async Task ArchiveAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
         CurrentReviewRow current,
@@ -156,11 +170,11 @@ public sealed class SqliteCandidateReviewRepository(
         CancellationToken cancellationToken)
     {
         string? sourceLibraryName = null;
-        if (sourceLibraryId is { } operationLibraryId)
+        if (current.SourceLibraryId is { } originalSourceLibraryId)
         {
             sourceLibraryName = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
                 "SELECT Name FROM Libraries WHERE Id = @LibraryId;",
-                new { LibraryId = operationLibraryId },
+                new { LibraryId = originalSourceLibraryId },
                 transaction,
                 cancellationToken: cancellationToken));
         }
@@ -180,7 +194,7 @@ public sealed class SqliteCandidateReviewRepository(
                 current.TrackIdB,
                 current.Decision,
                 current.Note,
-                SourceLibraryId = sourceLibraryName is null ? (long?)null : sourceLibraryId,
+                SourceLibraryId = sourceLibraryName is null ? (long?)null : current.SourceLibraryId,
                 SourceLibraryNameSnapshot = sourceLibraryName,
                 ChangedAtUtcTicks = DateTime.UtcNow.Ticks,
                 ChangeKind = changeKind,
