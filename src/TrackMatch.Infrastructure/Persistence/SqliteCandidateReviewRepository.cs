@@ -7,7 +7,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// 人手で確定した候補レビューをSQLiteへ保存する。
 /// </summary>
-public sealed class SqliteCandidateReviewRepository(SqliteDatabase database) : ICandidateReviewRepository
+public sealed class SqliteCandidateReviewRepository(SqliteDatabase database) : ICandidateReviewMutationRepository
 {
     public async Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
     {
