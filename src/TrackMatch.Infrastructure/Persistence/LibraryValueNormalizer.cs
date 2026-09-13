@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// Library名とWindows Root Pathを永続化前に正規化する。
+/// Library名とWindows Pathを永続化前に正規化する。
 /// </summary>
 internal static partial class LibraryValueNormalizer
 {
@@ -24,13 +24,29 @@ internal static partial class LibraryValueNormalizer
     }
 
     /// <summary>
-    /// Windowsの絶対Pathを、比較と保存に使用できる字句上の正規形へ変換する。
+    /// Windowsの絶対Root Pathを、比較と保存に使用できる字句上の正規形へ変換する。
+    /// </summary>
+    internal static (string DisplayPath, string Key) NormalizeRootPath(string path)
+        => NormalizeWindowsAbsolutePath(path, "対象フォルダ");
+
+    /// <summary>
+    /// Global Trackの物理Pathを、Track Identityとして使用する字句上の正規形へ変換する。
     /// </summary>
     /// <remarks>
-    /// JunctionやSymlinkの実体解決は仕様対象外なので、ファイルシステムへ問い合わせず字句だけを正規化する。
-    /// この実装によりLinux上のCIでもWindows Path規則を同じように検証できる。
+    /// JunctionやSymlinkの実体解決は行わない。異なる字句Pathが同じ実体を指す場合でも別Trackとして扱う。
     /// </remarks>
-    internal static (string DisplayPath, string Key) NormalizeRootPath(string path)
+    internal static (string DisplayPath, string Key) NormalizeTrackPath(string path)
+        => NormalizeWindowsAbsolutePath(path, "音源ファイル");
+
+    /// <summary>
+    /// 2つの正規化Rootが同一または包含関係にあるかを判定する。
+    /// </summary>
+    internal static bool Overlaps(string leftKey, string rightKey)
+        => string.Equals(leftKey, rightKey, StringComparison.Ordinal)
+           || IsAncestor(leftKey, rightKey)
+           || IsAncestor(rightKey, leftKey);
+
+    private static (string DisplayPath, string Key) NormalizeWindowsAbsolutePath(string path, string subject)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -59,7 +75,7 @@ internal static partial class LibraryValueNormalizer
         }
         else
         {
-            throw new ArgumentException("対象フォルダにはWindowsの絶対パスを指定してください。", nameof(path));
+            throw new ArgumentException($"{subject}にはWindowsの絶対パスを指定してください。", nameof(path));
         }
 
         var normalizedSegments = new List<string>();
@@ -74,7 +90,7 @@ internal static partial class LibraryValueNormalizer
             {
                 if (normalizedSegments.Count == 0)
                 {
-                    throw new ArgumentException("対象フォルダより上位へ移動するパスは指定できません。", nameof(path));
+                    throw new ArgumentException($"{subject}のルートより上位へ移動するパスは指定できません。", nameof(path));
                 }
 
                 normalizedSegments.RemoveAt(normalizedSegments.Count - 1);
@@ -91,14 +107,6 @@ internal static partial class LibraryValueNormalizer
         // Windowsの通常Path比較に合わせ、大小文字差を比較キーで吸収する。
         return (displayPath, displayPath.ToUpperInvariant());
     }
-
-    /// <summary>
-    /// 2つの正規化Rootが同一または包含関係にあるかを判定する。
-    /// </summary>
-    internal static bool Overlaps(string leftKey, string rightKey)
-        => string.Equals(leftKey, rightKey, StringComparison.Ordinal)
-           || IsAncestor(leftKey, rightKey)
-           || IsAncestor(rightKey, leftKey);
 
     private static bool IsAncestor(string ancestor, string descendant)
         => descendant.Length > ancestor.Length
