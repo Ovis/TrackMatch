@@ -21,6 +21,7 @@ public partial class MainWindow
         base.OnContentRendered(e);
         EnsureQualityUiAttached();
         EnsureQualityAnalysisStarted();
+        ApplyCandidateGridHeaderFillerBackground();
     }
 
     internal void EnsureQualityAnalysisStarted()
@@ -49,10 +50,39 @@ public partial class MainWindow
     private void EnsureQualityUiAttached()
     {
         if (_qualityUiAttached) return;
-        var comparisonGroup = FindVisualChildren<GroupBox>(this).FirstOrDefault(item => string.Equals(item.Header?.ToString(), "比較結果", StringComparison.Ordinal));
-        if (comparisonGroup?.Parent is Grid detailGrid) RearrangeCandidateDetailLayout(detailGrid, comparisonGroup);
+
+        var comparisonGroup = FindVisualChildren<GroupBox>(this)
+            .FirstOrDefault(item => string.Equals(item.Header?.ToString(), "比較結果", StringComparison.Ordinal));
+        var detailGrid = comparisonGroup is null ? null : FindCandidateDetailGrid(comparisonGroup);
+        if (comparisonGroup is not null && detailGrid is not null)
+        {
+            RearrangeCandidateDetailLayout(detailGrid, comparisonGroup);
+        }
+
         AttachQualityProgressToFooter();
         _qualityUiAttached = true;
+    }
+
+    /// <summary>
+    /// UI刷新後は比較結果が中間Gridの内側へ入ったため、即親ではなく同期再生を持つ祖先Gridを詳細領域として特定する。
+    /// </summary>
+    private static Grid? FindCandidateDetailGrid(DependencyObject source)
+    {
+        for (var current = VisualTreeHelper.GetParent(source); current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is not Grid grid)
+            {
+                continue;
+            }
+
+            if (grid.Children.OfType<GroupBox>()
+                .Any(item => string.Equals(item.Header?.ToString(), "A/B 同期再生", StringComparison.Ordinal)))
+            {
+                return grid;
+            }
+        }
+
+        return null;
     }
 
     private void RearrangeCandidateDetailLayout(Grid detailGrid, GroupBox comparisonGroup)
@@ -88,13 +118,21 @@ public partial class MainWindow
         comparisonAndQuality.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
         comparisonAndQuality.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
         Grid.SetRow(comparisonAndQuality, 2);
+
+        // comparisonGroupは既存の中間Gridから外してから新しい比較領域へ付け替える。
+        if (comparisonGroup.Parent is Panel previousParent)
+        {
+            previousParent.Children.Remove(comparisonGroup);
+        }
         Grid.SetRow(comparisonGroup, 0);
         Grid.SetColumn(comparisonGroup, 0);
         comparisonAndQuality.Children.Add(comparisonGroup);
+
         var qualityPanel = new CandidateQualityPanel();
         Grid.SetColumn(qualityPanel, 2);
         comparisonAndQuality.Children.Add(qualityPanel);
         detailGrid.Children.Add(comparisonAndQuality);
+
         Grid.SetRow(playbackGroup, 4);
         detailGrid.Children.Add(playbackGroup);
         Grid.SetRow(reviewGrid, 6);
@@ -111,15 +149,33 @@ public partial class MainWindow
 
     private static void CompactComparisonResult(GroupBox comparisonGroup)
     {
-        if (comparisonGroup.Content is not Grid comparisonGrid) return;
-        foreach (var row in comparisonGrid.RowDefinitions) row.Height = GridLength.Auto;
-        comparisonGrid.VerticalAlignment = VerticalAlignment.Top;
+        if (comparisonGroup.Content is not Panel comparisonPanel) return;
+        comparisonPanel.VerticalAlignment = VerticalAlignment.Top;
         comparisonGroup.VerticalContentAlignment = VerticalAlignment.Top;
     }
 
     private static void ScrollSourcePanelsToTop(Grid sourceGrid)
     {
         foreach (var scrollViewer in FindVisualChildren<ScrollViewer>(sourceGrid)) scrollViewer.ScrollToTop();
+    }
+
+    /// <summary>
+    /// DataGridがVertical ScrollBar用に確保する列ヘッダー右端のFillerを、通常の列ヘッダーと同じ背景色へ揃える。
+    /// </summary>
+    private void ApplyCandidateGridHeaderFillerBackground()
+    {
+        var candidateGrid = FindVisualChildren<DataGrid>(this).FirstOrDefault();
+        if (candidateGrid is null) return;
+
+        var headerBackground = (Brush)FindResource("DataGridHeaderBackgroundBrush");
+        foreach (var header in FindVisualChildren<DataGridColumnHeader>(candidateGrid))
+        {
+            if (header.Column is null)
+            {
+                header.Background = headerBackground;
+                header.BorderBrush = (Brush)FindResource("BorderBrush");
+            }
+        }
     }
 
     private void AttachQualityProgressToFooter()
