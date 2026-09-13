@@ -73,7 +73,7 @@ public partial class LibraryManagementDialog : Window
         RootsListBox.ItemsSource = library?.Roots;
         _nameDirty = false;
         _loadingSelection = false;
-        StatusText.Text = library is null ? "Libraryがありません。" : string.Empty;
+        StatusText.Text = library is null ? "ライブラリがありません。" : string.Empty;
     }
 
     private void NameTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -92,7 +92,7 @@ public partial class LibraryManagementDialog : Window
             var id = _selectedLibrary.Id;
             await _service.RenameLibraryAsync(id, NameTextBox.Text);
             await ReloadAsync(id);
-            StatusText.Text = "Library名を保存しました。";
+            StatusText.Text = "ライブラリ名を保存しました。";
             return true;
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -104,8 +104,8 @@ public partial class LibraryManagementDialog : Window
         if (!_nameDirty) return true;
 
         var dialog = new ConfirmationDialog(
-            "未保存のLibrary名",
-            "Library名が変更されています",
+            "未保存のライブラリ名",
+            "ライブラリ名が変更されています",
             "変更を保存するか、破棄して続行するかを選択してください。",
             "保存",
             "破棄",
@@ -135,9 +135,9 @@ public partial class LibraryManagementDialog : Window
         var summary = await _service.GetDeleteSummaryAsync(library.Id);
 
         var confirmation = new ConfirmationDialog(
-            "Libraryを削除",
-            $"Library '{library.Name}' を削除しますか？",
-            $"Root: {summary.RootCount:N0}\nTrack: {summary.TrackCount:N0}\n\nFingerprint・Candidate・Review等のTrackMatch管理データも削除されます。元Audio Fileは削除されません。",
+            "ライブラリを削除",
+            $"ライブラリ「{library.Name}」を削除しますか？",
+            $"対象フォルダ: {summary.RootCount:N0}\n音源: {summary.TrackCount:N0}\n\nフィンガープリント・候補・レビューなどのTrackMatch管理データも削除されます。元の音源ファイルは削除されません。",
             "削除",
             "キャンセル",
             kind: AppDialogKind.Warning)
@@ -153,7 +153,7 @@ public partial class LibraryManagementDialog : Window
     {
         var library = _selectedLibrary;
         if (library is null) return;
-        var dialog = new OpenFolderDialog { Title = "追加するLibrary Rootを選択", Multiselect = false };
+        var dialog = new OpenFolderDialog { Title = "追加する対象フォルダを選択", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return;
         try { await _service.AddRootAsync(library.Id, dialog.FolderName); await ReloadAsync(library.Id); }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { StatusText.Text = exception.Message; }
@@ -168,9 +168,9 @@ public partial class LibraryManagementDialog : Window
         {
             var count = await _service.GetRootTrackCountAsync(root.Id);
             var confirmation = new ConfirmationDialog(
-                "Rootを削除",
-                $"Root '{root.Path}' を削除しますか？",
-                $"対象Track: {count:N0}\nTrackMatch管理データは削除されますが、元Audio Fileは削除されません。",
+                "対象フォルダを削除",
+                $"対象フォルダ「{root.Path}」を削除しますか？",
+                $"対象音源: {count:N0}\nTrackMatch管理データは削除されますが、元の音源ファイルは削除されません。",
                 "削除",
                 "キャンセル",
                 kind: AppDialogKind.Warning)
@@ -189,7 +189,7 @@ public partial class LibraryManagementDialog : Window
         var library = _selectedLibrary;
         var root = RootsListBox.SelectedItem as LibraryRoot;
         if (library is null || root is null) return;
-        var picker = new OpenFolderDialog { Title = "新しいRoot保存場所を選択", Multiselect = false };
+        var picker = new OpenFolderDialog { Title = "新しい保存場所を選択", Multiselect = false };
         if (picker.ShowDialog(this) != true) return;
         try
         {
@@ -198,14 +198,14 @@ public partial class LibraryManagementDialog : Window
             if (confirmation.ShowDialog() != true) return;
             await _service.RemapRootAsync(library.Id, root.Id, picker.FolderName);
             await ReloadAsync(library.Id);
-            StatusText.Text = "Root保存場所を変更しました。通常のスキャン・分析は自動実行していません。";
+            StatusText.Text = "対象フォルダの保存場所を変更しました。通常のスキャン・分析は自動実行していません。";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { StatusText.Text = exception.Message; }
     }
 
     private void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new OpenFolderDialog { Title = "Trashのルートフォルダを選択", Multiselect = false };
+        var picker = new OpenFolderDialog { Title = "ごみ箱フォルダを選択", Multiselect = false };
         if (picker.ShowDialog(this) != true) return;
         SelectedTrashRoot = picker.FolderName;
         TrashRootTextBox.Text = SelectedTrashRoot;
