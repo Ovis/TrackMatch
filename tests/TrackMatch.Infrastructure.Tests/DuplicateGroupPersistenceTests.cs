@@ -8,13 +8,14 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// レビュー更新とSQLite上の重複グループ再構成が一貫することを検証する。
+/// Global Verdict更新とSQLite上のGlobal Duplicate Group、Library固有Keepが一貫することを検証する。
 /// </summary>
 public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests", Guid.NewGuid().ToString("N"));
     private SqliteDatabase _database = null!;
     private long _libraryId;
+    private long _rootId;
 
     public async ValueTask InitializeAsync()
     {
@@ -22,8 +23,9 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         _database = new SqliteDatabase(Path.Combine(_directory, "trackmatch.db"));
         await _database.InitializeAsync(TestContext.Current.CancellationToken);
         var libraries = new SqliteLibraryRepository(_database);
-        await libraries.CreateAsync("Test Library", [_directory], TestContext.Current.CancellationToken);
-        _libraryId = Assert.Single(await libraries.GetAllAsync(TestContext.Current.CancellationToken)).Id;
+        var library = await libraries.CreateAsync("Test Library", [_directory], TestContext.Current.CancellationToken);
+        _libraryId = library.Id;
+        _rootId = Assert.Single(library.Roots).Id;
     }
 
     public ValueTask DisposeAsync()
@@ -34,7 +36,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveReview_AddsThirdTrackAndChangesGroupKeep()
+    public async Task SaveReview_AddsThirdTrackAndChangesLibraryKeep()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
@@ -44,12 +46,14 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 
         var group = Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, group.KeepStatus);
         Assert.Equal(b, group.KeepTrackId);
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.TrackIds);
+        Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.GlobalTrackIds);
     }
 
     [Fact]
-    public async Task DeleteReview_SplitsGroupAndLeavesEveryRemainingGroupWithKeep()
+    public async Task DeleteReview_SplitsGroupAndLeavesRemainingProjectionWithValidKeep()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
@@ -64,8 +68,11 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var group = Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b }.Order().ToArray(), group.TrackIds);
-        Assert.Contains(group.KeepTrackId, group.TrackIds);
-        Assert.DoesNotContain(c, group.TrackIds);
+        Assert.Equal(new[] { a, b }.Order().ToArray(), group.GlobalTrackIds);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, group.KeepStatus);
+        Assert.NotNull(group.KeepTrackId);
+        Assert.Contains(group.KeepTrackId.Value, group.TrackIds);
+        Assert.DoesNotContain(c, group.GlobalTrackIds);
     }
 
     [Fact]
@@ -97,10 +104,22 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     private async Task<(long A, long B, long C)> CreateTracksAsync()
     {
         var tracks = new SqliteTrackRepository(_database);
-        var a = await tracks.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
-        var b = await tracks.UpsertMetadataAsync(CreateMetadata("b.flac"), TestContext.Current.CancellationToken);
-        var c = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        var a = await CreateTrackAsync(tracks, "a.flac");
+        var b = await CreateTrackAsync(tracks, "b.flac");
+        var c = await CreateTrackAsync(tracks, "c.flac");
         return (a, b, c);
+    }
+
+    private async Task<long> CreateTrackAsync(SqliteTrackRepository tracks, string fileName)
+    {
+        var id = await tracks.UpsertMetadataAsync(CreateMetadata(fileName), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            id,
+            fileName,
+            TestContext.Current.CancellationToken);
+        return id;
     }
 
     private AudioTrackMetadata CreateMetadata(string fileName)
