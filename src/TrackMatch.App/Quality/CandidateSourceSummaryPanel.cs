@@ -67,15 +67,17 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         pathText.SetBinding(ToolTipProperty, new Binding(PathProperty()));
         bottom.Children.Add(pathText);
 
-        // フォントGlyphは環境によって外観が変わるため、テーマで共有するGeometryからフォルダーを描画する。
-        // TrackMatch.Application名前空間との名前衝突を避けるため、WPFのApplication型を完全修飾する。
+        // 背面と前面を重ねたフォルダー表現は小サイズで影のように見えるため、
+        // 補助操作として視線を奪わない単線の開いたフォルダー輪郭だけを描画する。
         var folderIcon = new System.Windows.Shapes.Path
         {
-            Data = (Geometry)System.Windows.Application.Current.FindResource("FolderOpenIconGeometry"),
+            Data = Geometry.Parse("M2,13 L4.5,6 L16,6 L13.5,13 Z M2,13 L2,4 L7,4 L9,6"),
             Stroke = (Brush)System.Windows.Application.Current.FindResource("TextSecondaryBrush"),
-            StrokeThickness = 1.4,
+            StrokeThickness = 1.2,
             StrokeLineJoin = PenLineJoin.Round,
-            Fill = Brushes.Transparent,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Fill = null,
             Width = 18,
             Height = 16,
             Stretch = Stretch.Uniform,
