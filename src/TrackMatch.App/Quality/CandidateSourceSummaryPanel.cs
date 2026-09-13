@@ -67,17 +67,27 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         pathText.SetBinding(ToolTipProperty, new Binding(PathProperty()));
         bottom.Children.Add(pathText);
 
-        // フォルダーを開く操作は補助的な操作なので、本文より強く見えない小型アイコンに留める。
+        // フォントGlyphは環境によって外観が変わるため、テーマで共有するGeometryからフォルダーを描画する。
+        var folderIcon = new System.Windows.Shapes.Path
+        {
+            Data = (Geometry)Application.Current.FindResource("FolderOpenIconGeometry"),
+            Stroke = (Brush)Application.Current.FindResource("TextSecondaryBrush"),
+            StrokeThickness = 1.4,
+            StrokeLineJoin = PenLineJoin.Round,
+            Fill = Brushes.Transparent,
+            Width = 18,
+            Height = 16,
+            Stretch = Stretch.Uniform,
+        };
         var openFolderButton = new Button
         {
-            Content = "↗",
+            Content = folderIcon,
             ToolTip = "フォルダーを開く",
             Width = 32,
             Height = 30,
             MinWidth = 32,
             MinHeight = 30,
             Padding = new Thickness(0),
-            FontSize = 16,
         };
         openFolderButton.SetBinding(TagProperty, new Binding(PathProperty()));
         openFolderButton.Click += OpenFolderButton_Click;
