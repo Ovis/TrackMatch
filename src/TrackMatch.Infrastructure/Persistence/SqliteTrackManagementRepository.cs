@@ -69,9 +69,17 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
     public Task<ForceReanalysisResult> ForceReanalysisTrackAsync(
         long trackId,
         CancellationToken cancellationToken = default)
+        => ForceReanalysisTracksAsync([trackId], cancellationToken);
+
+    /// <summary>
+    /// 選択した複数Global Trackを1 TransactionでForce Reanalysisする。
+    /// </summary>
+    public Task<ForceReanalysisResult> ForceReanalysisTracksAsync(
+        IReadOnlyCollection<long> trackIds,
+        CancellationToken cancellationToken = default)
         => ForceReanalysisAsync(
             ForceReanalysisScope.Track,
-            [trackId],
+            trackIds,
             "ForceReanalysisTrack",
             cancellationToken);
 
@@ -162,6 +170,23 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
+
+        // Track削除のCASCADEで構成Trackが1件以下になったGroupは有効なGlobal Groupではない。
+        // 後続再同期の入力へ孤立Groupを残さないため、このTransaction内でGroup本体も整理する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM DuplicateGroups
+            WHERE Id IN (
+                SELECT g.Id
+                FROM DuplicateGroups g
+                LEFT JOIN DuplicateGroupTracks gt ON gt.DuplicateGroupId = g.Id
+                GROUP BY g.Id
+                HAVING COUNT(gt.TrackId) < 2
+            );
+            """,
+            transaction: transaction,
+            cancellationToken: cancellationToken));
+
         await transaction.CommitAsync(cancellationToken);
         return deleted;
     }
@@ -172,6 +197,7 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
         string invalidationReason,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(trackIds);
         var ids = trackIds.Where(id => id > 0).Distinct().ToArray();
         if (ids.Length == 0)
         {
