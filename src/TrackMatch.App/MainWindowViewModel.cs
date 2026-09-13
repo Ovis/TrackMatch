@@ -231,13 +231,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         {
             var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
             var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
-            var progress = new Progress<LibraryAnalysisStage>(stage => AnalysisStatusText = stage switch
-            {
-                LibraryAnalysisStage.Scanning => "スキャン中...",
-                LibraryAnalysisStage.GeneratingCandidates => "候補生成中...",
-                LibraryAnalysisStage.AnalyzingCandidates => "詳細比較中...",
-                _ => AnalysisStatusText,
-            });
+            var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
             var result = await workflow.RunAsync(library.Id, progress, _analysisCancellation.Token);
             var summaries = result.Scan.Roots.Select(item => item.Summary).ToArray();
             foreach (var error in result.Scan.Roots.SelectMany(item => item.Errors)) _analysisErrors.Add(error);
@@ -408,6 +402,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private static bool SameCandidate(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
         => left.TrackIdA == right.TrackIdA && left.TrackIdB == right.TrackIdB;
+
+    private static string FormatAnalysisProgress(LibraryAnalysisProgress progress)
+    {
+        var detail = string.IsNullOrWhiteSpace(progress.Detail) ? string.Empty : $" {progress.Detail}";
+        var count = progress.TotalCount is { } total
+            ? $" — {progress.CompletedCount:N0} / {total:N0}"
+            : progress.CompletedCount > 0
+                ? $" — {progress.CompletedCount:N0}件処理済み"
+                : string.Empty;
+
+        return progress.Stage switch
+        {
+            LibraryAnalysisStage.Scanning => $"スキャン中:{detail}{count}{(progress.TotalCount is not null ? "曲" : string.Empty)}",
+            LibraryAnalysisStage.GeneratingCandidates => $"候補生成中:{detail}{count}",
+            LibraryAnalysisStage.AnalyzingCandidates => $"詳細比較中:{detail}{count}{(progress.TotalCount is not null ? "件" : string.Empty)}",
+            _ => "分析中...",
+        };
+    }
 
     private string FormatAnalysisSummary(string prefix, IReadOnlyCollection<ScanSessionSummary> summaries)
     {
