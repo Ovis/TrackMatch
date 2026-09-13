@@ -12,9 +12,16 @@ public sealed class CandidateAnalysisService(
     ICandidateComparisonRepository comparisonRepository,
     FingerprintComparer comparer)
 {
+    /// <summary>
+    /// 保存済み候補ペアを詳細比較する。
+    /// </summary>
+    /// <param name="fingerprintAlgorithm">対象Fingerprint Algorithm</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    /// <param name="progress">候補ペア単位の比較進捗通知先</param>
     public async Task<CandidateAnalysisResult> AnalyzeAsync(
         int fingerprintAlgorithm,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<CandidateAnalysisProgress>? progress = null)
     {
         if (fingerprintAlgorithm < 0)
         {
@@ -28,6 +35,8 @@ public sealed class CandidateAnalysisService(
         var changedComparisons = new List<CandidateComparison>();
         var reused = 0;
         var skipped = 0;
+        var completed = 0;
+        progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
 
         foreach (var pair in pairs)
         {
@@ -37,6 +46,8 @@ public sealed class CandidateAnalysisService(
             {
                 // Track更新後などで候補生成時のFingerprintが失効している場合は、古い組み合わせを比較しない。
                 skipped++;
+                completed++;
+                progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
                 continue;
             }
 
@@ -47,6 +58,8 @@ public sealed class CandidateAnalysisService(
             {
                 // 両方のFingerprintが前回比較時点から変わっていなければ、raw Fingerprint比較は再実行しない。
                 reused++;
+                completed++;
+                progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
                 continue;
             }
 
@@ -62,6 +75,8 @@ public sealed class CandidateAnalysisService(
                 result.CoverageA,
                 result.CoverageB,
                 CalculateDurationRatio(a.Fingerprint.Duration, b.Fingerprint.Duration)));
+            completed++;
+            progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
         }
 
         await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
@@ -74,3 +89,8 @@ public sealed class CandidateAnalysisService(
         return maximum <= 0d ? 0d : Math.Min(a.TotalSeconds, b.TotalSeconds) / maximum;
     }
 }
+
+/// <summary>
+/// 候補ペアの詳細比較進捗を表す。
+/// </summary>
+public sealed record CandidateAnalysisProgress(int CompletedPairs, int TotalPairs);

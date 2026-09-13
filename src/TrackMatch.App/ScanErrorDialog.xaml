@@ -7,8 +7,8 @@
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="12"/><RowDefinition Height="150"/><RowDefinition Height="12"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <DataGrid x:Name="ErrorsGrid" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionChanged="ErrorsGrid_SelectionChanged">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*"/>
-                <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="120"/>
+                <DataGridTextColumn Header="パス" Binding="{Binding Path}" Width="*"/>
+                <DataGridTextColumn Header="処理段階" Binding="{Binding Stage}" Width="120"/>
                 <DataGridTextColumn Header="概要" Binding="{Binding Message}" Width="2*"/>
             </DataGrid.Columns>
         </DataGrid>

@@ -21,10 +21,10 @@
                         IsEnabled="{Binding CanReanalyzeQuality}" Click="Reanalyze_Click"/>
             </Grid>
 
-            <ScrollViewer Grid.Row="2"
+            <ScrollViewer x:Name="QualityScrollViewer" Grid.Row="2"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          CanContentScroll="True">
+                          CanContentScroll="False">
                 <StackPanel Margin="0,0,4,0">
                     <Border Padding="10" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="3">
                         <StackPanel>
@@ -57,7 +57,13 @@
                               CanUserAddRows="False" CanUserDeleteRows="False"
                               VerticalScrollBarVisibility="Disabled"
                               HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseWheel="QualityMeasurements_PreviewMouseWheel"
                               RowHeaderWidth="0">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="ToolTip" Value="{Binding Description}"/>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="項目" Binding="{Binding Label}" Width="*" MinWidth="180"/>
                             <DataGridTextColumn Header="A" Binding="{Binding ValueA}" Width="110"/>

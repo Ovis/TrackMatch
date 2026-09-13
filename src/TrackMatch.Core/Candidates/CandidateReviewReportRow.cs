@@ -3,7 +3,7 @@ using TrackMatch.Core.Classification;
 namespace TrackMatch.Core.Candidates;
 
 /// <summary>
-/// 分類前の詳細比較結果も含め、GUIで人手確認する候補1行を表す。
+/// 分類前の詳細比較結果と人手レビュー状態を含め、GUIで確認する候補1行を表す。
 /// </summary>
 public sealed record CandidateReviewReportRow(
     long TrackIdA,
@@ -41,4 +41,8 @@ public sealed record CandidateReviewReportRow(
     int? BitDepthA,
     int? BitDepthB,
     int? ChannelsA,
-    int? ChannelsB);
+    int? ChannelsB,
+    CandidateReviewDecision? ReviewDecision = null,
+    long? KeepTrackId = null,
+    uint? YearA = null,
+    uint? YearB = null);

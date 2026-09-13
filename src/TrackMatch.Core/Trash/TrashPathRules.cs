@@ -20,7 +20,7 @@ public static class TrashPathRules
             if (IsSameOrUnder(trash, root) || IsSameOrUnder(root, trash))
             {
                 throw new ArgumentException(
-                    $"Trash RootとLibrary Rootは同一または包含関係にできない: {root}",
+                    $"ごみ箱フォルダとライブラリの対象フォルダは、同じ場所または包含関係にはできません: {root}",
                     nameof(trashRoot));
             }
         }
@@ -48,7 +48,7 @@ public static class TrashPathRules
             var root = Path.GetPathRoot(source);
             if (string.IsNullOrWhiteSpace(root) || root.Length < 2 || root[1] != ':')
             {
-                throw new ArgumentException("Windows Absolute Pathとして解釈できない。", nameof(sourcePath));
+                throw new ArgumentException("Windowsの絶対パスとして解釈できません。", nameof(sourcePath));
             }
 
             var drive = char.ToUpperInvariant(root[0]).ToString();

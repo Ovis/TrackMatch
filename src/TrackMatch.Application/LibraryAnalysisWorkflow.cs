@@ -61,7 +61,8 @@ public sealed class LibraryAnalysisWorkflow
     /// </summary>
     public async Task<LibraryRootScanBatchResult> ScanLibraryAsync(
         long libraryId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<LibraryScanBatchProgress>? progress = null)
     {
         var database = await OpenDatabaseAsync(cancellationToken);
         var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
@@ -69,10 +70,18 @@ public sealed class LibraryAnalysisWorkflow
         var results = new List<IncrementalScanResult>(library.Roots.Count);
 
         // Root間でTrack Identityを共有しない設計なので、各Rootを独立したScan Sessionとして順番に処理する。
-        foreach (var root in library.Roots)
+        for (var index = 0; index < library.Roots.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(await service.ScanAsync(root.Path, cancellationToken));
+            var root = library.Roots[index];
+            var rootProgress = new Progress<IncrementalScanProgress>(value =>
+                progress?.Report(new LibraryScanBatchProgress(
+                    index + 1,
+                    library.Roots.Count,
+                    value.CompletedFiles,
+                    value.TotalFiles,
+                    value.CurrentPath)));
+            results.Add(await service.ScanAsync(root.Path, cancellationToken, rootProgress));
         }
 
         return new LibraryRootScanBatchResult(library.Id, results);
@@ -99,7 +108,8 @@ public sealed class LibraryAnalysisWorkflow
     public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
         long libraryId,
         CandidateGenerationOptions? options = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<CandidateGenerationProgress>? progress = null)
     {
         options ??= new CandidateGenerationOptions();
         options.Validate();
@@ -107,7 +117,7 @@ public sealed class LibraryAnalysisWorkflow
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
         return await CreateCandidateGenerationService(database, libraryId)
-            .GenerateAsync(_fingerprintAlgorithm, options, cancellationToken);
+            .GenerateAsync(_fingerprintAlgorithm, options, cancellationToken, progress);
     }
 
     /// <summary>
@@ -126,12 +136,13 @@ public sealed class LibraryAnalysisWorkflow
     /// </summary>
     public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
         long libraryId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<CandidateAnalysisProgress>? progress = null)
     {
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
         return await CreateCandidateAnalysisService(database, libraryId)
-            .AnalyzeAsync(_fingerprintAlgorithm, cancellationToken);
+            .AnalyzeAsync(_fingerprintAlgorithm, cancellationToken, progress);
     }
 
     /// <summary>
@@ -163,20 +174,41 @@ public sealed class LibraryAnalysisWorkflow
     /// 指定Libraryの全Root走査からLibrary内候補の詳細比較までを一連の処理として実行する。
     /// </summary>
     /// <param name="libraryId">解析対象LibraryのID</param>
-    /// <param name="progress">現在の処理段階をUI等へ通知するための進捗通知先</param>
+    /// <param name="progress">処理段階と実処理件数をUI等へ通知するための進捗通知先</param>
     public async Task<LibraryScopedAnalysisWorkflowResult> RunAsync(
         long libraryId,
-        IProgress<LibraryAnalysisStage>? progress = null,
+        IProgress<LibraryAnalysisProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        progress?.Report(LibraryAnalysisStage.Scanning);
-        var scan = await ScanLibraryAsync(libraryId, cancellationToken);
+        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.Scanning, 0, null, null));
+        var scanProgress = new Progress<LibraryScanBatchProgress>(value =>
+            progress?.Report(new LibraryAnalysisProgress(
+                LibraryAnalysisStage.Scanning,
+                value.CompletedFiles,
+                value.TotalFiles,
+                $"対象フォルダ {value.RootIndex}/{value.RootCount}")));
+        var scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
 
-        progress?.Report(LibraryAnalysisStage.GeneratingCandidates);
-        var generation = await GenerateCandidatesAsync(libraryId, cancellationToken: cancellationToken);
+        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
+        var generationProgress = new Progress<CandidateGenerationProgress>(value =>
+            progress?.Report(new LibraryAnalysisProgress(
+                LibraryAnalysisStage.GeneratingCandidates,
+                value.CompletedCount,
+                value.TotalCount,
+                value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
+        var generation = await GenerateCandidatesAsync(
+            libraryId,
+            cancellationToken: cancellationToken,
+            progress: generationProgress);
 
-        progress?.Report(LibraryAnalysisStage.AnalyzingCandidates);
-        var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken);
+        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
+        var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
+            progress?.Report(new LibraryAnalysisProgress(
+                LibraryAnalysisStage.AnalyzingCandidates,
+                value.CompletedPairs,
+                value.TotalPairs,
+                null)));
+        var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
 
         return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
     }
@@ -224,7 +256,7 @@ public sealed class LibraryAnalysisWorkflow
         }
 
         var library = await new SqliteLibraryRepository(database).GetAsync(libraryId, cancellationToken);
-        return library ?? throw new InvalidOperationException($"Libraryが見つかりません: {libraryId}");
+        return library ?? throw new InvalidOperationException($"ライブラリが見つかりません: {libraryId}");
     }
 
     private async Task<SqliteDatabase> OpenDatabaseAsync(CancellationToken cancellationToken)
@@ -244,6 +276,29 @@ public enum LibraryAnalysisStage
     GeneratingCandidates,
     AnalyzingCandidates,
 }
+
+/// <summary>
+/// ライブラリ分析の実処理件数を含む進捗を表す。
+/// </summary>
+/// <param name="Stage">現在の処理段階</param>
+/// <param name="CompletedCount">現在の段階で処理を完了した件数</param>
+/// <param name="TotalCount">現在の段階の総件数。不明な場合はnull</param>
+/// <param name="Detail">処理段階内の補足表示</param>
+public sealed record LibraryAnalysisProgress(
+    LibraryAnalysisStage Stage,
+    int CompletedCount,
+    int? TotalCount,
+    string? Detail);
+
+/// <summary>
+/// 複数対象フォルダを走査するときの進捗を表す。
+/// </summary>
+public sealed record LibraryScanBatchProgress(
+    int RootIndex,
+    int RootCount,
+    int CompletedFiles,
+    int? TotalFiles,
+    string? CurrentPath);
 
 /// <summary>
 /// 単一Rootの走査、候補生成、詳細比較を一括実行した結果を保持する。

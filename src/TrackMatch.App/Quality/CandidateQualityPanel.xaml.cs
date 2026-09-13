@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace TrackMatch.App.Quality;
 
@@ -27,5 +28,16 @@ public partial class CandidateQualityPanel : UserControl
         {
             await window.ReanalyzeSelectedQualityAsync();
         }
+    }
+
+    /// <summary>
+    /// 内部スクロールを持たない測定値Grid上でも、音質比較全体のScrollViewerをホイール操作できるようにする。
+    /// </summary>
+    private void QualityMeasurements_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // DataGridは自身に縦ScrollBarがなくてもMouseWheelを処理するため、
+        // そのままでは親ScrollViewerへスクロール操作が伝わらない。
+        QualityScrollViewer.ScrollToVerticalOffset(QualityScrollViewer.VerticalOffset - e.Delta);
+        e.Handled = true;
     }
 }

@@ -21,7 +21,7 @@ public static class CandidateQualityPresentationFormatter
             {
                 ListSummary = "音質: 解析中",
                 StatusText = "音質解析: 解析中",
-                SummaryLine1 = "音質を解析しています。Candidateレビューはそのまま利用できます。",
+                SummaryLine1 = "音質を解析しています。候補レビューはそのまま利用できます。",
             };
         }
 
@@ -183,14 +183,46 @@ public static class CandidateQualityPresentationFormatter
         TrackQualityAnalysis? analysisB)
         =>
         [
-            new("聴感上の音量 (Integrated Loudness)", FormatNumber(analysisA?.IntegratedLoudnessLufs, "LUFS"), FormatNumber(analysisB?.IntegratedLoudnessLufs, "LUFS")),
-            new("ピークの余裕 (True Peak)", FormatNumber(analysisA?.TruePeakDbtp, "dBTP"), FormatNumber(analysisB?.TruePeakDbtp, "dBTP")),
-            new("曲中の音量変化 (LRA)", FormatNumber(analysisA?.LoudnessRangeLu, "LU"), FormatNumber(analysisB?.LoudnessRangeLu, "LU")),
-            new("PLR", FormatNumber(analysisA?.PeakToLoudnessRatioDb, "dB"), FormatNumber(analysisB?.PeakToLoudnessRatioDb, "dB")),
-            new("左右レベル差", FormatNumber(analysisA?.LeftRightLevelDifferenceDb, "dB"), FormatNumber(analysisB?.LeftRightLevelDifferenceDb, "dB")),
-            new("推定有効上限周波数", FormatFrequencyValue(analysisA?.EffectiveUpperFrequencyHz), FormatFrequencyValue(analysisB?.EffectiveUpperFrequencyHz)),
-            new("クリッピング疑いの総時間", FormatDuration(analysisA?.ClippingTotalDuration), FormatDuration(analysisB?.ClippingTotalDuration)),
-            new("クリッピング疑いの最長連続", FormatDuration(analysisA?.ClippingLongestDuration), FormatDuration(analysisB?.ClippingLongestDuration)),
+            new(
+                "聴感上の音量 (Integrated Loudness)",
+                FormatNumber(analysisA?.IntegratedLoudnessLufs, "LUFS"),
+                FormatNumber(analysisB?.IntegratedLoudnessLufs, "LUFS"),
+                "音源全体の聴感上の平均的な音量をLUFSで表します。値が0に近いほど大きく聞こえます。"),
+            new(
+                "ピークの余裕 (True Peak)",
+                FormatNumber(analysisA?.TruePeakDbtp, "dBTP"),
+                FormatNumber(analysisB?.TruePeakDbtp, "dBTP"),
+                "再生時に生じ得るピークをdBTPで表します。0 dBTPに近いほど余裕が少なく、0を超えるとクリッピングのリスクがあります。"),
+            new(
+                "曲中の音量変化 (LRA)",
+                FormatNumber(analysisA?.LoudnessRangeLu, "LU"),
+                FormatNumber(analysisB?.LoudnessRangeLu, "LU"),
+                "曲の中で聴感上の音量がどの程度変化するかを表します。大きいほど静かな部分と大きな部分の差が広い傾向があります。"),
+            new(
+                "PLR",
+                FormatNumber(analysisA?.PeakToLoudnessRatioDb, "dB"),
+                FormatNumber(analysisB?.PeakToLoudnessRatioDb, "dB"),
+                "ピークと平均的な聴感音量の差を表します。一般に大きいほどピークの余裕や瞬発的なダイナミクスが残っています。"),
+            new(
+                "左右レベル差",
+                FormatNumber(analysisA?.LeftRightLevelDifferenceDb, "dB"),
+                FormatNumber(analysisB?.LeftRightLevelDifferenceDb, "dB"),
+                "左右チャンネルの平均レベル差です。0 dBに近いほど左右の音量バランスが近いことを示します。"),
+            new(
+                "推定有効上限周波数",
+                FormatFrequencyValue(analysisA?.EffectiveUpperFrequencyHz),
+                FormatFrequencyValue(analysisB?.EffectiveUpperFrequencyHz),
+                "有意な高域成分が存在すると推定された上限周波数です。極端に低い場合は、帯域制限や非可逆圧縮由来の高域カットを示すことがあります。"),
+            new(
+                "クリッピング疑いの総時間",
+                FormatDuration(analysisA?.ClippingTotalDuration),
+                FormatDuration(analysisB?.ClippingTotalDuration),
+                "波形が上限付近へ張り付いているなど、クリッピングが疑われる区間の合計時間です。"),
+            new(
+                "クリッピング疑いの最長連続",
+                FormatDuration(analysisA?.ClippingLongestDuration),
+                FormatDuration(analysisB?.ClippingLongestDuration),
+                "クリッピングが疑われる状態が連続した最長時間です。長いほど聴感上の歪みにつながる可能性があります。"),
         ];
 
     private static string FormatNumber(double? value, string unit)

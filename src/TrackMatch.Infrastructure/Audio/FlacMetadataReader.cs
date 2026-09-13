@@ -110,7 +110,8 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
             BitrateKbps: CalculateBitrateKbps(fileInfo.Length, audioInfo.Duration),
             SampleRateHz: audioInfo.SampleRate,
             BitDepth: audioInfo.BitDepth,
-            Channels: audioInfo.Channels);
+            Channels: audioInfo.Channels,
+            Year: ParseYear(GetFirstValue(comments, "DATE") ?? GetFirstValue(comments, "YEAR")));
     }
 
     private static FlacStreamInfo ReadStreamInfo(ReadOnlySpan<byte> streamInfo)
@@ -243,6 +244,23 @@ public sealed class FlacMetadataReader : IAudioMetadataReader
         var separatorIndex = value.IndexOf('/');
         var numberPart = separatorIndex > 0 ? value[..separatorIndex] : value;
         return uint.TryParse(numberPart.Trim(), out var number) ? number : null;
+    }
+
+    private static uint? ParseYear(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        // Vorbis CommentのDATEは「YYYY」だけでなく「YYYY-MM-DD」なども許容されるため、先頭4桁を年として扱う。
+        var trimmed = value.Trim();
+        if (trimmed.Length < 4 || !uint.TryParse(trimmed[..4], out var year) || year == 0)
+        {
+            return null;
+        }
+
+        return year;
     }
 
     private sealed record FlacStreamInfo(TimeSpan Duration, int SampleRate, int BitDepth, int Channels);

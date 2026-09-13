@@ -38,7 +38,8 @@ public sealed class Mp3MetadataReader : IAudioMetadataReader
                 BitrateKbps: PositiveToNull(file.Properties.AudioBitrate),
                 SampleRateHz: PositiveToNull(file.Properties.AudioSampleRate),
                 BitDepth: null,
-                Channels: PositiveToNull(file.Properties.AudioChannels));
+                Channels: PositiveToNull(file.Properties.AudioChannels),
+                Year: ZeroToNull(file.Tag.Year));
         }
         catch (CorruptFileException exception)
         {

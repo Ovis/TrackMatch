@@ -29,10 +29,12 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
     /// <param name="sketches">現在有効な全TrackのSegment Sketch</param>
     /// <param name="targetTrackIds">指定した場合、このTrackを一方に含むペアだけを返す</param>
     /// <param name="maximumDistance">許容する32-bit SimHash Hamming距離</param>
+    /// <param name="progress">探索済みSketch数を通知する進捗通知先</param>
     public IReadOnlyList<CandidatePair> GenerateFromSketches(
         IReadOnlyList<FingerprintSegmentSketch> sketches,
         IReadOnlySet<long>? targetTrackIds,
-        int maximumDistance)
+        int maximumDistance,
+        IProgress<CandidatePairGenerationProgress>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(sketches);
         if (maximumDistance is < 0 or > 3)
@@ -43,6 +45,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         var lowerIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var upperIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var pairDistances = new Dictionary<(long A, long B), int>();
+        var completed = 0;
+        progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
 
         foreach (var sketch in sketches)
         {
@@ -51,6 +55,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 
             AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
             AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
+            completed++;
+            progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
         }
 
         return pairDistances
@@ -129,3 +135,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         bucket.Add(sketch);
     }
 }
+
+/// <summary>
+/// 候補ペア探索の進捗を表す。
+/// </summary>
+public sealed record CandidatePairGenerationProgress(int CompletedSketches, int TotalSketches);

@@ -19,4 +19,5 @@ public sealed record AudioTrackMetadata(
     int? BitrateKbps = null,
     int? SampleRateHz = null,
     int? BitDepth = null,
-    int? Channels = null);
+    int? Channels = null,
+    uint? Year = null);

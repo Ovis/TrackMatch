@@ -17,7 +17,7 @@ internal static partial class LibraryValueNormalizer
         var displayName = WhitespaceRegex().Replace(name.Trim(), " ");
         if (displayName.Length == 0)
         {
-            throw new ArgumentException("Library名には空白以外の文字が必要です。", nameof(name));
+            throw new ArgumentException("ライブラリ名には空白以外の文字が必要です。", nameof(name));
         }
 
         return (displayName, displayName.ToUpperInvariant());
@@ -43,7 +43,7 @@ internal static partial class LibraryValueNormalizer
             var parts = value[2..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2)
             {
-                throw new ArgumentException("UNC PathにはServer名とShare名が必要です。", nameof(path));
+                throw new ArgumentException("UNCパスにはサーバー名と共有名が必要です。", nameof(path));
             }
 
             prefix = $"\\\\{parts[0]}\\{parts[1]}";
@@ -59,7 +59,7 @@ internal static partial class LibraryValueNormalizer
         }
         else
         {
-            throw new ArgumentException("Library RootにはWindowsの絶対Pathを指定してください。", nameof(path));
+            throw new ArgumentException("対象フォルダにはWindowsの絶対パスを指定してください。", nameof(path));
         }
 
         var normalizedSegments = new List<string>();
@@ -74,7 +74,7 @@ internal static partial class LibraryValueNormalizer
             {
                 if (normalizedSegments.Count == 0)
                 {
-                    throw new ArgumentException("Rootより上位へ移動するPathは指定できません。", nameof(path));
+                    throw new ArgumentException("対象フォルダより上位へ移動するパスは指定できません。", nameof(path));
                 }
 
                 normalizedSegments.RemoveAt(normalizedSegments.Count - 1);

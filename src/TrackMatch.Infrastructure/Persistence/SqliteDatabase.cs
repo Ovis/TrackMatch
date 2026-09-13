@@ -72,6 +72,7 @@ public sealed class SqliteDatabase
                 TrackNumber INTEGER NULL,
                 DiscNumber INTEGER NULL,
                 GenresJson TEXT NOT NULL,
+                Year INTEGER NULL,
                 Format TEXT NULL,
                 Codec TEXT NULL,
                 BitrateKbps INTEGER NULL,

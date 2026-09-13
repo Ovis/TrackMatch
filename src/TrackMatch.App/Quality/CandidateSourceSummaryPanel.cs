@@ -36,6 +36,7 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         identity.Children.Add(CreateBoundTextBlock(Property("Artist"), margin: new Thickness(0, 4, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Album"), margin: new Thickness(0, 2, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Genre"), margin: new Thickness(0, 2, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Year"), prefix: "年: ", margin: new Thickness(0, 2, 0, 0)));
         Children.Add(identity);
 
         var separator = new Separator();
@@ -67,11 +68,30 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         pathText.SetBinding(ToolTipProperty, new Binding(PathProperty()));
         bottom.Children.Add(pathText);
 
+        // 背面と前面を重ねたフォルダー表現は小サイズで影のように見えるため、
+        // 補助操作として視線を奪わない単線の開いたフォルダー輪郭だけを描画する。
+        var folderIcon = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M2,13 L4.5,6 L16,6 L13.5,13 Z M2,13 L2,4 L7,4 L9,6"),
+            Stroke = (Brush)System.Windows.Application.Current.FindResource("TextSecondaryBrush"),
+            StrokeThickness = 1.2,
+            StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Fill = null,
+            Width = 18,
+            Height = 16,
+            Stretch = Stretch.Uniform,
+        };
         var openFolderButton = new Button
         {
-            Content = "フォルダーを開く",
-            Padding = new Thickness(12, 3, 12, 3),
-            MinWidth = 110,
+            Content = folderIcon,
+            ToolTip = "フォルダーを開く",
+            Width = 32,
+            Height = 30,
+            MinWidth = 32,
+            MinHeight = 30,
+            Padding = new Thickness(0),
         };
         openFolderButton.SetBinding(TagProperty, new Binding(PathProperty()));
         openFolderButton.Click += OpenFolderButton_Click;
@@ -145,7 +165,7 @@ internal sealed class CandidateSourceSummaryPanel : Grid
 
     private static void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string path } || string.IsNullOrWhiteSpace(path))
+        if (sender is not Button { Tag: string path } button || string.IsNullOrWhiteSpace(path))
         {
             return;
         }
@@ -175,11 +195,23 @@ internal sealed class CandidateSourceSummaryPanel : Grid
                 return;
             }
 
-            MessageBox.Show("ファイルまたは保存先フォルダーが見つかりません。", "フォルダーを開く", MessageBoxButton.OK, MessageBoxImage.Warning);
+            new ConfirmationDialog(
+                "フォルダーを開く",
+                "ファイルまたは保存先フォルダーが見つかりません",
+                path,
+                "閉じる",
+                kind: AppDialogKind.Warning)
+            { Owner = Window.GetWindow(button) }.ShowDialog();
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show(exception.Message, "フォルダーを開けませんでした", MessageBoxButton.OK, MessageBoxImage.Error);
+            new ConfirmationDialog(
+                "フォルダーを開けませんでした",
+                "エクスプローラーを起動できませんでした",
+                exception.Message,
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = Window.GetWindow(button) }.ShowDialog();
         }
     }
 }

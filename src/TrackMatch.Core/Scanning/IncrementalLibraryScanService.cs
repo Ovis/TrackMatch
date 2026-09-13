@@ -13,9 +13,16 @@ public sealed class IncrementalLibraryScanService(
     IFingerprintExtractor fingerprintExtractor,
     int fingerprintAlgorithm)
 {
+    /// <summary>
+    /// 対象フォルダを増分走査し、必要なメタデータとFingerprintを更新する。
+    /// </summary>
+    /// <param name="rootPath">走査対象の対象フォルダ</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    /// <param name="progress">ファイル単位の処理件数を通知する進捗通知先</param>
     public async Task<IncrementalScanResult> ScanAsync(
         string rootPath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<IncrementalScanProgress>? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         if (fingerprintAlgorithm < 0)
@@ -24,6 +31,9 @@ public sealed class IncrementalLibraryScanService(
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
+        var totalFiles = scanner.GetSupportedFileCount(fullRootPath, cancellationToken);
+        progress?.Report(new IncrementalScanProgress(0, totalFiles, null));
+
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
         var total = 0;
         var processed = 0;
@@ -52,6 +62,7 @@ public sealed class IncrementalLibraryScanService(
                 if (!result.IsSuccess)
                 {
                     errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗した。"));
+                    progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
                     continue;
                 }
 
@@ -80,20 +91,22 @@ public sealed class IncrementalLibraryScanService(
                 }
 
                 var needsFingerprint = isNew || needsMetadataUpdate || missingFingerprintIds.Contains(trackId);
-                if (!needsFingerprint)
+                if (needsFingerprint)
                 {
-                    continue;
+                    try
+                    {
+                        var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
+                        await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+                    {
+                        errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
+                    }
                 }
 
-                try
-                {
-                    var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
-                    await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
-                {
-                    errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
-                }
+                // Fingerprint生成まで含めて1ファイル分の処理が完了した時点で進捗を進める。
+                // 件数だけ先行すると、時間のかかるFingerprint処理中にUI上の進捗が実態より先へ進むためここで通知する。
+                progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
             }
 
             foreach (var stored in storedTracks)
@@ -123,3 +136,14 @@ public sealed class IncrementalLibraryScanService(
         => stored.Metadata.FileSize != current.FileSize
             || stored.Metadata.LastWriteTimeUtc != current.LastWriteTimeUtc;
 }
+
+/// <summary>
+/// 対象フォルダ走査のファイル単位進捗を表す。
+/// </summary>
+/// <param name="CompletedFiles">処理を完了した対応音声ファイル数</param>
+/// <param name="TotalFiles">事前取得できた対応音声ファイル総数。不明な場合はnull</param>
+/// <param name="CurrentPath">直近に処理を完了したファイルのパス</param>
+public sealed record IncrementalScanProgress(
+    int CompletedFiles,
+    int? TotalFiles,
+    string? CurrentPath);

@@ -59,7 +59,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
         ArgumentNullException.ThrowIfNull(rootPaths);
         if (rootPaths.Count == 0)
         {
-            throw new ArgumentException("Libraryには1つ以上のRootが必要です。", nameof(rootPaths));
+            throw new ArgumentException("ライブラリには1つ以上の対象フォルダが必要です。", nameof(rootPaths));
         }
 
         var normalizedName = LibraryValueNormalizer.NormalizeLibraryName(name);
@@ -153,7 +153,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             cancellationToken: cancellationToken));
         if (rootCount <= 1)
         {
-            throw new InvalidOperationException("Libraryの最後のRootは削除できません。代替Rootを追加するかLibrary自体を削除してください。");
+            throw new InvalidOperationException("ライブラリの最後の対象フォルダは削除できません。代わりの対象フォルダを追加するか、ライブラリ自体を削除してください。");
         }
 
         var affected = await connection.ExecuteAsync(new CommandDefinition(
@@ -163,7 +163,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             cancellationToken: cancellationToken));
         if (affected == 0)
         {
-            throw new InvalidOperationException("指定したRootはLibraryに存在しません。");
+            throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
         }
 
         transaction.Commit();
@@ -179,7 +179,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             cancellationToken: cancellationToken));
         if (affected == 0)
         {
-            throw new InvalidOperationException("指定したLibraryは存在しません。");
+            throw new InvalidOperationException("指定したライブラリは存在しません。");
         }
     }
 
@@ -191,7 +191,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             {
                 if (LibraryValueNormalizer.Overlaps(roots[i].Key, roots[j].Key))
                 {
-                    throw new InvalidOperationException($"Root同士を同一または包含関係にはできません: {roots[i].DisplayPath} / {roots[j].DisplayPath}");
+                    throw new InvalidOperationException($"対象フォルダ同士を同一または包含関係にはできません: {roots[i].DisplayPath} / {roots[j].DisplayPath}");
                 }
             }
         }
@@ -211,7 +211,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             cancellationToken: cancellationToken));
         if (count != 0)
         {
-            throw new InvalidOperationException("同名のLibraryが既に存在します。");
+            throw new InvalidOperationException("同名のライブラリが既に存在します。");
         }
     }
 
@@ -233,7 +233,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             var conflict = existing.FirstOrDefault(root => LibraryValueNormalizer.Overlaps(key, root.PathKey));
             if (conflict is not null)
             {
-                throw new InvalidOperationException($"Rootは既存Rootと同一または包含関係にあります: {conflict.Path}");
+                throw new InvalidOperationException($"対象フォルダは既存の対象フォルダと同一または包含関係にあります: {conflict.Path}");
             }
         }
     }
@@ -251,7 +251,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             cancellationToken: cancellationToken));
         if (exists == 0)
         {
-            throw new InvalidOperationException("指定したLibraryは存在しません。");
+            throw new InvalidOperationException("指定したライブラリは存在しません。");
         }
     }
 

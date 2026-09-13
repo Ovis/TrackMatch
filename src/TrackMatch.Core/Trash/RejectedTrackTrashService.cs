@@ -59,7 +59,7 @@ public sealed class RejectedTrackTrashService(
                     sourcePath,
                     destinationPath,
                     RejectedTrackMoveStatus.ReviewConflict,
-                    "同じTrackが別のConfirmedDuplicateレビューでKeepにも指定されている。"));
+                    "同じ音源が別の重複レビューで残す側にも指定されています。"));
                 continue;
             }
 
@@ -70,7 +70,7 @@ public sealed class RejectedTrackTrashService(
                     sourcePath,
                     destinationPath,
                     RejectedTrackMoveStatus.AlreadyMissing,
-                    "Trackは既にMissingとして記録されている。"));
+                    "音源は既に見つからない状態として記録されています。"));
                 continue;
             }
 
@@ -81,7 +81,7 @@ public sealed class RejectedTrackTrashService(
                     sourcePath,
                     destinationPath,
                     RejectedTrackMoveStatus.SourceMissing,
-                    "移動元ファイルが存在しない。"));
+                    "移動元ファイルが存在しません。"));
                 continue;
             }
 
@@ -94,7 +94,7 @@ public sealed class RejectedTrackTrashService(
                         sourcePath,
                         destinationPath,
                         RejectedTrackMoveStatus.DestinationExists,
-                        "Trash側に同じAbsolute Path構造のファイルが既に存在する。"));
+                        "ごみ箱側に同じ絶対パス構造のファイルが既に存在します。"));
                     continue;
                 }
 
@@ -131,7 +131,7 @@ public sealed class RejectedTrackTrashService(
     private string FindAvailableDestination(string destinationPath)
     {
         var directory = Path.GetDirectoryName(destinationPath)
-            ?? throw new InvalidOperationException("Trash Destination Directoryを解決できない。");
+            ?? throw new InvalidOperationException("ごみ箱の移動先フォルダを解決できません。");
         var extension = Path.GetExtension(destinationPath);
         var name = Path.GetFileNameWithoutExtension(destinationPath);
 
@@ -145,7 +145,7 @@ public sealed class RejectedTrackTrashService(
             }
         }
 
-        throw new IOException("Trash Destinationの別名を確保できない。");
+        throw new IOException("ごみ箱の移動先に使用できる別名を確保できません。");
     }
 
     private static long GetRejectTrackId(CandidateReview review)
