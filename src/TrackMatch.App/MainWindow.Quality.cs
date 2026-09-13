@@ -13,6 +13,10 @@ public partial class MainWindow
 {
     private MainWindowQualityAnalysisController? _qualityController;
     private TextBlock? _qualityAnalysisStatusTextBlock;
+    private Grid? _candidateDetailGrid;
+    private Border? _candidateEmptyState;
+    private TextBlock? _candidateEmptyStateTitle;
+    private TextBlock? _candidateEmptyStateDescription;
     private bool _qualityLifecycleAttached;
     private bool _qualityUiAttached;
 
@@ -56,10 +60,97 @@ public partial class MainWindow
         if (comparisonGroup is not null && detailGrid is not null)
         {
             RearrangeCandidateDetailLayout(detailGrid, comparisonGroup);
+            AttachCandidateEmptyState(detailGrid);
         }
 
         AttachQualityProgressToFooter();
         _qualityUiAttached = true;
+    }
+
+    /// <summary>
+    /// 候補未選択時は空の詳細コントロールを残さず、次の操作が分かる空状態表示へ切り替える。
+    /// </summary>
+    private void AttachCandidateEmptyState(Grid detailGrid)
+    {
+        if (detailGrid.Parent is not Grid workspaceGrid)
+        {
+            return;
+        }
+
+        _candidateDetailGrid = detailGrid;
+        _candidateEmptyStateTitle = new TextBlock
+        {
+            FontSize = 20,
+            FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+        };
+        _candidateEmptyStateDescription = new TextBlock
+        {
+            Margin = new Thickness(0, 10, 0, 0),
+            MaxWidth = 520,
+            Foreground = (Brush)FindResource("TextSecondaryBrush"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var content = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(32),
+        };
+        content.Children.Add(_candidateEmptyStateTitle);
+        content.Children.Add(_candidateEmptyStateDescription);
+
+        _candidateEmptyState = new Border
+        {
+            Background = (Brush)FindResource("CardBackgroundBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Child = content,
+        };
+
+        // 詳細ペインと同じセルへ重ねることで、候補が現れたときに既存レイアウトを一切動かさず復帰できる。
+        Grid.SetRow(_candidateEmptyState, Grid.GetRow(detailGrid));
+        Grid.SetRowSpan(_candidateEmptyState, Grid.GetRowSpan(detailGrid));
+        Grid.SetColumn(_candidateEmptyState, Grid.GetColumn(detailGrid));
+        Grid.SetColumnSpan(_candidateEmptyState, Grid.GetColumnSpan(detailGrid));
+        Panel.SetZIndex(_candidateEmptyState, 1);
+        workspaceGrid.Children.Add(_candidateEmptyState);
+        UpdateCandidateDetailState();
+    }
+
+    /// <summary>
+    /// 候補の有無と選択状態に応じて詳細ペインと案内文を切り替える。
+    /// </summary>
+    private void UpdateCandidateDetailState()
+    {
+        if (_candidateDetailGrid is null || _candidateEmptyState is null
+            || _candidateEmptyStateTitle is null || _candidateEmptyStateDescription is null)
+        {
+            return;
+        }
+
+        var hasSelection = _viewModel.SelectedCandidate is not null;
+        _candidateDetailGrid.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
+        _candidateEmptyState.Visibility = hasSelection ? Visibility.Collapsed : Visibility.Visible;
+        if (hasSelection)
+        {
+            return;
+        }
+
+        if (_viewModel.Candidates.Count == 0)
+        {
+            _candidateEmptyStateTitle.Text = "比較する候補がありません";
+            _candidateEmptyStateDescription.Text = "「スキャン・分析」を実行するか、レビュー対象の一致度下限やタブを確認してください。";
+            return;
+        }
+
+        _candidateEmptyStateTitle.Text = "候補を選択してください";
+        _candidateEmptyStateDescription.Text = "左の候補一覧から比較する音源を選択してください。";
     }
 
     /// <summary>
@@ -173,6 +264,11 @@ public partial class MainWindow
 
     private void QualityViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedCandidate))
+        {
+            UpdateCandidateDetailState();
+        }
+
         if (_qualityController is null) return;
         if (e.PropertyName == nameof(MainWindowViewModel.IsAnalyzing) && _viewModel.IsAnalyzing) { _qualityController.Stop(); return; }
         if (e.PropertyName == nameof(MainWindowViewModel.IsLoading) && !_viewModel.IsLoading && !_viewModel.IsAnalyzing) _qualityController.Restart();
