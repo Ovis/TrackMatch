@@ -2,6 +2,7 @@ using System.Text.Json;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
 
 internal static class CandidateCommands
@@ -178,6 +179,7 @@ internal static class CandidateCommands
     {
         var databasePath = TrackMatchDataPaths.DefaultDatabasePath;
         string? note = null;
+        long? libraryId = null;
         long? trackIdA = null;
         long? trackIdB = null;
         long? keepTrackId = null;
@@ -191,7 +193,13 @@ internal static class CandidateCommands
                 continue;
             }
 
-            if (TryReadLongOption(args, ref i, "--track-a", out var longValue))
+            if (TryReadLongOption(args, ref i, "--library-id", out var longValue))
+            {
+                libraryId = longValue;
+                continue;
+            }
+
+            if (TryReadLongOption(args, ref i, "--track-a", out longValue))
             {
                 trackIdA = longValue;
                 continue;
@@ -239,17 +247,21 @@ internal static class CandidateCommands
 
             var database = new SqliteDatabase(databasePath);
             await database.InitializeAsync();
-            var repository = new SqliteCandidateReviewRepository(database);
-            await repository.SaveAsync(review);
+            var trackLookup = new SqliteTrackLookupRepository(database);
+            var resolvedLibraryId = libraryId ?? await ResolveUniqueCommonLibraryAsync(trackLookup, pair);
+            var reviews = new SqliteCandidateReviewRepository(database, resolvedLibraryId);
+            var groups = new SqliteDuplicateGroupRepository(database);
+            var service = new DuplicateGroupService(reviews, trackLookup, groups);
+            await service.SaveReviewAsync(resolvedLibraryId, review);
 
             if (decision == CandidateReviewDecision.ConfirmedDuplicate)
             {
                 var discardTrackId = keepTrackId == pair.TrackIdA ? pair.TrackIdB : pair.TrackIdA;
-                Console.WriteLine($"ConfirmedDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}, Keep: {keepTrackId}, Reject: {discardTrackId}");
+                Console.WriteLine($"ConfirmedDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}, Keep: {keepTrackId}, Reject: {discardTrackId}, Library: {resolvedLibraryId}");
             }
             else
             {
-                Console.WriteLine($"NotDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}");
+                Console.WriteLine($"NotDuplicateとして記録: {pair.TrackIdA} <-> {pair.TrackIdB}, Library: {resolvedLibraryId}");
             }
 
             return 0;
@@ -259,6 +271,21 @@ internal static class CandidateCommands
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
+    }
+
+    private static async Task<long> ResolveUniqueCommonLibraryAsync(
+        SqliteTrackLookupRepository trackLookup,
+        CandidatePairKey pair)
+    {
+        var librariesA = await trackLookup.GetLibraryIdsAsync(pair.TrackIdA);
+        var librariesB = await trackLookup.GetLibraryIdsAsync(pair.TrackIdB);
+        var common = librariesA.Intersect(librariesB).Order().ToArray();
+        return common.Length switch
+        {
+            1 => common[0],
+            0 => throw new InvalidOperationException("候補ペアを同時に含むLibraryがありません。--library-id を指定してもMembership外ではレビューできません。"),
+            _ => throw new InvalidOperationException("候補ペアが複数Libraryに所属しています。Library固有Keepの対象を明確にするため --library-id を指定してください。"),
+        };
     }
 
     private static bool TryParseReviewDecision(string value, out CandidateReviewDecision decision)
