@@ -35,4 +35,8 @@ public sealed record CandidateQualityFindingViewModel(string Severity, string Me
 /// <summary>
 /// A/Bの技術測定値を1行で比較表示する。
 /// </summary>
-public sealed record CandidateQualityMeasurementRowViewModel(string Label, string ValueA, string ValueB);
+public sealed record CandidateQualityMeasurementRowViewModel(
+    string Label,
+    string ValueA,
+    string ValueB,
+    string? Description = null);
