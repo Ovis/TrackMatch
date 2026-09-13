@@ -57,7 +57,7 @@ public sealed partial class CandidateReviewItemViewModel : INotifyPropertyChange
         {
             ListSummary = "音質: 解析中",
             StatusText = "音質解析: 解析中",
-            SummaryLine1 = "音質を解析しています。Candidateレビューはそのまま利用できます。",
+            SummaryLine1 = "音質を解析しています。候補レビューはそのまま利用できます。",
         };
         NotifyQualityPropertiesChanged();
     }
