@@ -207,7 +207,7 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         {
             new ConfirmationDialog(
                 "フォルダーを開けませんでした",
-                "Explorerを起動できませんでした",
+                "エクスプローラーを起動できませんでした",
                 exception.Message,
                 "閉じる",
                 kind: AppDialogKind.Error)
