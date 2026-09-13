@@ -49,11 +49,10 @@
                         <TabItem><TabItem.Header><TextBlock><Run Text="すべて ("/><Run Text="{Binding TotalCandidateCount, Mode=OneWay}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
                     </TabControl>
                     <Grid Grid.Row="2" Margin="12,8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="6"/><ColumnDefinition Width="48"/><ColumnDefinition Width="4"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <TextBlock VerticalAlignment="Center" Text="一致度の表示下限" Style="{StaticResource SecondaryTextStyle}"/>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="6"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0" Text="一致度の表示下限" Style="{StaticResource SecondaryTextStyle}"/>
                         <TextBox Grid.Column="1" Width="48" HorizontalContentAlignment="Right" Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}"/>
                         <TextBlock Grid.Column="3" VerticalAlignment="Center" Text="%"/>
-                        <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}" Content="⌕" ToolTip="フィルター" IsEnabled="False"/>
                     </Grid>
                     <Grid Grid.Row="3">
                         <DataGrid x:Name="CandidateGrid" ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
