@@ -172,8 +172,8 @@ public sealed class SqliteDatabase
                 ReviewedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
                 CHECK (TrackIdA < TrackIdB),
-                FOREIGN KEY (TrackIdA, TrackIdB)
-                    REFERENCES CandidateComparisons (TrackIdA, TrackIdB) ON DELETE CASCADE
+                FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateReviews_Decision ON CandidateReviews (Decision);
