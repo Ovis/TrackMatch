@@ -19,9 +19,11 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
+        var tracks = new FakeTrackRepository([Entry(2, source, libraryId: 1)]);
         var files = new FakeFileOperations([source]);
+#pragma warning disable CS0618
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
+#pragma warning restore CS0618
 
         var result = await service.ProcessAsync(1, trash, execute: false, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -46,10 +48,12 @@ public sealed class RejectedTrackTrashServiceTests
         ]);
         var tracks = new FakeTrackRepository(
         [
-            Stored(2, sourceA, rootA, libraryId: 10),
-            Stored(4, sourceB, rootB, libraryId: 20),
+            Entry(2, sourceA, libraryId: 10),
+            Entry(4, sourceB, libraryId: 20),
         ]);
+#pragma warning disable CS0618
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, new FakeFileOperations([sourceA, sourceB]));
+#pragma warning restore CS0618
 
         var result = await service.ProcessAsync(10, trash, execute: false, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -70,9 +74,11 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
+        var tracks = new FakeTrackRepository([Entry(2, source, libraryId: 1)]);
         var files = new FakeFileOperations([source, destination, second]);
+#pragma warning disable CS0618
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
+#pragma warning restore CS0618
 
         var result = await service.ProcessAsync(
             1,
@@ -98,9 +104,11 @@ public sealed class RejectedTrackTrashServiceTests
         [
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, 1),
         ]);
-        var tracks = new FakeTrackRepository([Stored(2, source, root, libraryId: 1)]);
+        var tracks = new FakeTrackRepository([Entry(2, source, libraryId: 1)]);
         var files = new FakeFileOperations([source, destination]);
+#pragma warning disable CS0618
         var service = new RejectedTrackTrashService(reviews, tracks, tracks, files);
+#pragma warning restore CS0618
 
         var result = await service.ProcessAsync(
             1,
@@ -134,24 +142,23 @@ public sealed class RejectedTrackTrashServiceTests
         Assert.Equal(Path.Combine(trash, "UNC", "NAS", "Music", "Anime", "a.flac"), result);
     }
 
-    private static StoredTrack Stored(long id, string path, string root, long libraryId, bool isMissing = false)
-        => new(
-            id,
-            new AudioTrackMetadata(
-                path,
-                100,
-                new DateTime(2026, 9, 11, 0, 0, 0, DateTimeKind.Utc),
-                TimeSpan.FromMinutes(4),
-                ["Artist"],
-                "Title",
-                "Album",
-                1,
-                1,
-                ["J-POPS"]),
-            isMissing,
-            libraryId,
-            libraryId,
-            Path.GetRelativePath(root, path));
+    private static (StoredTrack Track, long LibraryId) Entry(long id, string path, long libraryId, bool isMissing = false)
+        => (
+            new StoredTrack(
+                id,
+                new AudioTrackMetadata(
+                    path,
+                    100,
+                    new DateTime(2026, 9, 11, 0, 0, 0, DateTimeKind.Utc),
+                    TimeSpan.FromMinutes(4),
+                    ["Artist"],
+                    "Title",
+                    "Album",
+                    1,
+                    1,
+                    ["J-POPS"]),
+                isMissing),
+            libraryId);
 
     private sealed class FakeReviewRepository(IReadOnlyList<CandidateReview> reviews) : ICandidateReviewRepository
     {
@@ -164,25 +171,59 @@ public sealed class RejectedTrackTrashServiceTests
             => Task.FromResult<IReadOnlySet<CandidatePairKey>>(new HashSet<CandidatePairKey>());
     }
 
-    private sealed class FakeTrackRepository(IReadOnlyList<StoredTrack> tracks) : ITrackRepository, ITrackLookupRepository
+    private sealed class FakeTrackRepository(IReadOnlyList<(StoredTrack Track, long LibraryId)> entries) : ITrackRepository, ITrackLookupRepository
     {
         public List<long> MarkedMissing { get; } = [];
-        public List<long> DeletedFingerprints { get; } = [];
 
         public Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
-            => Task.FromResult(tracks.FirstOrDefault(track => track.Id == trackId));
+            => Task.FromResult(entries.Select(entry => entry.Track).FirstOrDefault(track => track.Id == trackId));
+
+        public Task<bool> IsInLibraryAsync(long trackId, long libraryId, CancellationToken cancellationToken = default)
+            => Task.FromResult(entries.Any(entry => entry.Track.Id == trackId && entry.LibraryId == libraryId));
+
+        public Task<IReadOnlyList<long>> GetLibraryIdsAsync(long trackId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<long>>(entries
+                .Where(entry => entry.Track.Id == trackId)
+                .Select(entry => entry.LibraryId)
+                .Distinct()
+                .Order()
+                .ToArray());
+
+        public Task<IReadOnlyList<TrackLibraryReference>> GetLibrariesAsync(long trackId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<TrackLibraryReference>>(entries
+                .Where(entry => entry.Track.Id == trackId)
+                .Select(entry => entry.LibraryId)
+                .Distinct()
+                .Order()
+                .Select(id => new TrackLibraryReference(id, $"Library {id}"))
+                .ToArray());
 
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<StoredTrack?> GetByPathAsync(string path, CancellationToken cancellationToken = default)
-            => Task.FromResult(tracks.FirstOrDefault(track => string.Equals(track.Metadata.Path, path, StringComparison.OrdinalIgnoreCase)));
+            => Task.FromResult(entries.Select(entry => entry.Track)
+                .FirstOrDefault(track => string.Equals(track.Metadata.Path, path, StringComparison.OrdinalIgnoreCase)));
 
-        public Task<IReadOnlyList<StoredTrack>> GetByRootPathAsync(string rootPath, CancellationToken cancellationToken = default)
-            => Task.FromResult(tracks);
+        public Task<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>> GetByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>>([]);
 
-        public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootPathAsync(string rootPath, CancellationToken cancellationToken = default)
+        public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlySet<long>>(new HashSet<long>());
+
+        public Task EnsureMembershipAsync(
+            long libraryId,
+            long rootId,
+            long trackId,
+            string relativePath,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
 
         public Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
         {
@@ -194,10 +235,7 @@ public sealed class RejectedTrackTrashServiceTests
             => throw new NotSupportedException();
 
         public Task DeleteFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
-        {
-            DeletedFingerprints.Add(trackId);
-            return Task.CompletedTask;
-        }
+            => Task.CompletedTask;
 
         public Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<AudioFingerprint?>(null);
