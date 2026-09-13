@@ -6,28 +6,36 @@ using System.Windows;
 using System.Windows.Controls;
 using TrackMatch.App.Playback;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
 
 namespace TrackMatch.App;
 
 /// <summary>
-/// 確定済み重複グループの構成、残すファイル、確認根拠を参照する詳細画面。
+/// Global Duplicate Groupの構成、Library固有Keep、確認根拠を参照する詳細画面。
 /// </summary>
 public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChanged
 {
     private readonly string _databasePath;
+    private readonly long _libraryId;
     private readonly long _groupId;
     private readonly SingleTrackPreviewPlayer _previewPlayer = new();
     private Button? _playingButton;
     private string _groupTitle = "重複グループ";
     private string _fileCountText = string.Empty;
+    private string _keepStateText = string.Empty;
 
-    public DuplicateGroupDetailsWindow(string databasePath, long groupId)
+    /// <summary>
+    /// 指定Libraryから見たGlobal Duplicate Group詳細画面を生成する。
+    /// </summary>
+    public DuplicateGroupDetailsWindow(string databasePath, long libraryId, long groupId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        if (libraryId <= 0) throw new ArgumentOutOfRangeException(nameof(libraryId));
         if (groupId <= 0) throw new ArgumentOutOfRangeException(nameof(groupId));
 
         _databasePath = databasePath;
+        _libraryId = libraryId;
         _groupId = groupId;
         InitializeComponent();
         DataContext = this;
@@ -58,6 +66,17 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
     }
 
+    public string KeepStateText
+    {
+        get => _keepStateText;
+        private set
+        {
+            if (_keepStateText == value) return;
+            _keepStateText = value;
+            OnPropertyChanged();
+        }
+    }
+
     public ObservableCollection<DuplicateGroupTrackViewModel> KeepTracks { get; } = [];
     public ObservableCollection<DuplicateGroupTrackViewModel> OtherTracks { get; } = [];
     public ObservableCollection<string> ConfirmedRelations { get; } = [];
@@ -71,42 +90,56 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             var database = new SqliteDatabase(_databasePath);
             await database.InitializeAsync();
             var groups = new SqliteDuplicateGroupRepository(database);
-            var group = await groups.GetByIdAsync(_groupId);
+            var group = await groups.GetByIdAsync(_groupId, _libraryId);
             if (group is null)
             {
-                throw new InvalidOperationException("指定された重複グループは既に存在しません。");
+                throw new InvalidOperationException("指定された重複グループは現在のLibraryから参照できません。");
             }
 
             var trackLookup = new SqliteTrackLookupRepository(database);
+            var localTrackIds = group.TrackIds.ToHashSet();
             var trackModels = new Dictionary<long, DuplicateGroupTrackViewModel>();
-            foreach (var trackId in group.TrackIds)
+            foreach (var trackId in group.GlobalTrackIds)
             {
                 var track = await trackLookup.GetByIdAsync(trackId)
                     ?? throw new InvalidDataException($"重複グループ内のTrack #{trackId} が見つかりません。");
-                if (track.LibraryId != group.LibraryId)
-                {
-                    throw new InvalidDataException("重複グループに異なるLibraryのTrackが含まれています。");
-                }
-
-                trackModels[trackId] = DuplicateGroupTrackViewModel.Create(track, trackId == group.KeepTrackId);
+                trackModels[trackId] = DuplicateGroupTrackViewModel.Create(
+                    track,
+                    group.KeepTrackId == trackId,
+                    localTrackIds.Contains(trackId));
             }
 
             GroupTitle = $"重複グループ #{group.Id}";
-            FileCountText = $"{group.TrackIds.Count}ファイル";
-            KeepTracks.Add(trackModels[group.KeepTrackId]);
-            foreach (var item in group.TrackIds
+            var externalCount = group.GlobalTrackIds.Count - group.TrackIds.Count;
+            FileCountText = externalCount > 0
+                ? $"現在のLibrary: {group.TrackIds.Count}ファイル / Global Group: {group.GlobalTrackIds.Count}ファイル（Library外 {externalCount}件）"
+                : $"{group.TrackIds.Count}ファイル";
+            KeepStateText = group.KeepStatus switch
+            {
+                DuplicateGroupKeepStatus.Selected => "このLibraryで残すファイル",
+                DuplicateGroupKeepStatus.Conflict => "複数の過去Keepが競合しています。残すファイルを再確認してください。",
+                DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
+                _ => "残すファイルはまだ選択されていません。",
+            };
+
+            if (group.KeepTrackId is { } keepTrackId)
+            {
+                KeepTracks.Add(trackModels[keepTrackId]);
+            }
+
+            foreach (var item in group.GlobalTrackIds
                          .Where(trackId => trackId != group.KeepTrackId)
                          .Select(trackId => trackModels[trackId]))
             {
                 OtherTracks.Add(item);
             }
 
-            var memberIds = group.TrackIds.ToHashSet();
+            var globalMemberIds = group.GlobalTrackIds.ToHashSet();
             var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
             foreach (var review in reviews
                          .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-                             && memberIds.Contains(review.Pair.TrackIdA)
-                             && memberIds.Contains(review.Pair.TrackIdB))
+                             && globalMemberIds.Contains(review.Pair.TrackIdA)
+                             && globalMemberIds.Contains(review.Pair.TrackIdB))
                          .OrderBy(review => review.Pair.TrackIdA)
                          .ThenBy(review => review.Pair.TrackIdB))
             {
