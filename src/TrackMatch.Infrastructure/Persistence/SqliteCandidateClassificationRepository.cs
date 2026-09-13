@@ -9,7 +9,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// 候補分類結果をSQLiteへ保存し、Trackメタデータ付きで読み出す。
 /// </summary>
-public sealed class SqliteCandidateClassificationRepository(SqliteDatabase database) : ICandidateClassificationRepository
+public sealed class SqliteCandidateClassificationRepository(
+    SqliteDatabase database,
+    long? libraryId = null) : ICandidateClassificationRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateClassification> classifications,
@@ -25,10 +27,28 @@ public sealed class SqliteCandidateClassificationRepository(SqliteDatabase datab
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM CandidateClassifications;",
-            transaction: transaction,
-            cancellationToken: cancellationToken));
+        if (libraryId is null)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM CandidateClassifications;",
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+        }
+        else
+        {
+            // GUIは選択中のLibraryだけを再分析するため、他Libraryの分類結果を巻き込んで削除しない。
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidateClassifications
+                WHERE TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
+                  AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId);
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
+        await EnsureClassificationsInScopeAsync(connection, transaction, classifications, cancellationToken);
 
         if (classifications.Count != 0)
         {
@@ -69,7 +89,8 @@ public sealed class SqliteCandidateClassificationRepository(SqliteDatabase datab
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
             INNER JOIN Tracks a ON a.Id = c.TrackIdA
             INNER JOIN Tracks b ON b.Id = c.TrackIdB
-            WHERE NOT EXISTS (
+            WHERE (@LibraryId IS NULL OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId))
+              AND NOT EXISTS (
                 SELECT 1
                 FROM CandidateReviews r
                 WHERE r.TrackIdA = c.TrackIdA
@@ -85,8 +106,35 @@ public sealed class SqliteCandidateClassificationRepository(SqliteDatabase datab
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
+    }
+
+    private async Task EnsureClassificationsInScopeAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        IReadOnlyCollection<CandidateClassification> classifications,
+        CancellationToken cancellationToken)
+    {
+        if (libraryId is null || classifications.Count == 0)
+        {
+            return;
+        }
+
+        var trackIds = classifications
+            .SelectMany(item => new[] { item.TrackIdA, item.TrackIdB })
+            .Distinct()
+            .ToArray();
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            new { LibraryId = libraryId, TrackIds = trackIds },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (count != trackIds.Length)
+        {
+            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Classificationとして保存できません。");
+        }
     }
 
     private static CandidateClassificationReportRow ToReport(ReportRow row)

@@ -1,4 +1,5 @@
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Scanning;
@@ -10,7 +11,7 @@ using TrackMatch.Infrastructure.Scanning;
 namespace TrackMatch.Application;
 
 /// <summary>
-/// ライブラリ走査、候補生成、詳細比較を同じ設定とDBで順番に実行するアプリケーションWorkflow。
+/// ライブラリ走査、候補生成、詳細比較、自動分類を同じ設定とDBで順番に実行するアプリケーションWorkflow。
 /// </summary>
 public sealed class LibraryAnalysisWorkflow
 {
@@ -146,6 +147,27 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
+    /// 指定Library内の詳細比較済み候補へ関係分類を適用する。
+    /// </summary>
+    /// <param name="libraryId">分類対象LibraryのID</param>
+    /// <param name="profile">分類に使用するしきい値プロファイル</param>
+    /// <param name="cancellationToken">キャンセル通知</param>
+    public async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesAsync(
+        long libraryId,
+        RelationshipThresholdProfile profile,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var database = await OpenDatabaseAsync(cancellationToken);
+        await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
+        var service = new CandidateClassificationService(
+            new SqliteCandidateComparisonRepository(database, libraryId),
+            new SqliteCandidateClassificationRepository(database, libraryId));
+        return await service.ClassifyAsync(profile, cancellationToken);
+    }
+
+    /// <summary>
     /// 単一Rootの走査から候補詳細比較までを一連の処理として実行する。
     /// </summary>
     /// <remarks>
@@ -171,7 +193,7 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 指定Libraryの全Root走査からLibrary内候補の詳細比較までを一連の処理として実行する。
+    /// 指定Libraryの全Root走査からLibrary内候補の詳細比較・自動分類までを一連の処理として実行する。
     /// </summary>
     /// <param name="libraryId">解析対象LibraryのID</param>
     /// <param name="progress">処理段階と実処理件数をUI等へ通知するための進捗通知先</param>
@@ -209,6 +231,12 @@ public sealed class LibraryAnalysisWorkflow
                 value.TotalPairs,
                 null)));
         var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+
+        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
+        await ClassifyCandidatesAsync(
+            libraryId,
+            AutomaticRelationshipClassificationProfile.Default,
+            cancellationToken);
 
         return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
     }
@@ -275,6 +303,7 @@ public enum LibraryAnalysisStage
     Scanning,
     GeneratingCandidates,
     AnalyzingCandidates,
+    ClassifyingCandidates,
 }
 
 /// <summary>
@@ -316,7 +345,7 @@ public sealed record LibraryRootScanBatchResult(
     IReadOnlyList<IncrementalScanResult> Roots);
 
 /// <summary>
-/// Library単位の走査、候補生成、詳細比較を一括実行した結果を保持する。
+/// Library単位の走査、候補生成、詳細比較、自動分類を一括実行した結果を保持する。
 /// </summary>
 public sealed record LibraryScopedAnalysisWorkflowResult(
     LibraryRootScanBatchResult Scan,
