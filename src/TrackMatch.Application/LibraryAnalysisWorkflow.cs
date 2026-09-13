@@ -1,3 +1,4 @@
+using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
@@ -43,18 +44,33 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 指定Rootを増分走査し、変更された対応Audio FileのメタデータとFingerprintを更新する。
+    /// Pathで一意に特定できる登録済みRootを増分走査する。
     /// </summary>
     /// <remarks>
-    /// CLI/GUIをLibrary選択方式へ移行するまでの互換API。新規処理では<see cref="ScanLibraryAsync"/>を使用する。
+    /// 異なるLibraryで同一Rootを登録できるため、同一Pathが複数Libraryに存在する場合は曖昧として拒否する。
+    /// GUIの通常処理ではLibrary ID指定APIを使用する。
     /// </remarks>
     public async Task<IncrementalScanResult> ScanAsync(
         string rootPath,
         CancellationToken cancellationToken = default)
     {
         var database = await OpenDatabaseAsync(cancellationToken);
-        var service = CreateScanService(database);
-        return await service.ScanAsync(rootPath, cancellationToken);
+        var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
+            "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
+            new { PathKey = normalizedRoot.Key },
+            cancellationToken: cancellationToken))).ToArray();
+        if (roots.Length != 1)
+        {
+            throw new InvalidOperationException(
+                roots.Length == 0
+                    ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
+                    : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
+        }
+
+        var root = roots[0];
+        return await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
     }
 
     /// <summary>
@@ -70,7 +86,8 @@ public sealed class LibraryAnalysisWorkflow
         var service = CreateScanService(database);
         var results = new List<IncrementalScanResult>(library.Roots.Count);
 
-        // Root間でTrack Identityを共有しない設計なので、各Rootを独立したScan Sessionとして順番に処理する。
+        // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
+        // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
         for (var index = 0; index < library.Roots.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -82,7 +99,7 @@ public sealed class LibraryAnalysisWorkflow
                     value.CompletedFiles,
                     value.TotalFiles,
                     value.CurrentPath)));
-            results.Add(await service.ScanAsync(root.Path, cancellationToken, rootProgress));
+            results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
         }
 
         return new LibraryRootScanBatchResult(library.Id, results);
@@ -104,7 +121,7 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 指定Library内のTrackだけを対象に候補ペアを増分生成する。
+    /// 指定LibraryのMembershipに属するTrackだけを対象に候補ペアを増分生成する。
     /// </summary>
     public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
         long libraryId,
@@ -122,7 +139,7 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 候補ペアを詳細比較し、変更されていない比較結果はDBから再利用する。
+    /// 候補ペアを詳細比較し、変更されていないGlobal ComparisonはDBから再利用する。
     /// </summary>
     public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
         CancellationToken cancellationToken = default)
@@ -149,9 +166,6 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Library内の詳細比較済み候補へ関係分類を適用する。
     /// </summary>
-    /// <param name="libraryId">分類対象LibraryのID</param>
-    /// <param name="profile">分類に使用するしきい値プロファイル</param>
-    /// <param name="cancellationToken">キャンセル通知</param>
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesAsync(
         long libraryId,
         RelationshipThresholdProfile profile,
@@ -168,13 +182,8 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 単一Rootの走査から候補詳細比較までを一連の処理として実行する。
+    /// Pathで一意に特定できるRootの走査から候補詳細比較までを一連の処理として実行する。
     /// </summary>
-    /// <remarks>
-    /// CLI/GUIをLibrary選択方式へ移行するまでの互換API。新規処理ではLibrary ID指定のRunAsyncを使用する。
-    /// </remarks>
-    /// <param name="rootPath">解析対象のRootフォルダ</param>
-    /// <param name="progress">現在の処理段階をUI等へ通知するための進捗通知先</param>
     public async Task<LibraryAnalysisWorkflowResult> RunAsync(
         string rootPath,
         IProgress<LibraryAnalysisStage>? progress = null,
@@ -195,8 +204,6 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Libraryの全Root走査からLibrary内候補の詳細比較・自動分類までを一連の処理として実行する。
     /// </summary>
-    /// <param name="libraryId">解析対象LibraryのID</param>
-    /// <param name="progress">処理段階と実処理件数をUI等へ通知するための進捗通知先</param>
     public async Task<LibraryScopedAnalysisWorkflowResult> RunAsync(
         long libraryId,
         IProgress<LibraryAnalysisProgress>? progress = null,
@@ -293,6 +300,8 @@ public sealed class LibraryAnalysisWorkflow
         await database.InitializeAsync(cancellationToken);
         return database;
     }
+
+    private sealed record RootIdentityRow(long Id, long LibraryId, string Path);
 }
 
 /// <summary>
@@ -309,10 +318,6 @@ public enum LibraryAnalysisStage
 /// <summary>
 /// ライブラリ分析の実処理件数を含む進捗を表す。
 /// </summary>
-/// <param name="Stage">現在の処理段階</param>
-/// <param name="CompletedCount">現在の段階で処理を完了した件数</param>
-/// <param name="TotalCount">現在の段階の総件数。不明な場合はnull</param>
-/// <param name="Detail">処理段階内の補足表示</param>
 public sealed record LibraryAnalysisProgress(
     LibraryAnalysisStage Stage,
     int CompletedCount,
