@@ -3,7 +3,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Core.Candidates;
 
 /// <summary>
-/// 保存済みFingerprintから候補ペアを構築し、変更Trackだけ差分更新する。
+/// 保存済みFingerprintから候補ペアを構築し、変更TrackとLibraryTrack Pendingだけ差分更新する。
 /// </summary>
 public sealed class CandidateGenerationService(
     IFingerprintCatalogRepository fingerprintCatalog,
@@ -11,7 +11,8 @@ public sealed class CandidateGenerationService(
     ICandidatePairRepository candidatePairRepository,
     ICandidateReviewRepository reviewRepository,
     FingerprintSegmentSketcher sketcher,
-    CandidatePairGenerator pairGenerator)
+    CandidatePairGenerator pairGenerator,
+    ICandidateGenerationWorkRepository? workRepository = null)
 {
     /// <summary>
     /// 保存済みFingerprintから候補ペアを生成する。
@@ -37,6 +38,9 @@ public sealed class CandidateGenerationService(
         var fingerprintStates = await fingerprintCatalog.GetActiveStatesAsync(fingerprintAlgorithm, cancellationToken);
         var activeByTrackId = fingerprintStates.ToDictionary(item => item.TrackId);
         var cachedStates = await sketchRepository.GetTrackStatesAsync(fingerprintAlgorithm, options, cancellationToken);
+        var pendingTrackIds = workRepository is null
+            ? new HashSet<long>()
+            : (await workRepository.GetPendingTrackIdsAsync(cancellationToken)).ToHashSet();
 
         var changedTrackIds = fingerprintStates
             .Where(item => !cachedStates.TryGetValue(item.TrackId, out var cachedAt)
@@ -88,6 +92,10 @@ public sealed class CandidateGenerationService(
                 value.CompletedSketches,
                 value.TotalSketches)));
 
+        var affectedTrackIds = changedTrackIds
+            .Concat(inactiveTrackIds)
+            .Concat(pendingTrackIds)
+            .ToHashSet();
         IReadOnlyList<CandidatePair> generatedPairs;
         if (fullRebuild)
         {
@@ -97,27 +105,23 @@ public sealed class CandidateGenerationService(
                 options.MaximumSegmentHashHammingDistance,
                 pairProgress);
         }
+        else if (affectedTrackIds.Count == 0)
+        {
+            progress?.Report(new CandidateGenerationProgress(
+                CandidateGenerationProgressPhase.SearchingPairs,
+                allSketches.Count,
+                allSketches.Count));
+            generatedPairs = [];
+        }
         else
         {
-            var affectedTrackIds = changedTrackIds
-                .Concat(inactiveTrackIds)
-                .ToHashSet();
-            if (affectedTrackIds.Count == 0)
-            {
-                progress?.Report(new CandidateGenerationProgress(
-                    CandidateGenerationProgressPhase.SearchingPairs,
-                    allSketches.Count,
-                    allSketches.Count));
-                generatedPairs = [];
-            }
-            else
-            {
-                generatedPairs = pairGenerator.GenerateFromSketches(
-                    allSketches,
-                    affectedTrackIds,
-                    options.MaximumSegmentHashHammingDistance,
-                    pairProgress);
-            }
+            // PendingはFingerprint/Sketchが既知でも、新しいLibrary MembershipやGeneration Version変更によって
+            // このLibrary内の組合せ探索だけが未完了なTrackを表すため、changed Trackと同じ起点集合へ含める。
+            generatedPairs = pairGenerator.GenerateFromSketches(
+                allSketches,
+                affectedTrackIds,
+                options.MaximumSegmentHashHammingDistance,
+                pairProgress);
         }
 
         var excluded = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
@@ -131,13 +135,17 @@ public sealed class CandidateGenerationService(
         }
         else
         {
-            var affectedTrackIds = changedTrackIds
-                .Concat(inactiveTrackIds)
-                .ToArray();
-            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds, pairs, cancellationToken);
+            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), pairs, cancellationToken);
 
             // レビューはFingerprint更新と独立して発生するため、無変更実行でも新規レビュー済みペアを候補集合から除外する。
             await candidatePairRepository.DeleteAsync(excluded.ToArray(), cancellationToken);
+        }
+
+        if (workRepository is not null && pendingTrackIds.Count != 0)
+        {
+            // Fingerprint生成に失敗したTrackは候補探索を完了できていないためPendingを残す。
+            var completedPending = pendingTrackIds.Where(activeByTrackId.ContainsKey).ToArray();
+            await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
         }
 
         return new CandidateGenerationResult(
