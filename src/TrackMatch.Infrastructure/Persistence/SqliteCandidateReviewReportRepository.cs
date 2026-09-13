@@ -6,12 +6,12 @@ using TrackMatch.Core.Classification;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// 詳細比較済み候補を、人手レビュー状態を含めてGUI用に読み出す。
+/// Global Comparisonを、人手レビュー状態とLibrary Projectionを含めてGUI用に読み出す。
 /// </summary>
 public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase database)
 {
     /// <summary>
-    /// 指定Libraryの詳細比較結果をTrackメタデータとレビュー状態付きで取得する。
+    /// 指定LibraryのMembershipに両Trackが属する詳細比較結果を取得する。
     /// </summary>
     public async Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
@@ -50,8 +50,14 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 ON s.TrackIdA = x.TrackIdA AND s.TrackIdB = x.TrackIdB
             INNER JOIN Tracks a ON a.Id = x.TrackIdA
             INNER JOIN Tracks b ON b.Id = x.TrackIdB
-            WHERE a.LibraryId = @LibraryId
-              AND b.LibraryId = @LibraryId
+            WHERE a.IsMissing = 0
+              AND b.IsMissing = 0
+              AND EXISTS (
+                    SELECT 1 FROM LibraryTracks la
+                    WHERE la.LibraryId = @LibraryId AND la.TrackId = x.TrackIdA)
+              AND EXISTS (
+                    SELECT 1 FROM LibraryTracks lb
+                    WHERE lb.LibraryId = @LibraryId AND lb.TrackId = x.TrackIdB)
             ORDER BY CASE c.Kind
                 WHEN 'DuplicateCandidate' THEN 0
                 WHEN 'ShortVersionCandidate' THEN 1
@@ -76,7 +82,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         {
             if (!Enum.TryParse<AudioRelationshipKind>(row.Kind, out var parsedKind))
             {
-                throw new InvalidDataException($"未知の分類種別である: {row.Kind}");
+                throw new InvalidDataException($"未知の分類種別です: {row.Kind}");
             }
 
             kind = parsedKind;
@@ -87,7 +93,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         {
             if (!Enum.TryParse<CandidateReviewDecision>(row.ReviewDecision, out var parsedDecision))
             {
-                throw new InvalidDataException($"未知の候補レビュー判定である: {row.ReviewDecision}");
+                throw new InvalidDataException($"未知の候補レビュー判定です: {row.ReviewDecision}");
             }
 
             reviewDecision = parsedDecision;
@@ -113,7 +119,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
 
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
-            ?? throw new InvalidDataException("TrackメタデータJSONを復元できなかった。");
+            ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
 
     private sealed record ReportRow(
         long TrackIdA, long TrackIdB, string? Kind, string? Reason,
