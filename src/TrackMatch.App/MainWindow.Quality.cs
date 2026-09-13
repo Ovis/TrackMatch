@@ -184,6 +184,7 @@ public partial class MainWindow
 
         ReplaceSourcePanels(sourceGrid);
         CompactComparisonResult(comparisonGroup);
+        ImproveComparisonMetrics(comparisonGroup);
         sourceGrid.DataContextChanged += (_, _) => ScrollSourcePanelsToTop(sourceGrid);
         ScrollSourcePanelsToTop(sourceGrid);
 
@@ -242,6 +243,44 @@ public partial class MainWindow
         if (comparisonGroup.Content is not Panel comparisonPanel) return;
         comparisonPanel.VerticalAlignment = VerticalAlignment.Top;
         comparisonGroup.VerticalContentAlignment = VerticalAlignment.Top;
+    }
+
+    /// <summary>
+    /// 比較指標は短いラベルだけでは意味が伝わりにくいため、わずかな行間と指標説明を付加する。
+    /// </summary>
+    private static void ImproveComparisonMetrics(GroupBox comparisonGroup)
+    {
+        var descriptions = new Dictionary<string, string>
+        {
+            ["Aの一致範囲"] = "音源A全体のうち、音源Bとの一致区間として対応付けられた割合です。100%に近いほどAのほぼ全体が一致しています。",
+            ["Bの一致範囲"] = "音源B全体のうち、音源Aとの一致区間として対応付けられた割合です。100%に近いほどBのほぼ全体が一致しています。",
+            ["再生時間の近さ"] = "短い方の再生時間を長い方の再生時間で割った割合です。100%に近いほどA/Bの長さが近いことを示します。",
+            ["最適オフセット"] = "A/Bの音響特徴が最もよく一致するように時間位置をずらした量です。0秒に近いほど開始位置が近いことを示します。",
+            ["一致区間の長さ"] = "A/Bで音響的に一致していると判定された区間の長さです。",
+        };
+
+        foreach (var label in FindVisualChildren<TextBlock>(comparisonGroup))
+        {
+            if (!descriptions.TryGetValue(label.Text, out var description))
+            {
+                continue;
+            }
+
+            label.ToolTip = description;
+            label.Margin = new Thickness(label.Margin.Left, 2, label.Margin.Right, 2);
+
+            if (VisualTreeHelper.GetParent(label) is not Grid rowGrid)
+            {
+                continue;
+            }
+
+            var row = Grid.GetRow(label);
+            foreach (var value in rowGrid.Children.OfType<TextBlock>().Where(item => Grid.GetRow(item) == row))
+            {
+                value.ToolTip = description;
+                value.Margin = new Thickness(value.Margin.Left, 2, value.Margin.Right, 2);
+            }
+        }
     }
 
     private static void ScrollSourcePanelsToTop(Grid sourceGrid)
