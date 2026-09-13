@@ -1,54 +1,24 @@
-using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Trash;
 
 /// <summary>
-/// 確定済み重複グループのKeep以外を、安全条件を確認してApp-wide Trashへ移動する。
+/// Library固有Keepに基づき、重複グループのReject TrackをApp-wide Trashへ安全に移動する。
 /// </summary>
-public sealed class RejectedTrackTrashService
+public sealed class RejectedTrackTrashService(
+    IDuplicateGroupRepository groupRepository,
+    ITrackLookupRepository trackLookupRepository,
+    ITrackRepository trackRepository,
+    ITrackFileOperations fileOperations)
 {
-    private readonly ICandidateReviewRepository? _legacyReviewRepository;
-    private readonly IDuplicateGroupRepository? _groupRepository;
-    private readonly ITrackLookupRepository _trackLookupRepository;
-    private readonly ITrackRepository _trackRepository;
-    private readonly ITrackFileOperations _fileOperations;
-
-    /// <summary>
-    /// 重複グループを削除判断の正本として使用するコンストラクタ。
-    /// </summary>
-    public RejectedTrackTrashService(
-        IDuplicateGroupRepository groupRepository,
-        ITrackLookupRepository trackLookupRepository,
-        ITrackRepository trackRepository,
-        ITrackFileOperations fileOperations)
-    {
-        _groupRepository = groupRepository ?? throw new ArgumentNullException(nameof(groupRepository));
-        _trackLookupRepository = trackLookupRepository ?? throw new ArgumentNullException(nameof(trackLookupRepository));
-        _trackRepository = trackRepository ?? throw new ArgumentNullException(nameof(trackRepository));
-        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-    }
-
-    /// <summary>
-    /// 既存テストを移行するまでの互換コンストラクタ。
-    /// </summary>
-    [Obsolete("Global Duplicate Group経路を使用してください。")]
-    public RejectedTrackTrashService(
-        ICandidateReviewRepository reviewRepository,
-        ITrackLookupRepository trackLookupRepository,
-        ITrackRepository trackRepository,
-        ITrackFileOperations fileOperations)
-    {
-        _legacyReviewRepository = reviewRepository ?? throw new ArgumentNullException(nameof(reviewRepository));
-        _trackLookupRepository = trackLookupRepository ?? throw new ArgumentNullException(nameof(trackLookupRepository));
-        _trackRepository = trackRepository ?? throw new ArgumentNullException(nameof(trackRepository));
-        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-    }
-
     /// <summary>
     /// 指定LibraryのDispositionでRejectとなったTrackをPreviewまたはTrashへ移動する。
     /// </summary>
+    /// <remarks>
+    /// TrackはGlobalな物理ファイルなので、他LibraryでもMembershipされている場合は結果へ影響情報を含める。
+    /// Keepが未選択・競合・MissingのGroupは安全側で移動を拒否する。
+    /// </remarks>
     public async Task<RejectedTrackTrashResult> ProcessAsync(
         long libraryId,
         string trashRoot,
@@ -63,81 +33,59 @@ public sealed class RejectedTrackTrashService
 
         ArgumentException.ThrowIfNullOrWhiteSpace(trashRoot);
         var fullTrashRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(trashRoot));
-
-        if (_groupRepository is not null)
-        {
-            return await ProcessGroupsAsync(
-                libraryId,
-                fullTrashRoot,
-                execute,
-                collisionBehavior,
-                cancellationToken);
-        }
-
-        return await ProcessLegacyReviewsAsync(
-            libraryId,
-            fullTrashRoot,
-            execute,
-            collisionBehavior,
-            cancellationToken);
-    }
-
-    private async Task<RejectedTrackTrashResult> ProcessGroupsAsync(
-        long libraryId,
-        string fullTrashRoot,
-        bool execute,
-        TrashDestinationCollisionBehavior collisionBehavior,
-        CancellationToken cancellationToken)
-    {
-        var groups = await _groupRepository!.GetByLibraryIdAsync(libraryId, cancellationToken);
+        var groups = await groupRepository.GetByLibraryIdAsync(libraryId, cancellationToken);
         var items = new List<RejectedTrackMoveItem>();
+        var impacts = new Dictionary<long, SharedTrackTrashImpact>();
 
         foreach (var group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
             group.Validate();
 
-            // Keepは現在Library外のGlobal Trackでも選択できる。Membershipではなく、物理ファイルが利用可能かだけを確認する。
-            var keepTrack = await _trackLookupRepository.GetByIdAsync(group.KeepTrackId, cancellationToken);
-            var keepIsAvailable = keepTrack is not null
-                && !keepTrack.IsMissing
-                && _fileOperations.FileExists(Path.GetFullPath(keepTrack.Metadata.Path));
-
-            if (!keepIsAvailable)
+            if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
             {
-                foreach (var rejectTrackId in group.TrackIds.Where(trackId => trackId != group.KeepTrackId))
-                {
-                    if (!await _trackLookupRepository.IsInLibraryAsync(rejectTrackId, libraryId, cancellationToken))
-                    {
-                        continue;
-                    }
-
-                    var rejectTrack = await _trackLookupRepository.GetByIdAsync(rejectTrackId, cancellationToken);
-                    if (rejectTrack is null)
-                    {
-                        continue;
-                    }
-
-                    var sourcePath = Path.GetFullPath(rejectTrack.Metadata.Path);
-                    items.Add(new RejectedTrackMoveItem(
-                        rejectTrackId,
-                        sourcePath,
-                        TrashPathRules.CreateDestinationPath(fullTrashRoot, sourcePath),
-                        RejectedTrackMoveStatus.ReviewConflict,
-                        "重複グループで残すファイルが利用できないため、安全のため移動を中止しました。"));
-                }
-
+                await AddBlockedGroupItemsAsync(
+                    group,
+                    libraryId,
+                    fullTrashRoot,
+                    items,
+                    "重複グループで残すファイルが未確定のため、安全のため移動を中止しました。",
+                    cancellationToken);
                 continue;
             }
 
-            var rejectTrackIds = group.TrackIds.Where(trackId => trackId != group.KeepTrackId).ToArray();
-            if (rejectTrackIds.Length != group.TrackIds.Count - 1)
+            var keepTrackId = group.KeepTrackId.Value;
+            var keepTrack = await trackLookupRepository.GetByIdAsync(keepTrackId, cancellationToken);
+            var keepIsAvailable = keepTrack is not null
+                && !keepTrack.IsMissing
+                && fileOperations.FileExists(Path.GetFullPath(keepTrack.Metadata.Path));
+            if (!keepIsAvailable)
             {
-                throw new InvalidOperationException($"重複グループ #{group.Id} のKeep構成が不正なため、ごみ箱処理を拒否しました。");
+                await AddBlockedGroupItemsAsync(
+                    group,
+                    libraryId,
+                    fullTrashRoot,
+                    items,
+                    "重複グループで残すファイルが利用できないため、安全のため移動を中止しました。",
+                    cancellationToken);
+                continue;
             }
+
+            // KeepがLibrary外Trackの場合、現在Libraryの構成TrackはすべてReject候補になる。
+            var rejectTrackIds = group.TrackIds
+                .Where(trackId => trackId != keepTrackId)
+                .Distinct()
+                .ToArray();
 
             foreach (var rejectTrackId in rejectTrackIds)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                var impact = await CreateSharedImpactAsync(libraryId, rejectTrackId, cancellationToken);
+                if (impact.IsShared)
+                {
+                    impacts[rejectTrackId] = impact;
+                }
+
                 var item = await ProcessTrackAsync(
                     libraryId,
                     rejectTrackId,
@@ -152,61 +100,63 @@ public sealed class RejectedTrackTrashService
             }
         }
 
-        return new RejectedTrackTrashResult(items, execute);
+        return new RejectedTrackTrashResult(items, execute, impacts.Values.OrderBy(item => item.TrackId).ToArray());
     }
 
-    private async Task<RejectedTrackTrashResult> ProcessLegacyReviewsAsync(
+    private async Task AddBlockedGroupItemsAsync(
+        DuplicateGroup group,
         long libraryId,
         string fullTrashRoot,
-        bool execute,
-        TrashDestinationCollisionBehavior collisionBehavior,
+        ICollection<RejectedTrackMoveItem> items,
+        string message,
         CancellationToken cancellationToken)
     {
-        var reviews = await _legacyReviewRepository!.GetAllAsync(cancellationToken);
-        var confirmed = reviews
-            .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
-            .ToArray();
-        var keepTrackIds = confirmed.Select(review => review.KeepTrackId!.Value).ToHashSet();
-        var rejectTrackIds = confirmed.Select(GetRejectTrackId).Distinct().Order().ToArray();
-
-        var items = new List<RejectedTrackMoveItem>(rejectTrackIds.Length);
-        foreach (var trackId in rejectTrackIds)
+        foreach (var trackId in group.TrackIds)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!await _trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
+            if (!await trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
             {
                 continue;
             }
 
-            var track = await _trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
+            var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
             if (track is null)
             {
                 continue;
             }
 
             var sourcePath = Path.GetFullPath(track.Metadata.Path);
-            var destinationPath = TrashPathRules.CreateDestinationPath(fullTrashRoot, sourcePath);
-            if (keepTrackIds.Contains(trackId))
-            {
-                items.Add(new RejectedTrackMoveItem(
-                    trackId,
-                    sourcePath,
-                    destinationPath,
-                    RejectedTrackMoveStatus.ReviewConflict,
-                    "同じ音源が別の重複レビューで残す側にも指定されています。"));
-                continue;
-            }
-
-            items.Add(await ProcessKnownTrackAsync(
-                track,
+            items.Add(new RejectedTrackMoveItem(
+                trackId,
                 sourcePath,
-                destinationPath,
-                execute,
-                collisionBehavior,
-                cancellationToken));
+                TrashPathRules.CreateDestinationPath(fullTrashRoot, sourcePath),
+                RejectedTrackMoveStatus.ReviewConflict,
+                message));
+        }
+    }
+
+    private async Task<SharedTrackTrashImpact> CreateSharedImpactAsync(
+        long currentLibraryId,
+        long trackId,
+        CancellationToken cancellationToken)
+    {
+        var libraries = await trackLookupRepository.GetLibrariesAsync(trackId, cancellationToken);
+        var otherLibraries = libraries.Where(library => library.Id != currentLibraryId).ToArray();
+        if (otherLibraries.Length == 0)
+        {
+            return new SharedTrackTrashImpact(trackId, [], []);
         }
 
-        return new RejectedTrackTrashResult(items, execute);
+        var keepLibraries = new List<TrackLibraryReference>();
+        foreach (var library in otherLibraries)
+        {
+            var group = await groupRepository.GetByTrackIdAsync(trackId, library.Id, cancellationToken);
+            if (group?.KeepStatus == DuplicateGroupKeepStatus.Selected && group.KeepTrackId == trackId)
+            {
+                keepLibraries.Add(library);
+            }
+        }
+
+        return new SharedTrackTrashImpact(trackId, otherLibraries, keepLibraries);
     }
 
     private async Task<RejectedTrackMoveItem?> ProcessTrackAsync(
@@ -217,12 +167,12 @@ public sealed class RejectedTrackTrashService
         TrashDestinationCollisionBehavior collisionBehavior,
         CancellationToken cancellationToken)
     {
-        if (!await _trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
+        if (!await trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
         {
             return null;
         }
 
-        var track = await _trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
+        var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
         if (track is null)
         {
             return null;
@@ -257,7 +207,7 @@ public sealed class RejectedTrackTrashService
                 "音源は既に見つからない状態として記録されています。");
         }
 
-        if (!_fileOperations.FileExists(sourcePath))
+        if (!fileOperations.FileExists(sourcePath))
         {
             return new RejectedTrackMoveItem(
                 track.Id,
@@ -267,7 +217,7 @@ public sealed class RejectedTrackTrashService
                 "移動元ファイルが存在しません。");
         }
 
-        if (_fileOperations.FileExists(destinationPath))
+        if (fileOperations.FileExists(destinationPath))
         {
             if (!execute || collisionBehavior == TrashDestinationCollisionBehavior.Skip)
             {
@@ -289,21 +239,20 @@ public sealed class RejectedTrackTrashService
 
         try
         {
-            _fileOperations.Move(sourcePath, destinationPath);
+            fileOperations.Move(sourcePath, destinationPath);
             try
             {
                 // Trashは同じContentを別場所へ退避する操作なのでFingerprint等の解析キャッシュは保持する。
                 // Global Trackは元Pathに存在しない状態としてMissingだけを更新する。
-                await _trackRepository.MarkMissingAsync(track.Id, cancellationToken);
+                await trackRepository.MarkMissingAsync(track.Id, cancellationToken);
                 return new RejectedTrackMoveItem(track.Id, sourcePath, destinationPath, RejectedTrackMoveStatus.Moved);
             }
             catch (Exception databaseException) when (databaseException is IOException or InvalidDataException or InvalidOperationException)
             {
-                // FilesystemとSQLiteを同一Transactionにはできない。DB更新失敗時は元Pathへの補償Moveを試し、
-                // 物理状態とDB状態が可能な限り分離しないようにする。
+                // FilesystemとSQLiteを同一Transactionにはできない。DB更新失敗時は元Pathへの補償Moveを試す。
                 try
                 {
-                    _fileOperations.Move(destinationPath, sourcePath);
+                    fileOperations.Move(destinationPath, sourcePath);
                     return new RejectedTrackMoveItem(
                         track.Id,
                         sourcePath,
@@ -343,7 +292,7 @@ public sealed class RejectedTrackTrashService
         for (var number = 2; number < int.MaxValue; number++)
         {
             var candidate = Path.Combine(directory, $"{name} ({number}){extension}");
-            if (!_fileOperations.FileExists(candidate))
+            if (!fileOperations.FileExists(candidate))
             {
                 return candidate;
             }
@@ -351,7 +300,4 @@ public sealed class RejectedTrackTrashService
 
         throw new IOException("ごみ箱の移動先に使用できる別名を確保できません。");
     }
-
-    private static long GetRejectTrackId(CandidateReview review)
-        => review.KeepTrackId == review.Pair.TrackIdA ? review.Pair.TrackIdB : review.Pair.TrackIdA;
 }
