@@ -75,9 +75,20 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
         if (!string.Equals(dialog.SelectedTrashRoot, _viewModel.TrashRoot, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(dialog.SelectedTrashRoot))
         {
-            try { await _viewModel.SetTrashRootAsync(dialog.SelectedTrashRoot); }
+            try
+            {
+                await _viewModel.SetTrashRootAsync(dialog.SelectedTrashRoot);
+            }
             catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
-            { MessageBox.Show(this, exception.Message, "Trash Root設定失敗", MessageBoxButton.OK, MessageBoxImage.Error); }
+            {
+                new ConfirmationDialog(
+                    "Trash Root設定失敗",
+                    "Trash Rootを設定できませんでした",
+                    exception.Message,
+                    "閉じる",
+                    kind: AppDialogKind.Error)
+                { Owner = this }.ShowDialog();
+            }
         }
         await _viewModel.LoadAsync(dialog.SelectedLibraryId);
     }
@@ -108,28 +119,63 @@ public partial class MainWindow : Window
             if (!await EnsureTrashRootAsync()) return;
             var preview = await _viewModel.ProcessTrashAsync(execute: false);
             if (preview is null) return;
+
             var collisionBehavior = TrashDestinationCollisionBehavior.Skip;
             var collisions = preview.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
             if (collisions > 0)
             {
-                var collisionChoice = MessageBox.Show(this,
-                    $"Trash側に同じPathのファイルが {collisions} 件あります。\n\nはい: Track (2).flac のような最小Available番号で別名移動\nいいえ: Collisionしたファイルをスキップ\nキャンセル: Trash処理を中止",
-                    "Destination Collision", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
-                if (collisionChoice == MessageBoxResult.Cancel) return;
-                collisionBehavior = collisionChoice == MessageBoxResult.Yes ? TrashDestinationCollisionBehavior.Rename : TrashDestinationCollisionBehavior.Skip;
+                var collisionDialog = new ConfirmationDialog(
+                    "移動先のファイル重複",
+                    $"Trash側に同じPathのファイルが {collisions} 件あります",
+                    "別名で移動するか、衝突したファイルだけスキップするかを選択してください。",
+                    "別名で移動",
+                    "スキップ",
+                    "キャンセル",
+                    AppDialogKind.Warning)
+                { Owner = this };
+                collisionDialog.ShowDialog();
+
+                if (collisionDialog.SelectedResult is AppDialogResult.Tertiary or AppDialogResult.None)
+                    return;
+
+                collisionBehavior = collisionDialog.SelectedResult == AppDialogResult.Primary
+                    ? TrashDestinationCollisionBehavior.Rename
+                    : TrashDestinationCollisionBehavior.Skip;
             }
 
-            var confirmation = MessageBox.Show(this,
-                $"レビュー済みの破棄対象 {preview.ReadyCount} 件をTrashへ移動します。\n元ファイルの場所から実際に移動されます。続行しますか？",
-                "Trashへ移動", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-            if (confirmation != MessageBoxResult.Yes) return;
+            var confirmation = new ConfirmationDialog(
+                "Trashへ移動",
+                $"レビュー済みの破棄対象 {preview.ReadyCount} 件をTrashへ移動しますか？",
+                "元ファイルの場所から実際に移動されます。",
+                "ごみ箱へ移動",
+                "キャンセル",
+                kind: AppDialogKind.Warning)
+            { Owner = this };
+            confirmation.ShowDialog();
+            if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+
             var result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
             if (result is not null)
-                MessageBox.Show(this, $"移動完了: {result.MovedCount}件\nBlocked / Skipped: {result.BlockedCount}件", "Trash移動結果", MessageBoxButton.OK,
-                    result.BlockedCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            {
+                new ConfirmationDialog(
+                    "Trash移動結果",
+                    $"移動完了: {result.MovedCount}件",
+                    $"Blocked / Skipped: {result.BlockedCount}件",
+                    "閉じる",
+                    kind: result.BlockedCount == 0 ? AppDialogKind.Information : AppDialogKind.Warning)
+                { Owner = this }.ShowDialog();
+            }
         }
         catch (Exception exception)
-        { MessageBox.Show(this, exception.Message, "Trash処理失敗", MessageBoxButton.OK, MessageBoxImage.Error); }
+        {
+            new ConfirmationDialog(
+                "Trash処理失敗",
+                "Trash処理を完了できませんでした",
+                exception.Message,
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = this }.ShowDialog();
+        }
     }
 
     private async Task<bool> EnsureTrashRootAsync()
@@ -229,23 +275,19 @@ public partial class MainWindow : Window
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
     {
-        if (!_viewModel.CanClearReview)
-        {
-            return;
-        }
+        if (!_viewModel.CanClearReview) return;
 
-        var dialog = new ConfirmationDialog(
+        var confirmation = new ConfirmationDialog(
             "レビューを未確定に戻す",
             "この候補を未レビューへ戻しますか？",
             "現在のレビュー結果を削除します。Trashへ移動済みのファイルは自動では元に戻りません。",
-            "未レビューへ戻す")
-        {
-            Owner = this,
-        };
+            "未レビューへ戻す",
+            "キャンセル",
+            kind: AppDialogKind.Warning)
+        { Owner = this };
+        confirmation.ShowDialog();
 
-        if (dialog.ShowDialog() == true)
-        {
+        if (confirmation.SelectedResult == AppDialogResult.Primary)
             await _viewModel.ClearReviewAsync();
-        }
     }
 }
