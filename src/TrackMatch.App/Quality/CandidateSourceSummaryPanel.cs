@@ -145,7 +145,7 @@ internal sealed class CandidateSourceSummaryPanel : Grid
 
     private static void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string path } || string.IsNullOrWhiteSpace(path))
+        if (sender is not Button { Tag: string path } button || string.IsNullOrWhiteSpace(path))
         {
             return;
         }
@@ -175,11 +175,23 @@ internal sealed class CandidateSourceSummaryPanel : Grid
                 return;
             }
 
-            MessageBox.Show("ファイルまたは保存先フォルダーが見つかりません。", "フォルダーを開く", MessageBoxButton.OK, MessageBoxImage.Warning);
+            new ConfirmationDialog(
+                "フォルダーを開く",
+                "ファイルまたは保存先フォルダーが見つかりません",
+                path,
+                "閉じる",
+                kind: AppDialogKind.Warning)
+            { Owner = Window.GetWindow(button) }.ShowDialog();
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show(exception.Message, "フォルダーを開けませんでした", MessageBoxButton.OK, MessageBoxImage.Error);
+            new ConfirmationDialog(
+                "フォルダーを開けませんでした",
+                "Explorerを起動できませんでした",
+                exception.Message,
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = Window.GetWindow(button) }.ShowDialog();
         }
     }
 }
