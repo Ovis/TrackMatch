@@ -1,5 +1,6 @@
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
+using Xunit;
 
 namespace TrackMatch.Core.Tests;
 
