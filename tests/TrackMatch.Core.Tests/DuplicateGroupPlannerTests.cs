@@ -89,11 +89,11 @@ public sealed class DuplicateGroupPlannerTests
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
 
         Assert.Equal(2, groups.Count);
-        var first = Assert.Single(groups.Where(group => group.TrackIds.Contains(1)));
+        var first = Assert.Single(groups, group => group.TrackIds.Contains(1));
         Assert.Equal(12, first.ExistingGroupId);
         Assert.Equal(1, first.KeepTrackId);
         Assert.Equal(new long[] { 1, 2 }, first.TrackIds);
-        var second = Assert.Single(groups.Where(group => group.TrackIds.Contains(4)));
+        var second = Assert.Single(groups, group => group.TrackIds.Contains(4));
         Assert.Null(second.ExistingGroupId);
         Assert.Equal(4, second.KeepTrackId);
     }
