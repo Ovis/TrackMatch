@@ -3,11 +3,13 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.App;
 
 /// <summary>
-/// 重複グループ詳細画面で1ファイル分のメタデータを表示するモデル。
+/// Global Duplicate Group詳細画面で1ファイル分のメタデータとLibrary所属を表示するモデル。
 /// </summary>
 public sealed record DuplicateGroupTrackViewModel(
     long TrackId,
     bool IsKeep,
+    bool IsInCurrentLibrary,
+    bool IsMissing,
     string Title,
     string Artist,
     string? Album,
@@ -15,8 +17,11 @@ public sealed record DuplicateGroupTrackViewModel(
     string Duration,
     string Path)
 {
-    /// <summary>保存済みTrackから詳細画面用モデルを生成する。</summary>
-    public static DuplicateGroupTrackViewModel Create(StoredTrack track, bool isKeep)
+    /// <summary>現在Libraryとの関係を表示する短いラベル。</summary>
+    public string ScopeLabel => IsInCurrentLibrary ? "現在のLibrary" : "Library外";
+
+    /// <summary>保存済みGlobal Trackから詳細画面用モデルを生成する。</summary>
+    public static DuplicateGroupTrackViewModel Create(StoredTrack track, bool isKeep, bool isInCurrentLibrary)
     {
         ArgumentNullException.ThrowIfNull(track);
         var metadata = track.Metadata;
@@ -33,10 +38,13 @@ public sealed record DuplicateGroupTrackViewModel(
         if (metadata.BitrateKbps is { } bitrate) details.Add($"{bitrate} kbps");
         if (metadata.Channels is { } channels) details.Add($"{channels} ch");
         details.Add(FormatFileSize(metadata.FileSize));
+        if (track.IsMissing) details.Add("Missing");
 
         return new DuplicateGroupTrackViewModel(
             track.Id,
             isKeep,
+            isInCurrentLibrary,
+            track.IsMissing,
             title,
             artist,
             metadata.Album,
