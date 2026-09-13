@@ -7,17 +7,17 @@ using Xunit;
 namespace TrackMatch.Core.Tests;
 
 /// <summary>
-/// Missing Trackが同じRoot/RelativePathへ再出現した場合の復活挙動を検証する。
+/// MissingになったGlobal Trackが同じ物理Pathへ再出現した場合の復活挙動を検証する。
 /// </summary>
 public sealed class MissingTrackResurrectionTests
 {
     [Fact]
-    public async Task ScanAsync_ReappearedMissingTrackKeepsTrackIdAndRegeneratesFingerprint()
+    public async Task ScanAsync_ReappearedMissingTrackKeepsTrackIdAndRestoresMembership()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
         var path = Path.Combine(root, "Album", "01.flac");
         var metadata = CreateMetadata(path);
-        var stored = new StoredTrack(42, metadata, true, 1, 1, Path.Combine("Album", "01.flac"));
+        var stored = new StoredTrack(42, metadata, true);
         var tracks = new FakeTrackRepository(stored);
         var extractor = new FakeFingerprintExtractor();
         var service = new IncrementalLibraryScanService(
@@ -27,12 +27,11 @@ public sealed class MissingTrackResurrectionTests
             extractor,
             2);
 
-        var result = await service.ScanAsync(root, TestContext.Current.CancellationToken);
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
 
         Assert.Equal(42, tracks.UpsertedTrackId);
-        Assert.Equal([42L], tracks.DeletedFingerprintIds);
-        Assert.Equal([42L], tracks.SavedFingerprintTrackIds);
-        Assert.Equal([path], extractor.Paths);
+        Assert.Equal([(1L, 1L, 42L, Path.Combine("Album", "01.flac"))], tracks.Memberships);
+        Assert.Empty(extractor.Paths);
         Assert.Equal(1, result.Summary.UpdatedFiles);
         Assert.Equal(0, result.Summary.AddedFiles);
     }
@@ -61,8 +60,7 @@ public sealed class MissingTrackResurrectionTests
     private sealed class FakeTrackRepository(StoredTrack stored) : ITrackRepository
     {
         public long? UpsertedTrackId { get; private set; }
-        public List<long> DeletedFingerprintIds { get; } = [];
-        public List<long> SavedFingerprintTrackIds { get; } = [];
+        public List<(long LibraryId, long RootId, long TrackId, string RelativePath)> Memberships { get; } = [];
 
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
         {
@@ -73,29 +71,43 @@ public sealed class MissingTrackResurrectionTests
         public Task<StoredTrack?> GetByPathAsync(string path, CancellationToken cancellationToken = default)
             => Task.FromResult<StoredTrack?>(stored);
 
-        public Task<IReadOnlyList<StoredTrack>> GetByRootPathAsync(string rootPath, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<StoredTrack>>([stored]);
+        public Task<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>> GetByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>>(
+            [
+                (new StoredLibraryTrack(libraryId, stored.Id, rootId, Path.Combine("Album", "01.flac"), false, null), stored),
+            ]);
 
-        public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootPathAsync(string rootPath, CancellationToken cancellationToken = default)
+        public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlySet<long>>(new HashSet<long>());
+
+        public Task EnsureMembershipAsync(
+            long libraryId,
+            long rootId,
+            long trackId,
+            string relativePath,
+            CancellationToken cancellationToken = default)
+        {
+            Memberships.Add((libraryId, rootId, trackId, relativePath));
+            return Task.CompletedTask;
+        }
 
         public Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task SaveFingerprintAsync(long trackId, AudioFingerprint fingerprint, int algorithm, CancellationToken cancellationToken = default)
-        {
-            SavedFingerprintTrackIds.Add(trackId);
-            return Task.CompletedTask;
-        }
+            => Task.CompletedTask;
 
         public Task DeleteFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
-        {
-            DeletedFingerprintIds.Add(trackId);
-            return Task.CompletedTask;
-        }
+            => Task.CompletedTask;
 
         public Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
-            => Task.FromResult<AudioFingerprint?>(null);
+            => Task.FromResult<AudioFingerprint?>(new AudioFingerprint(stored.Metadata.Path, stored.Metadata.Duration, [1u, 2u, 3u]));
     }
 
     private sealed class FakeFingerprintExtractor : IFingerprintExtractor
