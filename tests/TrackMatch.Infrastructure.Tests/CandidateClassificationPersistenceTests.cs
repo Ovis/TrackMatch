@@ -12,6 +12,7 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests", Guid.NewGuid().ToString("N"));
     private SqliteDatabase _database = null!;
     private long _libraryId;
+    private long _rootId;
 
     public async ValueTask InitializeAsync()
     {
@@ -23,6 +24,7 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
             [_directory],
             TestContext.Current.CancellationToken);
         _libraryId = library.Id;
+        _rootId = Assert.Single(library.Roots).Id;
     }
 
     public ValueTask DisposeAsync()
@@ -80,6 +82,18 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
         var idB = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "unclassified-b.flac"), "Artist", "Same", "Album 2", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        await trackRepository.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            idA,
+            "unclassified-a.flac",
+            TestContext.Current.CancellationToken);
+        await trackRepository.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            idB,
+            "unclassified-b.flac",
             TestContext.Current.CancellationToken);
         var pair = CandidatePairKey.Create(idA, idB);
 
