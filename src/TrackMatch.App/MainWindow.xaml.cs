@@ -229,10 +229,23 @@ public partial class MainWindow : Window
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
     {
-        if (!_viewModel.CanClearReview) return;
-        var confirmation = MessageBox.Show(this,
-            "この候補のレビュー結果を削除して未レビューへ戻します。\nTrashへ移動済みのファイルは自動では元に戻りません。続行しますか？",
-            "レビューを未確定に戻す", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (confirmation == MessageBoxResult.Yes) await _viewModel.ClearReviewAsync();
+        if (!_viewModel.CanClearReview)
+        {
+            return;
+        }
+
+        var dialog = new ConfirmationDialog(
+            "レビューを未確定に戻す",
+            "この候補を未レビューへ戻しますか？",
+            "現在のレビュー結果を削除します。Trashへ移動済みのファイルは自動では元に戻りません。",
+            "未レビューへ戻す")
+        {
+            Owner = this,
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            await _viewModel.ClearReviewAsync();
+        }
     }
 }
