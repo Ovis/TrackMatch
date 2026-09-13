@@ -16,6 +16,9 @@
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
 
+    <!-- フォントGlyphへ依存せず、サイズや配色をテーマ側で統一できるよう主要アイコンはGeometryとして保持する。 -->
+    <Geometry x:Key="FolderOpenIconGeometry">M1,5 L1,3.5 C1,2.7 1.7,2 2.5,2 L6,2 L7.5,4 L13.5,4 C14.3,4 15,4.7 15,5.5 L15,6 L5,6 L2.2,13 L13.2,13 L16,6 L17,6 L14,14 L1,14 Z</Geometry>
+
     <Style TargetType="Window">
         <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
