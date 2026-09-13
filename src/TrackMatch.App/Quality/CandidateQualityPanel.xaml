@@ -59,6 +59,11 @@
                               HorizontalScrollBarVisibility="Disabled"
                               PreviewMouseWheel="QualityMeasurements_PreviewMouseWheel"
                               RowHeaderWidth="0">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="ToolTip" Value="{Binding Description}"/>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="項目" Binding="{Binding Label}" Width="*" MinWidth="180"/>
                             <DataGridTextColumn Header="A" Binding="{Binding ValueA}" Width="110"/>
