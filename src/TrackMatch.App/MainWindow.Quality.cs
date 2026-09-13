@@ -167,13 +167,15 @@ public partial class MainWindow
         var candidateGrid = FindVisualChildren<DataGrid>(this).FirstOrDefault();
         if (candidateGrid is null) return;
 
-        var headerBackground = (Brush)FindResource("DataGridHeaderBackgroundBrush");
+        // 共通DataGridColumnHeaderと同じ色を直接使い、Filler専用Resourceを増やさない。
+        var headerBackground = new SolidColorBrush(Color.FromRgb(0xF3, 0xF6, 0xF9));
+        var borderBrush = (Brush)FindResource("BorderBrush");
         foreach (var header in FindVisualChildren<DataGridColumnHeader>(candidateGrid))
         {
             if (header.Column is null)
             {
                 header.Background = headerBackground;
-                header.BorderBrush = (Brush)FindResource("BorderBrush");
+                header.BorderBrush = borderBrush;
             }
         }
     }
