@@ -102,7 +102,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
         var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             "SELECT Id FROM Tracks WHERE PathKey = @PathKey;",
-            new { normalizedPath.Key },
+            new { PathKey = normalizedPath.Key },
             transaction,
             cancellationToken: cancellationToken));
 
@@ -408,7 +408,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
 
     private static IReadOnlyList<string> DeserializeList(string json)
         => JsonSerializer.Deserialize<string[]>(json)
-            ?? throw new InvalidDataException("SQLite内の文字列配列JSONを復元できませんでした。");
+            ?? throw new InvalidDataException("SQLite内の文字列配列JSONを復元できなかった。");
 
     private static byte[] EncodeFingerprint(IReadOnlyList<uint> values)
     {
