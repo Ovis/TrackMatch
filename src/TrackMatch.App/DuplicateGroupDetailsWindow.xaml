@@ -19,7 +19,8 @@
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Text="残すファイル"/>
+                <TextBlock Margin="0,0,0,4" FontWeight="SemiBold" Text="残すファイル"/>
+                <TextBlock Margin="0,0,0,8" Style="{StaticResource SecondaryTextStyle}" Text="{Binding KeepStateText}" TextWrapping="Wrap"/>
                 <ItemsControl ItemsSource="{Binding KeepTracks}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -28,6 +29,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold"><Run Text="★ "/><Run Text="{Binding Title}"/></TextBlock>
+                                        <TextBlock Margin="0,2,0,0" Text="{Binding ScopeLabel}" Style="{StaticResource SecondaryTextStyle}"/>
                                         <TextBlock Margin="0,3,0,0" Text="{Binding Artist}"/>
                                         <TextBlock Margin="0,2,0,0" Text="{Binding Album}" Style="{StaticResource SecondaryTextStyle}"/>
                                         <TextBlock Margin="0,5,0,0" Text="{Binding MetadataSummary}"/>
@@ -44,7 +46,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Margin="0,20,0,8" FontWeight="SemiBold" Text="重複として確認済み"/>
+                <TextBlock Margin="0,20,0,8" FontWeight="SemiBold" Text="重複グループの構成ファイル"/>
                 <ItemsControl ItemsSource="{Binding OtherTracks}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -53,6 +55,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding Title}"/>
+                                        <TextBlock Margin="0,2,0,0" Text="{Binding ScopeLabel}" Style="{StaticResource SecondaryTextStyle}"/>
                                         <TextBlock Margin="0,3,0,0" Text="{Binding Artist}"/>
                                         <TextBlock Margin="0,2,0,0" Text="{Binding Album}" Style="{StaticResource SecondaryTextStyle}"/>
                                         <TextBlock Margin="0,5,0,0" Text="{Binding MetadataSummary}"/>
