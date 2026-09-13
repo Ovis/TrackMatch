@@ -8,7 +8,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// Root RemapでTrack IDと解析・Reviewデータを維持しつつPathとMissing状態だけを更新することを検証する。
+/// Global Root RemapでTrack IDと解析・Reviewを維持し、Root/Membershipを確定仕様どおり更新することを検証する。
 /// </summary>
 public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
 {
@@ -30,7 +30,7 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Remap_PreservesIdsFingerprintAndReviewWhileUpdatingMissingPaths()
+    public async Task Remap_PreservesGlobalIdsFingerprintAndReviewWhileUpdatingMissingPaths()
     {
         var oldRoot = Path.Combine(_directory, "OldMusic");
         var newRoot = Path.Combine(_directory, "NewMusic");
@@ -51,6 +51,8 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await tracks.UpsertMetadataAsync(CreateMetadata(oldA), TestContext.Current.CancellationToken);
         var trackB = await tracks.UpsertMetadataAsync(CreateMetadata(oldB), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, root.Id, trackA, Path.Combine("Album", "01.flac"), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, root.Id, trackB, Path.Combine("Album", "02.flac"), TestContext.Current.CancellationToken);
         await tracks.SaveFingerprintAsync(trackA, CreateFingerprint(oldA), 2, TestContext.Current.CancellationToken);
         await tracks.SaveFingerprintAsync(trackB, CreateFingerprint(oldB), 2, TestContext.Current.CancellationToken);
 
@@ -63,15 +65,18 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
                 trackA),
             TestContext.Current.CancellationToken);
 
-        // 旧Storageが既に取り外されていても、DBのRelativePathだけでRemapできる必要がある。
+        // 旧Storageが既に取り外されていても、DB上のGlobal Pathから相対位置を復元できる必要がある。
         Directory.Delete(oldRoot, recursive: true);
         var service = new SqliteLibraryRootRemapService(_database);
         var preview = await service.PreviewAsync(library.Id, root.Id, newRoot, TestContext.Current.CancellationToken);
 
+        Assert.True(preview.CanApply);
         Assert.Equal(2, preview.TargetTrackCount);
         Assert.Equal(1, preview.MatchedTrackCount);
         Assert.Equal([Path.Combine("Album", "02.flac")], preview.MissingRelativePaths);
         Assert.Equal(1, preview.UnknownAudioFileCount);
+        Assert.Single(preview.AffectedRoots);
+        Assert.Empty(preview.PathCollisions);
 
         var result = await service.ApplyAsync(library.Id, root.Id, newRoot, TestContext.Current.CancellationToken);
 
@@ -79,6 +84,8 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
         Assert.Equal(1, result.MatchedTrackCount);
         Assert.Equal(1, result.MissingTrackCount);
         Assert.Equal(1, result.UnknownAudioFileCount);
+        Assert.Equal(1, result.AffectedRootCount);
+        Assert.Equal(0, result.RemovedMembershipCount);
 
         var remappedLibrary = Assert.IsType<TrackMatch.Core.Libraries.Library>(
             await libraries.GetAsync(library.Id, TestContext.Current.CancellationToken));
@@ -104,13 +111,12 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Preview_RejectsRootThatOverlapsAnotherRegisteredRoot()
+    public async Task Preview_AllowsDestinationInsideDifferentLibraryRootWithoutAddingMembership()
     {
         var oldRoot = Path.Combine(_directory, "OldMusic");
         var otherRoot = Path.Combine(_directory, "OtherMusic");
-        Directory.CreateDirectory(oldRoot);
-        Directory.CreateDirectory(otherRoot);
         var nested = Path.Combine(otherRoot, "Nested");
+        Directory.CreateDirectory(oldRoot);
         Directory.CreateDirectory(nested);
 
         var libraries = new SqliteLibraryRepository(_database);
@@ -119,11 +125,61 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
         var root = Assert.Single(library.Roots);
 
         var service = new SqliteLibraryRootRemapService(_database);
+        var preview = await service.PreviewAsync(library.Id, root.Id, nested, TestContext.Current.CancellationToken);
+
+        Assert.True(preview.CanApply);
+        Assert.Single(preview.AffectedRoots);
+    }
+
+    [Fact]
+    public async Task Preview_RejectsDestinationOverlappingAnotherRootInSameLibrary()
+    {
+        var oldRoot = Path.Combine(_directory, "OldMusic");
+        var otherRoot = Path.Combine(_directory, "OtherMusic");
+        var nested = Path.Combine(otherRoot, "Nested");
+        Directory.CreateDirectory(oldRoot);
+        Directory.CreateDirectory(nested);
+
+        var libraries = new SqliteLibraryRepository(_database);
+        var library = await libraries.CreateAsync("Music", [oldRoot, otherRoot], TestContext.Current.CancellationToken);
+        var root = library.Roots.Single(item => string.Equals(item.Path, oldRoot, StringComparison.OrdinalIgnoreCase));
+        var service = new SqliteLibraryRootRemapService(_database);
+
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.PreviewAsync(
             library.Id,
             root.Id,
             nested,
             TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Remap_AlsoMovesContainedRootFromAnotherLibrary()
+    {
+        var oldRoot = Path.Combine(_directory, "OldMusic");
+        var childRoot = Path.Combine(oldRoot, "JPOP");
+        var newRoot = Path.Combine(_directory, "NewMusic");
+        Directory.CreateDirectory(childRoot);
+        Directory.CreateDirectory(Path.Combine(newRoot, "JPOP"));
+
+        var libraries = new SqliteLibraryRepository(_database);
+        var main = await libraries.CreateAsync("Main", [oldRoot], TestContext.Current.CancellationToken);
+        var diff = await libraries.CreateAsync("Diff", [childRoot], TestContext.Current.CancellationToken);
+        var mainRoot = Assert.Single(main.Roots);
+        var diffRoot = Assert.Single(diff.Roots);
+        var service = new SqliteLibraryRootRemapService(_database);
+
+        var preview = await service.PreviewAsync(main.Id, mainRoot.Id, newRoot, TestContext.Current.CancellationToken);
+        Assert.Equal(2, preview.AffectedRoots.Count);
+
+        await service.ApplyAsync(main.Id, mainRoot.Id, newRoot, TestContext.Current.CancellationToken);
+
+        var reloadedDiff = Assert.IsType<TrackMatch.Core.Libraries.Library>(
+            await libraries.GetAsync(diff.Id, TestContext.Current.CancellationToken));
+        Assert.Equal(
+            Path.Combine(newRoot, "JPOP"),
+            Assert.Single(reloadedDiff.Roots).Path,
+            ignoreCase: true);
+        Assert.Equal(diffRoot.Id, Assert.Single(reloadedDiff.Roots).Id);
     }
 
     private static AudioTrackMetadata CreateMetadata(string path)
