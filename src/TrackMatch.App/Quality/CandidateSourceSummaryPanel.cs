@@ -36,6 +36,7 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         identity.Children.Add(CreateBoundTextBlock(Property("Artist"), margin: new Thickness(0, 4, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Album"), margin: new Thickness(0, 2, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Genre"), margin: new Thickness(0, 2, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Year"), prefix: "年: ", margin: new Thickness(0, 2, 0, 0)));
         Children.Add(identity);
 
         var separator = new Separator();
