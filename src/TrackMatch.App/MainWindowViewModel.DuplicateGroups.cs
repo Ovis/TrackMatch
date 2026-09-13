@@ -17,6 +17,9 @@ public sealed partial class MainWindowViewModel
 
     public bool HasDuplicateGroups => DuplicateGroups.Count > 0;
 
+    /// <summary>現在選択中のCandidateに関係する重複グループ表示を再読込する。</summary>
+    public Task RefreshDuplicateGroupsAsync() => LoadDuplicateGroupsForSelectionAsync(SelectedCandidate);
+
     /// <summary>
     /// 指定TrackをKeepにする操作が既存グループへ与える影響を、確認Dialog向けの文面として返す。
     /// 既存Keepに変化がない場合はnullを返す。
