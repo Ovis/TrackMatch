@@ -41,6 +41,8 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
     public string AlbumB => Row.AlbumB ?? "-";
     public string GenreA => FormatList(Row.GenresA);
     public string GenreB => FormatList(Row.GenresB);
+    public string YearA => FormatYear(Row.YearA);
+    public string YearB => FormatYear(Row.YearB);
     public string Similarity => Row.Similarity.ToString("P2");
     public string CoverageA => Row.CoverageA.ToString("P2");
     public string CoverageB => Row.CoverageB.ToString("P2");
@@ -63,6 +65,7 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
     public string ChannelsB => Row.ChannelsB?.ToString() ?? "-";
 
     private static string FormatList(IReadOnlyList<string> values) => values.Count == 0 ? "-" : string.Join("; ", values);
+    private static string FormatYear(uint? value) => value?.ToString() ?? "-";
     private static string FormatDuration(TimeSpan value) => value.TotalHours >= 1 ? value.ToString(@"h\:mm\:ss\.fff") : value.ToString(@"m\:ss\.fff");
 
     private static string FormatCodec(string? format, string? codec)
