@@ -16,7 +16,7 @@ public static class DuplicateGroupPlanner
     /// </remarks>
     public static IReadOnlyList<DuplicateGroupRebuildItem> Build(
         IReadOnlyCollection<CandidateReview> reviews,
-        IReadOnlyCollection<DuplicateGroup> existingGroups)
+        IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
     {
         ArgumentNullException.ThrowIfNull(reviews);
         ArgumentNullException.ThrowIfNull(existingGroups);
@@ -54,10 +54,6 @@ public static class DuplicateGroupPlanner
             }
         }
 
-        var existingById = existingGroups
-            .GroupBy(group => group.Id)
-            .Select(group => group.First())
-            .ToArray();
         var reusableGroupIds = new HashSet<long>();
         var result = new List<DuplicateGroupRebuildItem>(components.Count);
 
@@ -70,12 +66,12 @@ public static class DuplicateGroupPlanner
 
             // 分割では同一IDを複数成分へ複製できないため、最大Overlapの成分だけが旧IDを引き継ぐ。
             // 結合では複数旧Groupのうち最も大きく重なるGroupを代表IDとして再利用する。
-            var retained = existingById
+            var retained = existingGroups
                 .Where(group => !reusableGroupIds.Contains(group.Id))
                 .Select(group => new
                 {
                     Group = group,
-                    Overlap = group.GlobalTrackIds.Count(component.Contains),
+                    Overlap = group.TrackIds.Count(component.Contains),
                 })
                 .Where(item => item.Overlap > 0)
                 .OrderByDescending(item => item.Overlap)
