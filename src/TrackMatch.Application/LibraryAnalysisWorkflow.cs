@@ -16,6 +16,7 @@ namespace TrackMatch.Application;
 /// </summary>
 public sealed class LibraryAnalysisWorkflow
 {
+    private static readonly SemaphoreSlim ScanGate = new(1, 1);
     private readonly string _databasePath;
     private readonly string _fpcalcPath;
     private readonly int _fingerprintAlgorithm;
@@ -48,29 +49,37 @@ public sealed class LibraryAnalysisWorkflow
     /// </summary>
     /// <remarks>
     /// 異なるLibraryで同一Rootを登録できるため、同一Pathが複数Libraryに存在する場合は曖昧として拒否する。
-    /// GUIの通常処理ではLibrary ID指定APIを使用する。
+    /// GUIの通常処理ではLibrary ID指定APIを使用する。Scan Jobはプロセス全体で同時に1件へ制限する。
     /// </remarks>
     public async Task<IncrementalScanResult> ScanAsync(
         string rootPath,
         CancellationToken cancellationToken = default)
     {
-        var database = await OpenDatabaseAsync(cancellationToken);
-        var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
-            "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
-            new { PathKey = normalizedRoot.Key },
-            cancellationToken: cancellationToken))).ToArray();
-        if (roots.Length != 1)
+        await EnterScanGateAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException(
-                roots.Length == 0
-                    ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
-                    : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
-        }
+            var database = await OpenDatabaseAsync(cancellationToken);
+            var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
+            await using var connection = await database.OpenConnectionAsync(cancellationToken);
+            var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
+                "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
+                new { PathKey = normalizedRoot.Key },
+                cancellationToken: cancellationToken))).ToArray();
+            if (roots.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    roots.Length == 0
+                        ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
+                        : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
+            }
 
-        var root = roots[0];
-        return await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
+            var root = roots[0];
+            return await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
+        }
+        finally
+        {
+            ScanGate.Release();
+        }
     }
 
     /// <summary>
@@ -81,28 +90,36 @@ public sealed class LibraryAnalysisWorkflow
         CancellationToken cancellationToken = default,
         IProgress<LibraryScanBatchProgress>? progress = null)
     {
-        var database = await OpenDatabaseAsync(cancellationToken);
-        var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
-        var service = CreateScanService(database);
-        var results = new List<IncrementalScanResult>(library.Roots.Count);
-
-        // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
-        // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
-        for (var index = 0; index < library.Roots.Count; index++)
+        await EnterScanGateAsync(cancellationToken);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var root = library.Roots[index];
-            var rootProgress = new Progress<IncrementalScanProgress>(value =>
-                progress?.Report(new LibraryScanBatchProgress(
-                    index + 1,
-                    library.Roots.Count,
-                    value.CompletedFiles,
-                    value.TotalFiles,
-                    value.CurrentPath)));
-            results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
-        }
+            var database = await OpenDatabaseAsync(cancellationToken);
+            var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
+            var service = CreateScanService(database);
+            var results = new List<IncrementalScanResult>(library.Roots.Count);
 
-        return new LibraryRootScanBatchResult(library.Id, results);
+            // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
+            // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
+            for (var index = 0; index < library.Roots.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var root = library.Roots[index];
+                var rootProgress = new Progress<IncrementalScanProgress>(value =>
+                    progress?.Report(new LibraryScanBatchProgress(
+                        index + 1,
+                        library.Roots.Count,
+                        value.CompletedFiles,
+                        value.TotalFiles,
+                        value.CurrentPath)));
+                results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
+            }
+
+            return new LibraryRootScanBatchResult(library.Id, results);
+        }
+        finally
+        {
+            ScanGate.Release();
+        }
     }
 
     /// <summary>
@@ -268,7 +285,8 @@ public sealed class LibraryAnalysisWorkflow
             new SqliteCandidatePairRepository(database, libraryId),
             reviewRepository,
             sketcher,
-            new CandidatePairGenerator(sketcher));
+            new CandidatePairGenerator(sketcher),
+            libraryId is { } id ? new SqliteCandidateGenerationWorkRepository(database, id) : null);
     }
 
     private static CandidateAnalysisService CreateCandidateAnalysisService(
@@ -299,6 +317,14 @@ public sealed class LibraryAnalysisWorkflow
         var database = new SqliteDatabase(_databasePath);
         await database.InitializeAsync(cancellationToken);
         return database;
+    }
+
+    private static async Task EnterScanGateAsync(CancellationToken cancellationToken)
+    {
+        if (!await ScanGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("別のスキャンが既に実行中です。完了またはキャンセルしてから再実行してください。");
+        }
     }
 
     private sealed record RootIdentityRow(long Id, long LibraryId, string Path);
