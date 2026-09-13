@@ -1,7 +1,15 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!--
-        右上の空白はMainWindow側で局所的に覆うため、ここではDataGridColumnHeaderへの追加補正を行わない。
-        RoleはXAML Style Triggerから参照できないため、Triggerによる判定は使用しない。
+        候補一覧右上の補完背景と列ヘッダーの境界に1pxの縦線が残るため、
+        列ヘッダーは下端線だけを描画し、縦方向の境界線は表示しない。
+        右上の空白自体はMainWindow側の局所オーバーレイで補完する。
     -->
+    <Style TargetType="DataGridColumnHeader">
+        <Setter Property="Background" Value="#F3F6F9"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
 </ResourceDictionary>
