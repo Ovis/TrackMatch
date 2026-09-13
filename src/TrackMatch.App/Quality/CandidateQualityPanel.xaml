@@ -21,10 +21,10 @@
                         IsEnabled="{Binding CanReanalyzeQuality}" Click="Reanalyze_Click"/>
             </Grid>
 
-            <ScrollViewer Grid.Row="2"
+            <ScrollViewer x:Name="QualityScrollViewer" Grid.Row="2"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          CanContentScroll="True">
+                          CanContentScroll="False">
                 <StackPanel Margin="0,0,4,0">
                     <Border Padding="10" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="3">
                         <StackPanel>

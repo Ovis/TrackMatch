@@ -67,7 +67,7 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <!-- DataGrid内部では列ヘッダーと縦ScrollBarの交差部分が空セルになるため、候補一覧だけ同色で覆う。 -->
-                        <Border x:Name="CandidateGridHeaderCornerOverlay" Width="14" Height="31" Margin="0,0,1,0"
+                        <Border x:Name="CandidateGridHeaderCornerOverlay" Width="14" Height="30" Margin="0,1,1,0"
                                 HorizontalAlignment="Right" VerticalAlignment="Top"
                                 Background="#F3F6F9" SnapsToDevicePixels="True" IsHitTestVisible="False"/>
                     </Grid>
