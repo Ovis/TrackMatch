@@ -67,11 +67,17 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         pathText.SetBinding(ToolTipProperty, new Binding(PathProperty()));
         bottom.Children.Add(pathText);
 
+        // フォルダーを開く操作は補助的な操作なので、本文より強く見えない小型アイコンに留める。
         var openFolderButton = new Button
         {
-            Content = "フォルダーを開く",
-            Padding = new Thickness(12, 3, 12, 3),
-            MinWidth = 110,
+            Content = "↗",
+            ToolTip = "フォルダーを開く",
+            Width = 32,
+            Height = 30,
+            MinWidth = 32,
+            MinHeight = 30,
+            Padding = new Thickness(0),
+            FontSize = 16,
         };
         openFolderButton.SetBinding(TagProperty, new Binding(PathProperty()));
         openFolderButton.Click += OpenFolderButton_Click;
