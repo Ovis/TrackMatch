@@ -7,7 +7,7 @@ namespace TrackMatch.Core.Duplicates;
 /// 候補レビューの変更と、それに従う重複グループ再構成を一貫して扱う。
 /// </summary>
 public sealed class DuplicateGroupService(
-    ICandidateReviewRepository reviewRepository,
+    ICandidateReviewMutationRepository reviewRepository,
     ITrackLookupRepository trackLookupRepository,
     IDuplicateGroupRepository groupRepository)
 {
