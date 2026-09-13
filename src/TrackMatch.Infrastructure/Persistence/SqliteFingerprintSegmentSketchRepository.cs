@@ -19,12 +19,15 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
         const string sql = """
             SELECT DISTINCT s.TrackId, s.FingerprintExtractedAtUtcTicks
             FROM CandidateSegmentSketches s
-            INNER JOIN Tracks t ON t.Id = s.TrackId
             WHERE s.Algorithm = @Algorithm
               AND s.SegmentLengthItems = @SegmentLengthItems
               AND s.SegmentStrideItems = @SegmentStrideItems
               AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
-              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId);
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = s.TrackId));
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -32,9 +35,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
             sql,
             CreateConfigParameters(algorithm, options),
             cancellationToken: cancellationToken));
-
-        // Microsoft.Data.SqliteではMAX等の集約式が元カラムのINTEGER型情報を保持せず、
-        // DapperがByte[]としてmaterializeしようとする場合があるため、最新時刻はC#側で選ぶ。
         return rows
             .GroupBy(row => row.TrackId)
             .ToDictionary(
@@ -50,12 +50,15 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
         const string sql = """
             SELECT s.TrackId, s.SegmentIndex, s.Hash
             FROM CandidateSegmentSketches s
-            INNER JOIN Tracks t ON t.Id = s.TrackId
             WHERE s.Algorithm = @Algorithm
               AND s.SegmentLengthItems = @SegmentLengthItems
               AND s.SegmentStrideItems = @SegmentStrideItems
               AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
-              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = s.TrackId))
             ORDER BY s.TrackId, s.SegmentIndex;
             """;
 
@@ -82,27 +85,25 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sketches);
 
-        const string deleteSql = "DELETE FROM CandidateSegmentSketches WHERE TrackId = @TrackId AND Algorithm = @Algorithm;";
-        const string insertSql = """
-            INSERT INTO CandidateSegmentSketches (
-                TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
-                MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
-            VALUES (
-                @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
-                @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
-            """;
-
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await EnsureTrackInScopeAsync(connection, fingerprint.TrackId, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
-            deleteSql,
+            "DELETE FROM CandidateSegmentSketches WHERE TrackId = @TrackId AND Algorithm = @Algorithm;",
             new { fingerprint.TrackId, fingerprint.Algorithm },
             transaction,
             cancellationToken: cancellationToken));
 
         if (sketches.Count != 0)
         {
+            const string insertSql = """
+                INSERT INTO CandidateSegmentSketches (
+                    TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
+                    MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
+                VALUES (
+                    @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
+                    @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
+                """;
             var parameters = sketches.Select(sketch => new
             {
                 fingerprint.TrackId,
@@ -131,10 +132,12 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
     {
         const string sql = """
             DELETE FROM CandidateSegmentSketches
-            WHERE TrackId IN (
-                SELECT t.Id
-                FROM Tracks t
-                WHERE @LibraryId IS NULL OR t.LibraryId = @LibraryId)
+            WHERE (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId
+                          AND lt.TrackId = CandidateSegmentSketches.TrackId))
               AND Algorithm = @Algorithm
               AND (
                     SegmentLengthItems <> @SegmentLengthItems
@@ -167,7 +170,7 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
         }
 
         var exists = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM Tracks WHERE Id = @TrackId AND LibraryId = @LibraryId;",
+            "SELECT COUNT(*) FROM LibraryTracks WHERE TrackId = @TrackId AND LibraryId = @LibraryId;",
             new { TrackId = trackId, LibraryId = libraryId },
             cancellationToken: cancellationToken));
         if (exists != 1)
