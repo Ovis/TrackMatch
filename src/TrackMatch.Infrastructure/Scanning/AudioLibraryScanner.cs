@@ -16,23 +16,31 @@ public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : I
     private readonly IAudioMetadataReader _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
 
     /// <inheritdoc />
+    public int? GetSupportedFileCount(string rootPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        EnsureDirectoryExists(rootPath);
+
+        var count = 0;
+        foreach (var path in EnumerateFiles(rootPath))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (SupportedExtensions.Contains(Path.GetExtension(path)))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <inheritdoc />
     public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        EnsureDirectoryExists(rootPath);
 
-        if (!Directory.Exists(rootPath))
-        {
-            throw new DirectoryNotFoundException($"走査対象ディレクトリが存在しない: {rootPath}");
-        }
-
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            AttributesToSkip = FileAttributes.ReparsePoint,
-        };
-
-        foreach (var path in Directory.EnumerateFiles(rootPath, "*", options))
+        foreach (var path in EnumerateFiles(rootPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -54,6 +62,25 @@ public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : I
             }
 
             yield return result;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateFiles(string rootPath)
+        => Directory.EnumerateFiles(
+            rootPath,
+            "*",
+            new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+            });
+
+    private static void EnsureDirectoryExists(string rootPath)
+    {
+        if (!Directory.Exists(rootPath))
+        {
+            throw new DirectoryNotFoundException($"走査対象ディレクトリが存在しない: {rootPath}");
         }
     }
 }
