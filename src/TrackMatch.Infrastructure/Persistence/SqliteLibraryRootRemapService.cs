@@ -23,7 +23,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
         var normalizedNewRoot = LibraryValueNormalizer.NormalizeRootPath(newRootPath);
         if (!Directory.Exists(normalizedNewRoot.DisplayPath))
         {
-            throw new DirectoryNotFoundException($"新Rootが存在しません: {normalizedNewRoot.DisplayPath}");
+            throw new DirectoryNotFoundException($"新しい対象フォルダが存在しません: {normalizedNewRoot.DisplayPath}");
         }
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -53,7 +53,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
         var normalizedNewRoot = LibraryValueNormalizer.NormalizeRootPath(newRootPath);
         if (!Directory.Exists(normalizedNewRoot.DisplayPath))
         {
-            throw new DirectoryNotFoundException($"新Rootが存在しません: {normalizedNewRoot.DisplayPath}");
+            throw new DirectoryNotFoundException($"新しい対象フォルダが存在しません: {normalizedNewRoot.DisplayPath}");
         }
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -192,7 +192,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
         var conflict = roots.FirstOrDefault(root => LibraryValueNormalizer.Overlaps(newRootKey, root.PathKey));
         if (conflict is not null)
         {
-            throw new InvalidOperationException($"新Rootは既存Rootと同一または包含関係にあります: {conflict.Path}");
+            throw new InvalidOperationException($"新しい対象フォルダは既存の対象フォルダと同一または包含関係にあります: {conflict.Path}");
         }
     }
 
@@ -205,7 +205,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
             "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE Id = @RootId AND LibraryId = @LibraryId;",
             new { RootId = rootId, LibraryId = libraryId },
             cancellationToken: cancellationToken))
-            ?? throw new InvalidOperationException("指定したRootはLibraryに存在しません。");
+            ?? throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
 
     private static async Task<RootRow> GetRequiredRootAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
@@ -218,7 +218,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
             new { RootId = rootId, LibraryId = libraryId },
             transaction,
             cancellationToken: cancellationToken))
-            ?? throw new InvalidOperationException("指定したRootはLibraryに存在しません。");
+            ?? throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
 
     private sealed record RootRow(long Id, long LibraryId, string Path);
     private sealed record RootKeyRow(long Id, string Path, string PathKey);
