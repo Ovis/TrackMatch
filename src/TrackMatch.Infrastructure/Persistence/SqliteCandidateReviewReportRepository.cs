@@ -31,6 +31,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.Title AS TitleA, b.Title AS TitleB,
                    a.Album AS AlbumA, b.Album AS AlbumB,
                    a.GenresJson AS GenresJsonA, b.GenresJson AS GenresJsonB,
+                   a.Year AS YearA, b.Year AS YearB,
                    a.DurationTicks AS DurationTicksA, b.DurationTicks AS DurationTicksB,
                    a.FileSize AS FileSizeA, b.FileSize AS FileSizeB,
                    a.Format AS FormatA, b.Format AS FormatB,
@@ -103,10 +104,12 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             row.FileSizeA, row.FileSizeB, row.FormatA, row.FormatB, row.CodecA, row.CodecB,
             ToInt(row.BitrateKbpsA), ToInt(row.BitrateKbpsB), ToInt(row.SampleRateHzA), ToInt(row.SampleRateHzB),
             ToInt(row.BitDepthA), ToInt(row.BitDepthB), ToInt(row.ChannelsA), ToInt(row.ChannelsB),
-            reviewDecision, row.KeepTrackId);
+            reviewDecision, row.KeepTrackId,
+            ToUInt(row.YearA), ToUInt(row.YearB));
     }
 
     private static int? ToInt(long? value) => value is null ? null : checked((int)value.Value);
+    private static uint? ToUInt(long? value) => value is null ? null : checked((uint)value.Value);
 
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
@@ -119,6 +122,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string PathA, string PathB, string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
+        long? YearA, long? YearB,
         long DurationTicksA, long DurationTicksB, long FileSizeA, long FileSizeB,
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
