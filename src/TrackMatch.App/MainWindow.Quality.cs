@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using TrackMatch.App.Quality;
 
@@ -22,7 +21,6 @@ public partial class MainWindow
         base.OnContentRendered(e);
         EnsureQualityUiAttached();
         EnsureQualityAnalysisStarted();
-        ApplyCandidateGridHeaderFillerBackground();
     }
 
     internal void EnsureQualityAnalysisStarted()
@@ -158,35 +156,6 @@ public partial class MainWindow
     private static void ScrollSourcePanelsToTop(Grid sourceGrid)
     {
         foreach (var scrollViewer in FindVisualChildren<ScrollViewer>(sourceGrid)) scrollViewer.ScrollToTop();
-    }
-
-    /// <summary>
-    /// DataGridの列ヘッダーPresenter全体を通常ヘッダーと同色にし、右端の余白も白く残らないようにする。
-    /// </summary>
-    private void ApplyCandidateGridHeaderFillerBackground()
-    {
-        var candidateGrid = FindVisualChildren<DataGrid>(this).FirstOrDefault();
-        if (candidateGrid is null) return;
-
-        // 列幅の合計が表示領域より短い場合やVertical ScrollBar分の余白がある場合、
-        // 個々のDataGridColumnHeaderだけでは右端にPresenterの背景が露出するため、Presenter自体を同色にする。
-        var headerBackground = new SolidColorBrush(Color.FromRgb(0xF3, 0xF6, 0xF9));
-        var borderBrush = (Brush)FindResource("BorderBrush");
-
-        foreach (var presenter in FindVisualChildren<DataGridColumnHeadersPresenter>(candidateGrid))
-        {
-            presenter.Background = headerBackground;
-        }
-
-        // WPFテーマによっては右端をFiller用DataGridColumnHeaderとして生成するため、こちらも同じ色へ揃える。
-        foreach (var header in FindVisualChildren<DataGridColumnHeader>(candidateGrid))
-        {
-            if (header.Column is null)
-            {
-                header.Background = headerBackground;
-                header.BorderBrush = borderBrush;
-            }
-        }
     }
 
     private void AttachQualityProgressToFooter()
