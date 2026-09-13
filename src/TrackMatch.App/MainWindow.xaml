@@ -55,16 +55,23 @@
                         <TextBlock Grid.Column="3" VerticalAlignment="Center" Text="%"/>
                         <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}" Content="⌕" ToolTip="フィルター" IsEnabled="False"/>
                     </Grid>
-                    <DataGrid Grid.Row="3" Margin="0,0,0,0" ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
-                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="120"/>
-                            <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
-                            <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
-                            <DataGridTextColumn Header="音響一致度" Binding="{Binding Similarity}" Width="90"/>
-                            <DataGridTextColumn Header="レビュー結果" Binding="{Binding ReviewResult}" Width="130"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <Grid Grid.Row="3">
+                        <DataGrid ItemsSource="{Binding Candidates}" SelectedItem="{Binding SelectedCandidate}"
+                                  AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="分類" Binding="{Binding Kind}" Width="120"/>
+                                <DataGridTextColumn Header="A" Binding="{Binding TitleA}" Width="*"/>
+                                <DataGridTextColumn Header="B" Binding="{Binding TitleB}" Width="*"/>
+                                <DataGridTextColumn Header="音響一致度" Binding="{Binding Similarity}" Width="90"/>
+                                <DataGridTextColumn Header="レビュー結果" Binding="{Binding ReviewResult}" Width="130"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <!-- DataGrid標準Templateでは列ヘッダー行と縦ScrollBar列の交差セルに要素が存在せず、
+                             DataGrid背景の白が見える。ScrollBar自体は変更せず、候補一覧だけヘッダー色で空白を埋める。 -->
+                        <Border Width="14" Height="31"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Background="#F3F6F9" IsHitTestVisible="False"/>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -188,29 +195,31 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="54"/><ColumnDefinition Width="24"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="54"/></Grid.ColumnDefinitions>
                             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="A 音量"/>
                             <Slider Grid.Column="2" Minimum="0" Maximum="100" TickFrequency="10" Value="{Binding VolumeAPercent, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding VolumeAPercent, StringFormat={}{0:0}%}"/>
+                            <TextBlock Grid.Column="4" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{Binding VolumeAPercent, StringFormat={}{0:F0}%}"/>
                             <TextBlock Grid.Column="6" VerticalAlignment="Center" FontWeight="SemiBold" Text="B 音量"/>
                             <Slider Grid.Column="8" Minimum="0" Maximum="100" TickFrequency="10" Value="{Binding VolumeBPercent, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Column="10" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding VolumeBPercent, StringFormat={}{0:0}%}"/>
+                            <TextBlock Grid.Column="10" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{Binding VolumeBPercent, StringFormat={}{0:F0}%}"/>
                         </Grid>
                     </Grid>
                 </GroupBox>
 
-                <Grid Grid.Row="6" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
-                    <Button Style="{StaticResource ReviewButtonStyle}" Content="重複ではない" IsEnabled="{Binding CanReview}" Click="NotDuplicate_Click"/>
-                    <Button Grid.Column="2" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Aを残す" IsEnabled="{Binding CanReview}" Click="KeepA_Click"/>
-                    <Button Grid.Column="4" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Bを残す" IsEnabled="{Binding CanReview}" Click="KeepB_Click"/>
-                    <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}" Content="…" ToolTip="その他の操作" Click="CandidateMore_Click"/>
+                <Grid Grid.Row="6">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
+                    <Button Style="{StaticResource ReviewButtonStyle}" Content="重複ではない" IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" Click="NotDuplicate_Click"/>
+                    <Button Grid.Column="2" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Aを残す" IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" Click="KeepA_Click"/>
+                    <Button Grid.Column="4" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Bを残す" IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" Click="KeepB_Click"/>
+                    <Button Grid.Column="6" Content="..." ToolTip="その他の操作" IsEnabled="{Binding DataContext.HasSelection, RelativeSource={RelativeSource AncestorType=Window}}" Click="CandidateMore_Click"/>
                 </Grid>
             </Grid>
         </Grid>
 
-        <Grid Grid.Row="8">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock VerticalAlignment="Center" Text="{Binding StatusText}"/>
-            <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{Binding AnalysisStatusText}"/>
-            <TextBlock Grid.Column="4" VerticalAlignment="Center"><Run Text="再生: "/><Run Text="{Binding Playback.StatusText, Mode=OneWay}"/><Run Text="  |  "/><Run Text="{Binding TrashStatusText, Mode=OneWay}"/></TextBlock>
-        </Grid>
+        <Border Grid.Row="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="20"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="{Binding StatusText}"/>
+                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="{Binding AnalysisStatusText}"/>
+                <TextBlock Grid.Column="3" VerticalAlignment="Center"><Run Text="再生: "/><Run Text="{Binding Playback.StatusText}"/><Run Text="  |  "/><Run Text="{Binding TrashStatusText}"/></TextBlock>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
