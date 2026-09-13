@@ -5,43 +5,41 @@ using Xunit;
 namespace TrackMatch.Core.Tests;
 
 /// <summary>
-/// ConfirmedDuplicateの連結関係から重複グループを再構成する規則を検証する。
+/// Global ConfirmedDuplicateの連結関係から重複グループを再構成する規則を検証する。
 /// </summary>
 public sealed class DuplicateGroupPlannerTests
 {
     [Fact]
-    public void Build_CreatesGroupFromConfirmedPair()
+    public void Build_CreatesGlobalGroupFromConfirmedPair()
     {
         var reviews = new[] { Confirmed(1, 2, 1) };
 
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, []));
 
         Assert.Null(group.ExistingGroupId);
-        Assert.Equal(1, group.KeepTrackId);
         Assert.Equal(new long[] { 1, 2 }, group.TrackIds);
     }
 
     [Fact]
-    public void Build_AddingTrackUsesCurrentExplicitKeepForWholeGroup()
+    public void Build_AddingTrackRetainsExistingGroupId()
     {
-        var existing = new DuplicateGroup(12, 1, 1, [1, 2]);
+        var existing = new GlobalDuplicateGroup(12, [1, 2]);
         var reviews = new[]
         {
             Confirmed(1, 2, 1),
             Confirmed(2, 3, 2),
         };
 
-        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing], preferredKeepTrackId: 2));
+        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
 
         Assert.Equal(12, group.ExistingGroupId);
-        Assert.Equal(2, group.KeepTrackId);
         Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
     }
 
     [Fact]
-    public void Build_LaterReviewCanChangeKeepToThirdTrack()
+    public void Build_HumanKeepSelectionDoesNotAffectGlobalTopology()
     {
-        var existing = new DuplicateGroup(12, 1, 2, [1, 2, 3]);
+        var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
         var reviews = new[]
         {
             Confirmed(1, 2, 1),
@@ -49,19 +47,19 @@ public sealed class DuplicateGroupPlannerTests
             Confirmed(1, 3, 3),
         };
 
-        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing], preferredKeepTrackId: 3));
+        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
 
-        Assert.Equal(3, group.KeepTrackId);
+        Assert.Equal(12, group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
     }
 
     [Fact]
-    public void Build_MergesExistingGroupsAndUsesCurrentReviewKeep()
+    public void Build_MergesExistingGroupsAndReusesLargestOverlapGroupId()
     {
         var existing = new[]
         {
-            new DuplicateGroup(10, 1, 1, [1, 2]),
-            new DuplicateGroup(20, 1, 3, [3, 4]),
+            new GlobalDuplicateGroup(10, [1, 2]),
+            new GlobalDuplicateGroup(20, [3, 4]),
         };
         var reviews = new[]
         {
@@ -70,16 +68,16 @@ public sealed class DuplicateGroupPlannerTests
             Confirmed(2, 3, 2),
         };
 
-        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, existing, preferredKeepTrackId: 2));
+        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, existing));
 
-        Assert.Equal(2, group.KeepTrackId);
+        Assert.Equal(10, group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2, 3, 4 }, group.TrackIds);
     }
 
     [Fact]
-    public void Build_RemovingBridgeSplitsGroupAndPreservesValidKeepSide()
+    public void Build_RemovingBridgeReusesExistingIdForOnlyOneSplitComponent()
     {
-        var existing = new DuplicateGroup(12, 1, 1, [1, 2, 3]);
+        var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
         var reviews = new[]
         {
             Confirmed(1, 2, 1),
@@ -91,24 +89,27 @@ public sealed class DuplicateGroupPlannerTests
         Assert.Equal(2, groups.Count);
         var first = Assert.Single(groups, group => group.TrackIds.Contains(1));
         Assert.Equal(12, first.ExistingGroupId);
-        Assert.Equal(1, first.KeepTrackId);
         Assert.Equal(new long[] { 1, 2 }, first.TrackIds);
         var second = Assert.Single(groups, group => group.TrackIds.Contains(4));
         Assert.Null(second.ExistingGroupId);
-        Assert.Equal(4, second.KeepTrackId);
+        Assert.Equal(new long[] { 4, 5 }, second.TrackIds);
     }
 
     [Fact]
-    public void Build_SplitSideWithoutOldKeepStillReceivesKeep()
+    public void Build_SplitComponentWithoutReusableOldIdGetsNewGroup()
     {
-        var existing = new DuplicateGroup(12, 1, 3, [1, 2, 3]);
-        var reviews = new[] { Confirmed(1, 2, 2) };
+        var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4]);
+        var reviews = new[]
+        {
+            Confirmed(1, 2, 1),
+            Confirmed(3, 4, 3),
+        };
 
-        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
+        var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
 
-        Assert.Null(group.ExistingGroupId);
-        Assert.Equal(2, group.KeepTrackId);
-        Assert.Equal(new long[] { 1, 2 }, group.TrackIds);
+        Assert.Equal(2, groups.Count);
+        Assert.Single(groups, group => group.ExistingGroupId == 12);
+        Assert.Single(groups, group => group.ExistingGroupId is null);
     }
 
     [Fact]
