@@ -7,6 +7,44 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
+    <Window.Resources>
+        <!--
+            標準Button Templateはhover時にOS Theme側の白背景へ戻る場合がある。
+            Dialogの主操作は常にAccent系の色を維持し、活性な主要操作であることを視覚的に保つ。
+        -->
+        <Style x:Key="DialogPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource AccentHoverBrush}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource AccentHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.82"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Border Margin="16" Style="{StaticResource CardStyle}" Padding="20">
         <Grid>
             <Grid.RowDefinitions>
@@ -63,7 +101,7 @@
                 <Button x:Name="PrimaryButton"
                         MinWidth="92"
                         Margin="8,0,0,0"
-                        Style="{StaticResource PrimaryButtonStyle}"
+                        Style="{StaticResource DialogPrimaryButtonStyle}"
                         Content="続行"
                         IsDefault="True"
                         Click="Primary_Click"/>
