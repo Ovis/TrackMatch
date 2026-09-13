@@ -32,7 +32,8 @@ public sealed class DuplicateGroupService(
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
 
         // 矛盾検証を終えてからCurrent Verdictと派生Groupを更新する。
-        await reviewRepository.SaveAsync(review, cancellationToken);
+        // Verdict自体はGlobalだが、HistoryでどのLibrary Contextから操作したか追えるよう現在Libraryも渡す。
+        await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
         await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
 
         if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || review.KeepTrackId is null)
@@ -71,7 +72,7 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
 
-        await reviewRepository.DeleteAsync(pair, cancellationToken);
+        await reviewRepository.DeleteAsync(pair, libraryId, cancellationToken);
         await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
     }
 
