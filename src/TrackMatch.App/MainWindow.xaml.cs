@@ -245,9 +245,88 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async void NotDuplicate_Click(object sender, RoutedEventArgs e) => await _viewModel.MarkNotDuplicateAsync();
-    private async void KeepA_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepAAsync();
-    private async void KeepB_Click(object sender, RoutedEventArgs e) => await _viewModel.ConfirmDuplicateKeepBAsync();
+    private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
+        => await ExecuteReviewActionAsync(_viewModel.MarkNotDuplicateAsync);
+
+    private async void KeepA_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = _viewModel.SelectedCandidate;
+        if (selected is null) return;
+        await ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync);
+    }
+
+    private async void KeepB_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = _viewModel.SelectedCandidate;
+        if (selected is null) return;
+        await ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync);
+    }
+
+    private async Task ConfirmDuplicateWithImpactAsync(long keepTrackId, Func<Task> action)
+    {
+        try
+        {
+            var impact = await _viewModel.GetKeepChangeImpactAsync(keepTrackId);
+            if (!string.IsNullOrWhiteSpace(impact))
+            {
+                var confirmation = new ConfirmationDialog(
+                    "重複グループの残すファイルを変更",
+                    impact,
+                    "この変更はグループ全体のごみ箱移動対象に反映されます。",
+                    "変更して確定",
+                    "キャンセル",
+                    kind: AppDialogKind.Warning)
+                { Owner = this };
+                confirmation.ShowDialog();
+                if (confirmation.SelectedResult != AppDialogResult.Primary)
+                {
+                    return;
+                }
+            }
+
+            await ExecuteReviewActionAsync(action);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            ShowReviewError(exception);
+        }
+    }
+
+    private async Task ExecuteReviewActionAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            ShowReviewError(exception);
+        }
+    }
+
+    private void ShowReviewError(Exception exception)
+    {
+        new ConfirmationDialog(
+            "レビュー保存失敗",
+            "レビューを保存できませんでした",
+            exception.Message,
+            "閉じる",
+            kind: AppDialogKind.Error)
+        { Owner = this }.ShowDialog();
+    }
+
+    private async void ShowDuplicateGroupDetails_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not long groupId)
+        {
+            return;
+        }
+
+        // Main WindowのA/B同期再生と詳細画面の簡易試聴が同時に鳴らないよう、詳細表示前に停止する。
+        _viewModel.StopPlayback();
+        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, groupId) { Owner = this }.ShowDialog();
+        await _viewModel.RefreshDuplicateGroupsAsync();
+    }
 
     private void CandidateMore_Click(object sender, RoutedEventArgs e)
     {
@@ -280,7 +359,7 @@ public partial class MainWindow : Window
         var confirmation = new ConfirmationDialog(
             "レビューを未確定に戻す",
             "この候補を未レビューへ戻しますか？",
-            "現在のレビュー結果を削除します。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
+            "現在のレビュー結果を削除します。重複グループは残っているレビューから再計算されます。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
             "未レビューへ戻す",
             "キャンセル",
             kind: AppDialogKind.Warning)
@@ -288,6 +367,6 @@ public partial class MainWindow : Window
         confirmation.ShowDialog();
 
         if (confirmation.SelectedResult == AppDialogResult.Primary)
-            await _viewModel.ClearReviewAsync();
+            await ExecuteReviewActionAsync(_viewModel.ClearReviewAsync);
     }
 }
