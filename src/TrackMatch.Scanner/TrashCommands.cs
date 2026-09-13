@@ -1,3 +1,4 @@
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
 using TrackMatch.Infrastructure.Trash;
@@ -99,10 +100,18 @@ internal static class TrashCommands
                 trashRoot,
                 libraries.SelectMany(library => library.Roots).Select(root => root.Path));
 
+            var reviewRepository = new SqliteCandidateReviewRepository(database);
+            var trackLookup = new SqliteTrackLookupRepository(database);
+            var groupRepository = new SqliteDuplicateGroupRepository(database);
+            var groupService = new DuplicateGroupService(reviewRepository, trackLookup, groupRepository);
+
+            // 削除対象算出の直前にレビューから再同期し、途中失敗等で古いグループ状態が残っていても利用しない。
+            await groupService.SynchronizeAsync(resolvedLibraryId.Value);
+
             var tracks = new SqliteTrackRepository(database);
             var service = new RejectedTrackTrashService(
-                new SqliteCandidateReviewRepository(database),
-                new SqliteTrackLookupRepository(database),
+                groupRepository,
+                trackLookup,
                 tracks,
                 new LocalTrackFileOperations());
             var result = await service.ProcessAsync(
