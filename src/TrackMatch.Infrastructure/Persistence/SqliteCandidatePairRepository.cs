@@ -7,7 +7,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// 詳細比較前の候補TrackペアをSQLiteへ保存する。
+/// 詳細比較前のGlobal Candidate PairをSQLiteへ保存する。
 /// </summary>
 public sealed class SqliteCandidatePairRepository(
     SqliteDatabase database,
@@ -25,30 +25,25 @@ public sealed class SqliteCandidatePairRepository(
         const string selectSql = """
             SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
             FROM CandidatePairs p
-            INNER JOIN Tracks a ON a.Id = p.TrackIdA
-            INNER JOIN Tracks b ON b.Id = p.TrackIdB
             WHERE @LibraryId IS NULL
-               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId);
+               OR (
+                    EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = p.TrackIdA)
+                AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = p.TrackIdB));
             """;
         var existingRows = (await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             selectSql,
             new { LibraryId = libraryId },
             transaction,
             cancellationToken: cancellationToken))).ToArray();
-        var incomingByKey = pairs.ToDictionary(
-            pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
+        var incomingByKey = pairs.ToDictionary(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
 
         var obsolete = existingRows
             .Where(row => !incomingByKey.ContainsKey(CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)))
             .ToArray();
         if (obsolete.Length != 0)
         {
-            const string deleteSql = """
-                DELETE FROM CandidatePairs
-                WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
-                """;
             await connection.ExecuteAsync(new CommandDefinition(
-                deleteSql,
+                "DELETE FROM CandidatePairs WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
                 obsolete.Select(row => new { row.TrackIdA, row.TrackIdB }),
                 transaction,
                 cancellationToken: cancellationToken));
@@ -67,8 +62,6 @@ public sealed class SqliteCandidatePairRepository(
         await EnsurePairsInScopeAsync(connection, transaction, changed, cancellationToken);
         await UpsertAsync(connection, transaction, changed, cancellationToken);
 
-        // 不変ペアをDELETE/INSERTしないことで、その配下の詳細比較・分類結果を保持する。
-        // Fingerprint自体が更新された場合の比較失効判定は比較日時とFingerprint抽出日時で行う。
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -88,7 +81,6 @@ public sealed class SqliteCandidatePairRepository(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await EnsurePairsInScopeAsync(connection, transaction, pairs, cancellationToken);
 
-        // 変更Track数がSQLiteのパラメータ上限を超えても処理できるよう、一時表を使って対象集合を渡す。
         await connection.ExecuteAsync(new CommandDefinition(
             "CREATE TEMP TABLE IF NOT EXISTS AffectedCandidateTracks (TrackId INTEGER PRIMARY KEY);",
             transaction: transaction,
@@ -102,14 +94,39 @@ public sealed class SqliteCandidatePairRepository(
             trackIds.Distinct().Select(trackId => new { TrackId = trackId }),
             transaction,
             cancellationToken: cancellationToken));
-        await connection.ExecuteAsync(new CommandDefinition(
-            """
-            DELETE FROM CandidatePairs
-            WHERE EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
-               OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB);
-            """,
-            transaction: transaction,
-            cancellationToken: cancellationToken));
+
+        if (libraryId is null)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidatePairs
+                WHERE EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
+                   OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB);
+                """,
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+        }
+        else
+        {
+            // PairはGlobalなので、現在Libraryで評価可能なPairだけを置換する。
+            // Shared Trackの別Library専用Pairを現在Libraryの増分生成で消してはいけない。
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidatePairs
+                WHERE (
+                        EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
+                     OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
+                  AND EXISTS (
+                        SELECT 1 FROM LibraryTracks la
+                        WHERE la.LibraryId = @LibraryId AND la.TrackId = CandidatePairs.TrackIdA)
+                  AND EXISTS (
+                        SELECT 1 FROM LibraryTracks lb
+                        WHERE lb.LibraryId = @LibraryId AND lb.TrackId = CandidatePairs.TrackIdB);
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
 
         await UpsertAsync(connection, transaction, pairs, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -132,8 +149,8 @@ public sealed class SqliteCandidatePairRepository(
               AND (
                     @LibraryId IS NULL
                  OR (
-                        TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
-                    AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)));
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidatePairs.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidatePairs.TrackIdB)));
             """;
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
@@ -147,10 +164,10 @@ public sealed class SqliteCandidatePairRepository(
         const string sql = """
             SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
             FROM CandidatePairs p
-            INNER JOIN Tracks a ON a.Id = p.TrackIdA
-            INNER JOIN Tracks b ON b.Id = p.TrackIdB
             WHERE @LibraryId IS NULL
-               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId)
+               OR (
+                    EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = p.TrackIdA)
+                AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = p.TrackIdB))
             ORDER BY p.TrackIdA, p.TrackIdB;
             """;
 
@@ -180,13 +197,13 @@ public sealed class SqliteCandidatePairRepository(
 
         var trackIds = pairs.SelectMany(pair => new[] { pair.TrackIdA, pair.TrackIdB }).Distinct().ToArray();
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
             new { LibraryId = libraryId, TrackIds = trackIds },
             transaction,
             cancellationToken: cancellationToken));
         if (count != trackIds.Length)
         {
-            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Pairとして保存できません。");
+            throw new InvalidOperationException("現在LibraryのMembership外TrackをCandidate Pairとして保存できません。");
         }
     }
 
