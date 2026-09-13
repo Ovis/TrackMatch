@@ -38,6 +38,14 @@ public partial class MainWindow
 
     internal Task ReanalyzeSelectedQualityAsync() => _qualityController?.ReanalyzeSelectedAsync() ?? Task.CompletedTask;
 
+    /// <summary>
+    /// 選択中Candidateの音質情報を手動で再解析する。
+    /// </summary>
+    private async void ReanalyzeQuality_Click(object sender, RoutedEventArgs e)
+    {
+        await ReanalyzeSelectedQualityAsync();
+    }
+
     private void EnsureQualityUiAttached()
     {
         if (_qualityUiAttached) return;
