@@ -7,7 +7,7 @@ using TrackMatch.Core.Libraries;
 namespace TrackMatch.App;
 
 /// <summary>
-/// 名前と1つ以上のRootをまとめて入力し、LibraryをAtomicに作成するDialog。
+/// 名前と1つ以上の対象フォルダをまとめて入力し、ライブラリをAtomicに作成するDialog。
 /// </summary>
 public partial class NewLibraryDialog : Window
 {
@@ -25,7 +25,7 @@ public partial class NewLibraryDialog : Window
 
     private void AddRoot_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Library Rootを選択", Multiselect = false };
+        var dialog = new OpenFolderDialog { Title = "対象フォルダを選択", Multiselect = false };
         if (dialog.ShowDialog(this) == true && !_roots.Contains(dialog.FolderName, StringComparer.OrdinalIgnoreCase))
         {
             _roots.Add(dialog.FolderName);
