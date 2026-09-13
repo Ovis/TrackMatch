@@ -30,7 +30,7 @@
             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="ライブラリ"/>
             <ComboBox x:Name="LibraryComboBox" Grid.Column="2" ItemsSource="{Binding Libraries}" SelectedItem="{Binding SelectedLibrary}"
                       DisplayMemberPath="Name" SelectionChanged="LibraryComboBox_SelectionChanged"/>
-            <Button Grid.Column="4" Content="⚙  管理..." IsEnabled="{Binding CanManageLibraries}" Click="ManageLibraries_Click"/>
+            <Button Grid.Column="4" Content="⚙  設定..." IsEnabled="{Binding CanManageLibraries}" Click="ManageLibraries_Click"/>
             <Button Grid.Column="6" Style="{StaticResource PrimaryButtonStyle}" Content="⌕  スキャン・分析" IsEnabled="{Binding CanAnalyzeLibrary}" Click="AnalyzeLibrary_Click"/>
             <Button Grid.Column="8" Content="■  キャンセル" IsEnabled="{Binding CanCancelAnalysis}" Click="CancelAnalysis_Click"/>
             <Button Grid.Column="10" Content="ごみ箱へ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click"/>
