@@ -221,7 +221,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public async Task AnalyzeLibraryAsync()
     {
         var library = SelectedLibrary;
-        if (library is null || !CanAnalyzeLibrary) { AnalysisStatusText = "Libraryを選択してください。"; return; }
+        if (library is null || !CanAnalyzeLibrary) { AnalysisStatusText = "ライブラリを選択してください。"; return; }
         _analysisErrors.Clear();
         OnPropertyChanged(nameof(AnalysisErrorCount));
         IsAnalyzing = true;
@@ -294,8 +294,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public async Task<RejectedTrackTrashResult?> ProcessTrashAsync(bool execute, TrashDestinationCollisionBehavior collisionBehavior = TrashDestinationCollisionBehavior.Skip)
     {
         var library = SelectedLibrary;
-        if (!CanProcessTrash || library is null) { TrashStatusText = "Libraryを選択してください。"; return null; }
-        if (string.IsNullOrWhiteSpace(TrashRoot)) { TrashStatusText = "Trash Rootを設定してください。"; return null; }
+        if (!CanProcessTrash || library is null) { TrashStatusText = "ライブラリを選択してください。"; return null; }
+        if (string.IsNullOrWhiteSpace(TrashRoot)) { TrashStatusText = "ごみ箱フォルダを設定してください。"; return null; }
         StopPlayback();
         IsLoading = true;
         try
@@ -306,7 +306,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             var tracks = new SqliteTrackRepository(database);
             var service = new RejectedTrackTrashService(new SqliteCandidateReviewRepository(database), new SqliteTrackLookupRepository(database), tracks, new LocalTrackFileOperations());
             var result = await service.ProcessAsync(library.Id, TrashRoot, execute, collisionBehavior);
-            TrashStatusText = execute ? $"移動完了 {result.MovedCount}件 / Blocked {result.BlockedCount}件" : $"確認: 移動可能 {result.ReadyCount}件 / Blocked {result.BlockedCount}件";
+            TrashStatusText = execute ? $"移動完了 {result.MovedCount}件 / 移動不可 {result.BlockedCount}件" : $"確認: 移動可能 {result.ReadyCount}件 / 移動不可 {result.BlockedCount}件";
             return result;
         }
         finally { IsLoading = false; }
@@ -327,7 +327,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         Candidates.Clear();
         SelectedCandidate = null;
         var library = SelectedLibrary;
-        if (library is null) { StatusText = "Libraryがありません。管理... から作成してください。"; return; }
+        if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         var database = new SqliteDatabase(DatabasePath);
         await database.InitializeAsync();
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(library.Id);
@@ -416,7 +416,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         var updated = summaries.Sum(item => item.UpdatedFiles);
         var missing = summaries.Sum(item => item.RemovedFiles);
         var errors = summaries.Sum(item => item.ErrorCount);
-        return $"{prefix}{(errors > 0 ? "（エラーあり）" : string.Empty)} — 対象 {total:N0}曲 / 新規 {added:N0} / 更新 {updated:N0} / Missing {missing:N0} / エラー {errors:N0}";
+        return $"{prefix}{(errors > 0 ? "（エラーあり）" : string.Empty)} — 対象 {total:N0}曲 / 新規 {added:N0} / 更新 {updated:N0} / 見つからない音源 {missing:N0} / エラー {errors:N0}";
     }
 
     private void RememberCurrentCandidate()
