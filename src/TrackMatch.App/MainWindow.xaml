@@ -30,7 +30,18 @@
             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="ライブラリ"/>
             <ComboBox x:Name="LibraryComboBox" Grid.Column="2" ItemsSource="{Binding Libraries}" SelectedItem="{Binding SelectedLibrary}"
                       DisplayMemberPath="Name" SelectionChanged="LibraryComboBox_SelectionChanged"/>
-            <Button Grid.Column="4" Content="⚙  設定..." IsEnabled="{Binding CanManageLibraries}" Click="ManageLibraries_Click"/>
+            <Button Grid.Column="4" IsEnabled="{Binding CanManageLibraries}" Click="ManageLibraries_Click">
+                <StackPanel Orientation="Horizontal">
+                    <Viewbox Width="14" Height="14" Margin="0,0,7,0" VerticalAlignment="Center">
+                        <Canvas Width="24" Height="24">
+                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeLineJoin="Round"
+                                  Data="M9.4,2.8 L10,5.1 C10.6,5 11.3,5 12,5 C12.7,5 13.4,5 14,5.1 L14.6,2.8 L17.4,4.4 L15.7,6.2 C16.7,7 17.5,8 18,9.1 L20.4,8.4 L21.2,11.6 L18.8,12 C18.8,13.3 18.4,14.6 17.7,15.7 L19.4,17.6 L17,20 L15.1,18.3 C14.2,18.8 13.2,19 12,19 C10.8,19 9.8,18.8 8.9,18.3 L7,20 L4.6,17.6 L6.3,15.7 C5.6,14.6 5.2,13.3 5.2,12 L2.8,11.6 L3.6,8.4 L6,9.1 C6.5,8 7.3,7 8.3,6.2 L6.6,4.4 Z"/>
+                            <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="9" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2"/>
+                        </Canvas>
+                    </Viewbox>
+                    <TextBlock VerticalAlignment="Center" Text="設定..."/>
+                </StackPanel>
+            </Button>
             <Button Grid.Column="6" Style="{StaticResource PrimaryButtonStyle}" Content="⌕  スキャン・分析" IsEnabled="{Binding CanAnalyzeLibrary}" Click="AnalyzeLibrary_Click"/>
             <Button Grid.Column="8" Content="■  キャンセル" IsEnabled="{Binding CanCancelAnalysis}" Click="CancelAnalysis_Click"/>
             <Button Grid.Column="10" Content="ごみ箱へ移動" IsEnabled="{Binding CanProcessTrash}" Click="ExecuteTrash_Click"/>
