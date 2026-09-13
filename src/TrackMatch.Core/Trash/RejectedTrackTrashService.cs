@@ -31,9 +31,9 @@ public sealed class RejectedTrackTrashService
     }
 
     /// <summary>
-    /// 既存のCoreテストと旧呼び出し元を段階的に移行するための互換コンストラクタ。
-    /// 新規コードでは重複グループRepositoryを使用する。
+    /// 既存テストを移行するまでの互換コンストラクタ。
     /// </summary>
+    [Obsolete("Global Duplicate Group経路を使用してください。")]
     public RejectedTrackTrashService(
         ICandidateReviewRepository reviewRepository,
         ITrackLookupRepository trackLookupRepository,
@@ -47,7 +47,7 @@ public sealed class RejectedTrackTrashService
     }
 
     /// <summary>
-    /// 指定Libraryに属するReject TrackをPreviewまたはTrashへ移動する。
+    /// 指定LibraryのDispositionでRejectとなったTrackをPreviewまたはTrashへ移動する。
     /// </summary>
     public async Task<RejectedTrackTrashResult> ProcessAsync(
         long libraryId,
@@ -97,11 +97,9 @@ public sealed class RejectedTrackTrashService
             cancellationToken.ThrowIfCancellationRequested();
             group.Validate();
 
-            // KeepがDB上・ファイル上とも利用可能であることを確認してからReject側を動かす。
-            // Keep消失時に残存ファイルまで移動してグループ全滅となる事故を防ぐための最終防御である。
+            // Keepは現在Library外のGlobal Trackでも選択できる。Membershipではなく、物理ファイルが利用可能かだけを確認する。
             var keepTrack = await _trackLookupRepository.GetByIdAsync(group.KeepTrackId, cancellationToken);
             var keepIsAvailable = keepTrack is not null
-                && keepTrack.LibraryId == libraryId
                 && !keepTrack.IsMissing
                 && _fileOperations.FileExists(Path.GetFullPath(keepTrack.Metadata.Path));
 
@@ -109,8 +107,13 @@ public sealed class RejectedTrackTrashService
             {
                 foreach (var rejectTrackId in group.TrackIds.Where(trackId => trackId != group.KeepTrackId))
                 {
+                    if (!await _trackLookupRepository.IsInLibraryAsync(rejectTrackId, libraryId, cancellationToken))
+                    {
+                        continue;
+                    }
+
                     var rejectTrack = await _trackLookupRepository.GetByIdAsync(rejectTrackId, cancellationToken);
-                    if (rejectTrack is null || rejectTrack.LibraryId != libraryId)
+                    if (rejectTrack is null)
                     {
                         continue;
                     }
@@ -170,10 +173,13 @@ public sealed class RejectedTrackTrashService
         foreach (var trackId in rejectTrackIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var track = await _trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
+            if (!await _trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
+            {
+                continue;
+            }
 
-            // 互換経路は従来挙動を維持する。実アプリではグループ経路を使用する。
-            if (track is null || track.LibraryId != libraryId)
+            var track = await _trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
+            if (track is null)
             {
                 continue;
             }
@@ -191,14 +197,13 @@ public sealed class RejectedTrackTrashService
                 continue;
             }
 
-            var item = await ProcessKnownTrackAsync(
+            items.Add(await ProcessKnownTrackAsync(
                 track,
                 sourcePath,
                 destinationPath,
                 execute,
                 collisionBehavior,
-                cancellationToken);
-            items.Add(item);
+                cancellationToken));
         }
 
         return new RejectedTrackTrashResult(items, execute);
@@ -212,8 +217,13 @@ public sealed class RejectedTrackTrashService
         TrashDestinationCollisionBehavior collisionBehavior,
         CancellationToken cancellationToken)
     {
+        if (!await _trackLookupRepository.IsInLibraryAsync(trackId, libraryId, cancellationToken))
+        {
+            return null;
+        }
+
         var track = await _trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
-        if (track is null || track.LibraryId != libraryId)
+        if (track is null)
         {
             return null;
         }
@@ -280,9 +290,37 @@ public sealed class RejectedTrackTrashService
         try
         {
             _fileOperations.Move(sourcePath, destinationPath);
-            await _trackRepository.DeleteFingerprintAsync(track.Id, cancellationToken);
-            await _trackRepository.MarkMissingAsync(track.Id, cancellationToken);
-            return new RejectedTrackMoveItem(track.Id, sourcePath, destinationPath, RejectedTrackMoveStatus.Moved);
+            try
+            {
+                // Trashは同じContentを別場所へ退避する操作なのでFingerprint等の解析キャッシュは保持する。
+                // Global Trackは元Pathに存在しない状態としてMissingだけを更新する。
+                await _trackRepository.MarkMissingAsync(track.Id, cancellationToken);
+                return new RejectedTrackMoveItem(track.Id, sourcePath, destinationPath, RejectedTrackMoveStatus.Moved);
+            }
+            catch (Exception databaseException) when (databaseException is IOException or InvalidDataException or InvalidOperationException)
+            {
+                // FilesystemとSQLiteを同一Transactionにはできない。DB更新失敗時は元Pathへの補償Moveを試し、
+                // 物理状態とDB状態が可能な限り分離しないようにする。
+                try
+                {
+                    _fileOperations.Move(destinationPath, sourcePath);
+                    return new RejectedTrackMoveItem(
+                        track.Id,
+                        sourcePath,
+                        destinationPath,
+                        RejectedTrackMoveStatus.Failed,
+                        $"DB更新に失敗したためファイルを元の場所へ戻しました: {databaseException.Message}");
+                }
+                catch (Exception compensationException) when (compensationException is IOException or UnauthorizedAccessException or InvalidOperationException)
+                {
+                    return new RejectedTrackMoveItem(
+                        track.Id,
+                        sourcePath,
+                        destinationPath,
+                        RejectedTrackMoveStatus.Failed,
+                        $"DB更新と補償Moveの両方に失敗しました。次回Scanで実状態を再確認してください。DB: {databaseException.Message} / 補償Move: {compensationException.Message}");
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -302,7 +340,6 @@ public sealed class RejectedTrackTrashService
         var extension = Path.GetExtension(destinationPath);
         var name = Path.GetFileNameWithoutExtension(destinationPath);
 
-        // (2)から開始し、既存Fileを上書きしない最小Available番号を採用する。
         for (var number = 2; number < int.MaxValue; number++)
         {
             var candidate = Path.Combine(directory, $"{name} ({number}){extension}");
