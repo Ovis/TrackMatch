@@ -58,7 +58,10 @@ public sealed class IncrementalLibraryScanService(
                 processed++;
                 var metadata = result.Metadata!;
                 var isNew = !storedByPath.TryGetValue(fullPath, out var stored);
-                var needsMetadataUpdate = isNew || stored!.IsMissing || HasChanged(stored, metadata);
+                var fileChanged = !isNew && HasFileChanged(stored!, metadata);
+                var metadataChanged = !isNew && stored!.Metadata.Year != metadata.Year;
+                var needsMetadataUpdate = isNew || stored!.IsMissing || fileChanged || metadataChanged;
+                var needsFingerprintRefresh = isNew || stored.IsMissing || fileChanged;
                 long trackId;
 
                 if (isNew)
@@ -70,8 +73,14 @@ public sealed class IncrementalLibraryScanService(
                 {
                     trackId = stored!.Id;
                     await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
-                    // Missingから復活した場合も旧Fingerprintを無条件には信用せず、通常の変更と同様に再生成する。
-                    await trackRepository.DeleteFingerprintAsync(trackId, cancellationToken);
+
+                    if (needsFingerprintRefresh)
+                    {
+                        // Missingからの復活やファイル実体の変更時だけ旧Fingerprintを破棄する。
+                        // Year追加などタグ情報だけの補完では音声データは変わらないため、重いFingerprint再生成を避ける。
+                        await trackRepository.DeleteFingerprintAsync(trackId, cancellationToken);
+                    }
+
                     updated++;
                 }
                 else
@@ -79,7 +88,7 @@ public sealed class IncrementalLibraryScanService(
                     trackId = stored!.Id;
                 }
 
-                var needsFingerprint = isNew || needsMetadataUpdate || missingFingerprintIds.Contains(trackId);
+                var needsFingerprint = needsFingerprintRefresh || missingFingerprintIds.Contains(trackId);
                 if (!needsFingerprint)
                 {
                     continue;
@@ -119,7 +128,7 @@ public sealed class IncrementalLibraryScanService(
         }
     }
 
-    private static bool HasChanged(StoredTrack stored, Models.AudioTrackMetadata current)
+    private static bool HasFileChanged(StoredTrack stored, Models.AudioTrackMetadata current)
         => stored.Metadata.FileSize != current.FileSize
             || stored.Metadata.LastWriteTimeUtc != current.LastWriteTimeUtc;
 }
