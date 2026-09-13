@@ -120,6 +120,43 @@ public partial class MainWindow : Window
             var preview = await _viewModel.ProcessTrashAsync(execute: false);
             if (preview is null) return;
 
+            if (preview.SharedTrackImpacts.Count > 0)
+            {
+                var impactedLibraries = preview.SharedTrackImpacts
+                    .SelectMany(impact => impact.OtherLibraries)
+                    .Select(library => library.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var keepLibraries = preview.SharedTrackImpacts
+                    .SelectMany(impact => impact.KeepLibraries)
+                    .Select(library => library.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var detail = $"影響するLibrary: {string.Join("、", impactedLibraries)}";
+                if (keepLibraries.Length > 0)
+                {
+                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」に指定されています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
+                }
+
+                // Shared Trackは1つの物理ファイルを複数Libraryが参照するため、通常のTrash確認とは別に影響範囲を明示する。
+                var sharedConfirmation = new ConfirmationDialog(
+                    "他のLibraryにも影響します",
+                    $"移動対象のうち {preview.SharedTrackImpacts.Count} 件は他のLibraryでも参照されています。",
+                    detail,
+                    "影響を確認して続行",
+                    "キャンセル",
+                    kind: keepLibraries.Length > 0 ? AppDialogKind.Warning : AppDialogKind.Information)
+                { Owner = this };
+                sharedConfirmation.ShowDialog();
+                if (sharedConfirmation.SelectedResult != AppDialogResult.Primary)
+                {
+                    return;
+                }
+            }
+
             var collisionBehavior = TrashDestinationCollisionBehavior.Skip;
             var collisions = preview.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
             if (collisions > 0)
@@ -317,14 +354,14 @@ public partial class MainWindow : Window
 
     private async void ShowDuplicateGroupDetails_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not long groupId)
+        if (sender is not Button button || button.Tag is not long groupId || _viewModel.SelectedLibrary is not { } library)
         {
             return;
         }
 
         // Main WindowのA/B同期再生と詳細画面の簡易試聴が同時に鳴らないよう、詳細表示前に停止する。
         _viewModel.StopPlayback();
-        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, groupId) { Owner = this }.ShowDialog();
+        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this }.ShowDialog();
         await _viewModel.RefreshDuplicateGroupsAsync();
     }
 
