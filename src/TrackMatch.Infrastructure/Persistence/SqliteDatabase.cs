@@ -189,6 +189,27 @@ public sealed class SqliteDatabase
                 FOREIGN KEY (KeepTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS DuplicateGroups (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                LibraryId INTEGER NOT NULL,
+                KeepTrackId INTEGER NOT NULL,
+                FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE,
+                FOREIGN KEY (KeepTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_DuplicateGroups_LibraryId ON DuplicateGroups (LibraryId);
+            CREATE INDEX IF NOT EXISTS IX_DuplicateGroups_KeepTrackId ON DuplicateGroups (KeepTrackId);
+
+            CREATE TABLE IF NOT EXISTS DuplicateGroupTracks (
+                DuplicateGroupId INTEGER NOT NULL,
+                TrackId INTEGER NOT NULL UNIQUE,
+                PRIMARY KEY (DuplicateGroupId, TrackId),
+                FOREIGN KEY (DuplicateGroupId) REFERENCES DuplicateGroups (Id) ON DELETE CASCADE,
+                FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_DuplicateGroupTracks_TrackId ON DuplicateGroupTracks (TrackId);
+
             CREATE TABLE IF NOT EXISTS TrackQualityAnalyses (
                 TrackId INTEGER PRIMARY KEY,
                 AnalysisVersion INTEGER NOT NULL,
