@@ -7,6 +7,7 @@ using TrackMatch.App.Playback;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Playback;
 using TrackMatch.Core.Scanning;
@@ -19,7 +20,7 @@ namespace TrackMatch.App;
 /// <summary>
 /// Library選択、表示Filter、分析進捗、候補レビュー画面の状態を管理する。
 /// </summary>
-public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
+public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly JsonAppSettingsStore _settingsStore = new();
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
@@ -82,6 +83,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(CanReview));
             OnPropertyChanged(nameof(CanClearReview));
             RememberCurrentCandidate();
+            _ = LoadDuplicateGroupsForSelectionAsync(value);
         }
     }
 
@@ -217,11 +219,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public async Task ClearReviewAsync()
     {
         var selected = SelectedCandidate; if (selected is null || !CanClearReview) return;
+        var library = SelectedLibrary; if (library is null) return;
         StopPlayback(); IsLoading = true;
         try
         {
             var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            await new SqliteCandidateReviewRepository(database).DeleteAsync(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
+            var reviews = new SqliteCandidateReviewRepository(database);
+            var tracks = new SqliteTrackLookupRepository(database);
+            var groups = new SqliteDuplicateGroupRepository(database);
+            var groupService = new DuplicateGroupService(reviews, tracks, groups);
+            await groupService.DeleteReviewAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
@@ -237,8 +244,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         {
             TrashPathRules.ValidateRootSeparation(TrashRoot, Libraries.SelectMany(item => item.Roots).Select(root => root.Path));
             var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+            var reviews = new SqliteCandidateReviewRepository(database);
+            var trackLookup = new SqliteTrackLookupRepository(database);
+            var groups = new SqliteDuplicateGroupRepository(database);
+            var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
+
+            // 実ファイルを動かす直前にレビューからグループを再同期し、古い派生状態を削除根拠にしない。
+            await groupService.SynchronizeAsync(library.Id);
+
             var tracks = new SqliteTrackRepository(database);
-            var service = new RejectedTrackTrashService(new SqliteCandidateReviewRepository(database), new SqliteTrackLookupRepository(database), tracks, new LocalTrackFileOperations());
+            var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
             var result = await service.ProcessAsync(library.Id, TrashRoot, execute, collisionBehavior);
             TrashStatusText = execute ? $"移動完了 {result.MovedCount}件 / 移動不可 {result.BlockedCount}件" : $"確認: 移動可能 {result.ReadyCount}件 / 移動不可 {result.BlockedCount}件";
             return result;
@@ -292,11 +307,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private async Task SaveReviewAsync(CandidateReviewDecision decision, long? keepTrackId)
     {
         var selected = SelectedCandidate; if (selected is null || !CanReview) return;
+        var library = SelectedLibrary; if (library is null) return;
         StopPlayback(); IsLoading = true;
         try
         {
             var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            await new SqliteCandidateReviewRepository(database).SaveAsync(new CandidateReview(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null, keepTrackId));
+            var reviews = new SqliteCandidateReviewRepository(database);
+            var tracks = new SqliteTrackLookupRepository(database);
+            var groups = new SqliteDuplicateGroupRepository(database);
+            var groupService = new DuplicateGroupService(reviews, tracks, groups);
+            await groupService.SaveReviewAsync(
+                library.Id,
+                new CandidateReview(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null, keepTrackId));
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
