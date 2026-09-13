@@ -70,4 +70,30 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
             cancellationToken: cancellationToken));
         return ids.ToArray();
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TrackLibraryReference>> GetLibrariesAsync(
+        long trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<LibraryReferenceRow>(new CommandDefinition(
+            """
+            SELECT l.Id, l.Name
+            FROM LibraryTracks lt
+            INNER JOIN Libraries l ON l.Id = lt.LibraryId
+            WHERE lt.TrackId = @TrackId
+            ORDER BY l.Name COLLATE NOCASE, l.Id;
+            """,
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        return rows.Select(row => new TrackLibraryReference(row.Id, row.Name)).ToArray();
+    }
+
+    private sealed record LibraryReferenceRow(long Id, string Name);
 }
