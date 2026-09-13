@@ -1,20 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!--
-        WPFは列ヘッダー右端にPaddingHeaderを生成し、縦ScrollBarとの境界に既定の線を描画する。
-        候補一覧では右上領域を列ヘッダー色で連続させるため、PaddingHeaderだけ境界線を描画しない。
+        右上の空白はMainWindow側で局所的に覆うため、ここではDataGridColumnHeaderへの追加補正を行わない。
+        RoleはXAML Style Triggerから参照できないため、Triggerによる判定は使用しない。
     -->
-    <Style TargetType="DataGridColumnHeader">
-        <Setter Property="Background" Value="#F3F6F9"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="Padding" Value="8,6"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
-        <Style.Triggers>
-            <Trigger Property="Role" Value="PaddingHeader">
-                <Setter Property="Background" Value="#F3F6F9"/>
-                <Setter Property="BorderBrush" Value="#F3F6F9"/>
-                <Setter Property="BorderThickness" Value="0"/>
-            </Trigger>
-        </Style.Triggers>
-    </Style>
 </ResourceDictionary>
