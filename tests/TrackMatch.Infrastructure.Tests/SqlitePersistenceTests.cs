@@ -52,6 +52,7 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
         var path = Path.Combine(_directory, "テスト.flac");
         var initial = CreateMetadata(path, 100, "Old title");
         var id = await repository.UpsertMetadataAsync(initial, TestContext.Current.CancellationToken);
+        await repository.EnsureMembershipAsync(_libraryId, _rootId, id, "テスト.flac", TestContext.Current.CancellationToken);
 
         var updated = CreateMetadata(path, 200, "New title");
         var updatedId = await repository.UpsertMetadataAsync(updated, TestContext.Current.CancellationToken);
@@ -68,13 +69,17 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
         Assert.Equal(96000, stored.Metadata.SampleRateHz);
         Assert.Equal(24, stored.Metadata.BitDepth);
         Assert.Equal(2, stored.Metadata.Channels);
-        Assert.Equal(_libraryId, stored.LibraryId);
-        Assert.Equal(_rootId, stored.RootId);
-        Assert.Equal("テスト.flac", stored.RelativePath);
+
+        var rootEntries = await repository.GetByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken);
+        var entry = Assert.Single(rootEntries);
+        Assert.Equal(id, entry.Track.Id);
+        Assert.Equal(_libraryId, entry.Membership.LibraryId);
+        Assert.Equal(_rootId, entry.Membership.RootId);
+        Assert.Equal("テスト.flac", entry.Membership.RelativePath);
 
         var fingerprint = new AudioFingerprint(path, updated.Duration, [0u, 1u, uint.MaxValue, 0x12345678u]);
         await repository.SaveFingerprintAsync(id, fingerprint, algorithm: 2, TestContext.Current.CancellationToken);
-        Assert.DoesNotContain(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(id, await repository.GetTrackIdsWithoutFingerprintByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken));
 
         var restored = Assert.IsType<AudioFingerprint>(
             await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
@@ -84,20 +89,26 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
 
         await repository.DeleteFingerprintAsync(id, TestContext.Current.CancellationToken);
         Assert.Null(await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
-        Assert.Contains(id, await repository.GetTrackIdsWithoutFingerprintByRootPathAsync(_directory, TestContext.Current.CancellationToken));
+        Assert.Contains(id, await repository.GetTrackIdsWithoutFingerprintByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task TrackRepository_GetsRootTracksAndMarksMissing()
+    public async Task TrackRepository_GetsRootMembershipAndMarksGlobalTrackMissing()
     {
         var repository = new SqliteTrackRepository(_database);
         var path = Path.Combine(_directory, "Album", "track.flac");
         var id = await repository.UpsertMetadataAsync(CreateMetadata(path, 100, "Track"), TestContext.Current.CancellationToken);
+        await repository.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            id,
+            Path.Combine("Album", "track.flac"),
+            TestContext.Current.CancellationToken);
 
-        var tracks = await repository.GetByRootPathAsync(_directory, TestContext.Current.CancellationToken);
-        var track = Assert.Single(tracks);
-        Assert.Equal(id, track.Id);
-        Assert.Equal(Path.Combine("Album", "track.flac"), track.RelativePath);
+        var entries = await repository.GetByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken);
+        var entry = Assert.Single(entries);
+        Assert.Equal(id, entry.Track.Id);
+        Assert.Equal(Path.Combine("Album", "track.flac"), entry.Membership.RelativePath);
 
         await repository.MarkMissingAsync(id, TestContext.Current.CancellationToken);
         var missing = Assert.IsType<StoredTrack>(await repository.GetByPathAsync(path, TestContext.Current.CancellationToken));
@@ -105,16 +116,18 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TrackRepository_RejectsTrackOutsideRegisteredRoots()
+    public async Task TrackRepository_AllowsGlobalTrackOutsideRegisteredRootsUntilMembershipIsAssigned()
     {
         var repository = new SqliteTrackRepository(_database);
         var outsidePath = Path.Combine(Path.GetTempPath(), "TrackMatch.Outside", Guid.NewGuid().ToString("N"), "other.flac");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => repository.UpsertMetadataAsync(
+        var id = await repository.UpsertMetadataAsync(
             CreateMetadata(outsidePath, 100, "Other"),
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken);
 
-        Assert.Contains("Library Root", exception.Message, StringComparison.Ordinal);
+        var stored = Assert.IsType<StoredTrack>(await repository.GetByPathAsync(outsidePath, TestContext.Current.CancellationToken));
+        Assert.Equal(id, stored.Id);
+        Assert.Empty(await repository.GetByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
