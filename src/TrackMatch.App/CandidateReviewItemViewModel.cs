@@ -19,7 +19,7 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
         AudioRelationshipKind.DuplicateCandidate => "重複候補",
         AudioRelationshipKind.ShortVersionCandidate => "短縮版候補",
         AudioRelationshipKind.AlternateVersionCandidate => "別バージョン候補",
-        AudioRelationshipKind.NeedsReview => "要確認",
+        AudioRelationshipKind.NeedsReview => "該当なし",
         _ => "自動分類なし",
     };
 
