@@ -10,8 +10,7 @@ public sealed partial class MainWindowViewModel
     private int _duplicateGroupLoadVersion;
 
     /// <summary>
-    /// 現在のCandidate A/Bのいずれかが所属する確定済み重複グループ。
-    /// A/Bが別グループの場合は2件表示し、結合前でも双方を確認できるようにする。
+    /// 現在のCandidate A/Bのいずれかが所属するGlobal Duplicate GroupのLibrary Projection。
     /// </summary>
     public ObservableCollection<DuplicateGroupSummaryViewModel> DuplicateGroups { get; } = [];
 
@@ -21,8 +20,7 @@ public sealed partial class MainWindowViewModel
     public Task RefreshDuplicateGroupsAsync() => LoadDuplicateGroupsForSelectionAsync(SelectedCandidate);
 
     /// <summary>
-    /// 指定TrackをKeepにする操作が既存グループへ与える影響を、確認Dialog向けの文面として返す。
-    /// 既存Keepに変化がない場合はnullを返す。
+    /// 指定TrackをKeepにする操作が現在Libraryの既存Keepへ与える影響を確認Dialog向け文面として返す。
     /// </summary>
     public async Task<string?> GetKeepChangeImpactAsync(long keepTrackId)
     {
@@ -36,13 +34,15 @@ public sealed partial class MainWindowViewModel
         var database = new SqliteDatabase(DatabasePath);
         await database.InitializeAsync();
         var groupRepository = new SqliteDuplicateGroupRepository(database);
-        var groups = await GetGroupsForCandidateAsync(groupRepository, selected);
+        var groups = await GetGroupsForCandidateAsync(groupRepository, selected, library.Id);
         if (groups.Count == 0)
         {
             return null;
         }
 
-        if (groups.Count == 1 && groups[0].KeepTrackId == keepTrackId)
+        if (groups.Count == 1
+            && groups[0].KeepStatus == DuplicateGroupKeepStatus.Selected
+            && groups[0].KeepTrackId == keepTrackId)
         {
             return null;
         }
@@ -53,18 +53,25 @@ public sealed partial class MainWindowViewModel
 
         if (groups.Count == 1)
         {
-            var currentKeep = await tracks.GetByIdAsync(groups[0].KeepTrackId);
-            return $"この操作により、重複グループ #{groups[0].Id} の残すファイルが「{FormatTrackTitle(currentKeep, groups[0].KeepTrackId)}」から「{newKeepTitle}」に変更されます。";
+            var group = groups[0];
+            if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
+            {
+                return $"この操作により、重複グループ #{group.Id} で残すファイルを「{newKeepTitle}」に設定します。";
+            }
+
+            var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
+            return $"この操作により、重複グループ #{group.Id} の残すファイルが「{FormatTrackTitle(currentKeep, group.KeepTrackId.Value)}」から「{newKeepTitle}」に変更されます。";
         }
 
         var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
-        return $"この操作により、重複グループ {groupIds} が結合され、結合後に残すファイルは「{newKeepTitle}」になります。";
+        return $"この操作により重複グループ {groupIds} が結合されます。既存Keepが複数ある場合、結合後は自動選択せず要確認になります。";
     }
 
     private async Task LoadDuplicateGroupsForSelectionAsync(CandidateReviewItemViewModel? selected)
     {
         var version = ++_duplicateGroupLoadVersion;
-        if (selected is null || SelectedLibrary is null || !File.Exists(DatabasePath))
+        var library = SelectedLibrary;
+        if (selected is null || library is null || !File.Exists(DatabasePath))
         {
             ReplaceDuplicateGroups([]);
             return;
@@ -75,18 +82,25 @@ public sealed partial class MainWindowViewModel
             var database = new SqliteDatabase(DatabasePath);
             await database.InitializeAsync();
             var groupRepository = new SqliteDuplicateGroupRepository(database);
-            var groups = await GetGroupsForCandidateAsync(groupRepository, selected);
+            var groups = await GetGroupsForCandidateAsync(groupRepository, selected, library.Id);
             var tracks = new SqliteTrackLookupRepository(database);
             var summaries = new List<DuplicateGroupSummaryViewModel>(groups.Count);
 
             foreach (var group in groups)
             {
-                var keep = await tracks.GetByIdAsync(group.KeepTrackId);
+                StoredTrack? keep = null;
+                if (group.KeepTrackId is { } keepTrackId)
+                {
+                    keep = await tracks.GetByIdAsync(keepTrackId);
+                }
+
                 summaries.Add(new DuplicateGroupSummaryViewModel(
                     group.Id,
                     group.TrackIds.Count,
+                    group.GlobalTrackIds.Count,
                     group.KeepTrackId,
-                    FormatTrackTitle(keep, group.KeepTrackId),
+                    group.KeepStatus,
+                    group.KeepTrackId is { } id ? FormatTrackTitle(keep, id) : string.Empty,
                     keep?.Metadata.Year?.ToString()));
             }
 
@@ -110,10 +124,11 @@ public sealed partial class MainWindowViewModel
 
     private static async Task<IReadOnlyList<DuplicateGroup>> GetGroupsForCandidateAsync(
         IDuplicateGroupRepository repository,
-        CandidateReviewItemViewModel selected)
+        CandidateReviewItemViewModel selected,
+        long libraryId)
     {
-        var groupA = await repository.GetByTrackIdAsync(selected.TrackIdA);
-        var groupB = await repository.GetByTrackIdAsync(selected.TrackIdB);
+        var groupA = await repository.GetByTrackIdAsync(selected.TrackIdA, libraryId);
+        var groupB = await repository.GetByTrackIdAsync(selected.TrackIdB, libraryId);
         return new[] { groupA, groupB }
             .Where(group => group is not null)
             .Select(group => group!)
