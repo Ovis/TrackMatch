@@ -2,6 +2,7 @@ using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Scanning;
 using TrackMatch.Infrastructure.Audio;
@@ -74,7 +75,9 @@ public sealed class LibraryAnalysisWorkflow
             }
 
             var root = roots[0];
-            return await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
+            var result = await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
+            await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
+            return result;
         }
         finally
         {
@@ -114,6 +117,9 @@ public sealed class LibraryAnalysisWorkflow
                 results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
             }
 
+            // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
+            // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
+            await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
             return new LibraryRootScanBatchResult(library.Id, results);
         }
         finally
@@ -310,6 +316,17 @@ public sealed class LibraryAnalysisWorkflow
 
         var library = await new SqliteLibraryRepository(database).GetAsync(libraryId, cancellationToken);
         return library ?? throw new InvalidOperationException($"ライブラリが見つかりません: {libraryId}");
+    }
+
+    private static async Task SynchronizeDuplicateGroupsAsync(
+        SqliteDatabase database,
+        CancellationToken cancellationToken)
+    {
+        var service = new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(database),
+            new SqliteTrackLookupRepository(database),
+            new SqliteDuplicateGroupRepository(database));
+        await service.SynchronizeGlobalAsync(cancellationToken);
     }
 
     private async Task<SqliteDatabase> OpenDatabaseAsync(CancellationToken cancellationToken)
