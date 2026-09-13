@@ -4,7 +4,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Core.Duplicates;
 
 /// <summary>
-/// 候補レビューの変更と、それに従う重複グループ再構成を一貫して扱う。
+/// Global候補レビューの変更と、現在Libraryへ投影した重複グループ再構成を一貫して扱う。
 /// </summary>
 public sealed class DuplicateGroupService(
     ICandidateReviewMutationRepository reviewRepository,
@@ -35,7 +35,7 @@ public sealed class DuplicateGroupService(
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups, preferredKeep);
 
         // グループ再計算を先に完了させて矛盾を検出してから永続化する。
-        // これによりNotDuplicateと推移的なConfirmedDuplicateが同時に成立する状態を作らない。
+        // Global Groupへの完全移行後も、矛盾したHuman Verdictを永続化しない順序は維持する。
         await reviewRepository.SaveAsync(review, cancellationToken);
         await groupRepository.ReplaceLibraryAsync(libraryId, rebuild, cancellationToken);
     }
@@ -62,9 +62,6 @@ public sealed class DuplicateGroupService(
     /// <summary>
     /// 現在保存されているレビューを正として重複グループを再同期する。
     /// </summary>
-    /// <remarks>
-    /// Trash実行前にも呼び出すことで、前回更新が途中で失敗した場合でも古いグループ状態を削除判断へ使用しない。
-    /// </remarks>
     public async Task SynchronizeAsync(long libraryId, CancellationToken cancellationToken = default)
     {
         var reviews = await GetLibraryReviewsAsync(libraryId, cancellationToken);
@@ -83,14 +80,12 @@ public sealed class DuplicateGroupService(
         }
 
         var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
-        var trackCache = new Dictionary<long, StoredTrack?>();
         var result = new List<CandidateReview>();
 
         foreach (var review in allReviews)
         {
-            var trackA = await GetTrackCachedAsync(review.Pair.TrackIdA, trackCache, cancellationToken);
-            var trackB = await GetTrackCachedAsync(review.Pair.TrackIdB, trackCache, cancellationToken);
-            if (trackA?.LibraryId == libraryId && trackB?.LibraryId == libraryId)
+            if (await trackLookupRepository.IsInLibraryAsync(review.Pair.TrackIdA, libraryId, cancellationToken)
+                && await trackLookupRepository.IsInLibraryAsync(review.Pair.TrackIdB, libraryId, cancellationToken))
             {
                 result.Add(review);
             }
@@ -116,24 +111,10 @@ public sealed class DuplicateGroupService(
             throw new InvalidOperationException("レビュー対象のTrackが見つかりません。");
         }
 
-        if (trackA.LibraryId != libraryId || trackB.LibraryId != libraryId)
+        if (!await trackLookupRepository.IsInLibraryAsync(pair.TrackIdA, libraryId, cancellationToken)
+            || !await trackLookupRepository.IsInLibraryAsync(pair.TrackIdB, libraryId, cancellationToken))
         {
-            throw new InvalidOperationException("異なるLibraryのTrackを同じ重複レビューとして扱うことはできません。");
+            throw new InvalidOperationException("現在LibraryのMembership外Track同士を通常レビューとして扱うことはできません。");
         }
-    }
-
-    private async Task<StoredTrack?> GetTrackCachedAsync(
-        long trackId,
-        IDictionary<long, StoredTrack?> cache,
-        CancellationToken cancellationToken)
-    {
-        if (cache.TryGetValue(trackId, out var cached))
-        {
-            return cached;
-        }
-
-        var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
-        cache[trackId] = track;
-        return track;
     }
 }
