@@ -7,7 +7,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// 候補分類結果をSQLiteへ保存し、Trackメタデータ付きで読み出す。
+/// Global Candidate ClassificationをSQLiteへ保存し、Library Membershipで絞り込んで読み出す。
 /// </summary>
 public sealed class SqliteCandidateClassificationRepository(
     SqliteDatabase database,
@@ -36,12 +36,15 @@ public sealed class SqliteCandidateClassificationRepository(
         }
         else
         {
-            // GUIは選択中のLibraryだけを再分析するため、他Libraryの分類結果を巻き込んで削除しない。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidateClassifications
-                WHERE TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
-                  AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId);
+                WHERE EXISTS (
+                        SELECT 1 FROM LibraryTracks a
+                        WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateClassifications.TrackIdA)
+                  AND EXISTS (
+                        SELECT 1 FROM LibraryTracks b
+                        WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateClassifications.TrackIdB);
                 """,
                 new { LibraryId = libraryId },
                 transaction,
@@ -89,7 +92,11 @@ public sealed class SqliteCandidateClassificationRepository(
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
             INNER JOIN Tracks a ON a.Id = c.TrackIdA
             INNER JOIN Tracks b ON b.Id = c.TrackIdB
-            WHERE (@LibraryId IS NULL OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId))
+            WHERE (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks la WHERE la.LibraryId = @LibraryId AND la.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks lb WHERE lb.LibraryId = @LibraryId AND lb.TrackId = c.TrackIdB)))
               AND NOT EXISTS (
                 SELECT 1
                 FROM CandidateReviews r
@@ -127,13 +134,13 @@ public sealed class SqliteCandidateClassificationRepository(
             .Distinct()
             .ToArray();
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
             new { LibraryId = libraryId, TrackIds = trackIds },
             transaction,
             cancellationToken: cancellationToken));
         if (count != trackIds.Length)
         {
-            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Classificationとして保存できません。");
+            throw new InvalidOperationException("現在LibraryのMembership外TrackをCandidate Classificationとして保存できません。");
         }
     }
 
@@ -141,7 +148,7 @@ public sealed class SqliteCandidateClassificationRepository(
     {
         if (!Enum.TryParse<AudioRelationshipKind>(row.Kind, out var kind))
         {
-            throw new InvalidDataException($"未知の分類種別である: {row.Kind}");
+            throw new InvalidDataException($"未知の分類種別です: {row.Kind}");
         }
 
         return new CandidateClassificationReportRow(
@@ -169,7 +176,7 @@ public sealed class SqliteCandidateClassificationRepository(
 
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
-            ?? throw new InvalidDataException("TrackメタデータJSONを復元できなかった。");
+            ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
 
     private sealed record ReportRow(
         long TrackIdA,
