@@ -13,10 +13,18 @@ public sealed class CandidateGenerationService(
     FingerprintSegmentSketcher sketcher,
     CandidatePairGenerator pairGenerator)
 {
+    /// <summary>
+    /// 保存済みFingerprintから候補ペアを生成する。
+    /// </summary>
+    /// <param name="fingerprintAlgorithm">対象Fingerprint Algorithm</param>
+    /// <param name="options">候補生成設定</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    /// <param name="progress">索引更新と候補ペア探索の進捗通知先</param>
     public async Task<CandidateGenerationResult> GenerateAsync(
         int fingerprintAlgorithm,
         CandidateGenerationOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<CandidateGenerationProgress>? progress = null)
     {
         if (fingerprintAlgorithm < 0)
         {
@@ -52,16 +60,33 @@ public sealed class CandidateGenerationService(
                 ? await fingerprintCatalog.GetActiveAsync(fingerprintAlgorithm, cancellationToken)
                 : await fingerprintCatalog.GetActiveByTrackIdsAsync(fingerprintAlgorithm, changedTrackIds, cancellationToken);
 
+            var completedTracks = 0;
+            progress?.Report(new CandidateGenerationProgress(
+                CandidateGenerationProgressPhase.UpdatingIndex,
+                completedTracks,
+                changedFingerprints.Count));
+
             foreach (var fingerprint in changedFingerprints)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var sketches = sketcher.Create(fingerprint, options);
                 await sketchRepository.ReplaceTrackAsync(fingerprint, options, sketches, cancellationToken);
+                completedTracks++;
+                progress?.Report(new CandidateGenerationProgress(
+                    CandidateGenerationProgressPhase.UpdatingIndex,
+                    completedTracks,
+                    changedFingerprints.Count));
             }
         }
 
         await sketchRepository.PruneAsync(fingerprintAlgorithm, options, cancellationToken);
         var allSketches = await sketchRepository.GetAllAsync(fingerprintAlgorithm, options, cancellationToken);
+
+        var pairProgress = new Progress<CandidatePairGenerationProgress>(value =>
+            progress?.Report(new CandidateGenerationProgress(
+                CandidateGenerationProgressPhase.SearchingPairs,
+                value.CompletedSketches,
+                value.TotalSketches)));
 
         IReadOnlyList<CandidatePair> generatedPairs;
         if (fullRebuild)
@@ -69,19 +94,30 @@ public sealed class CandidateGenerationService(
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
                 targetTrackIds: null,
-                options.MaximumSegmentHashHammingDistance);
+                options.MaximumSegmentHashHammingDistance,
+                pairProgress);
         }
         else
         {
             var affectedTrackIds = changedTrackIds
                 .Concat(inactiveTrackIds)
                 .ToHashSet();
-            generatedPairs = affectedTrackIds.Count == 0
-                ? []
-                : pairGenerator.GenerateFromSketches(
+            if (affectedTrackIds.Count == 0)
+            {
+                progress?.Report(new CandidateGenerationProgress(
+                    CandidateGenerationProgressPhase.SearchingPairs,
+                    allSketches.Count,
+                    allSketches.Count));
+                generatedPairs = [];
+            }
+            else
+            {
+                generatedPairs = pairGenerator.GenerateFromSketches(
                     allSketches,
                     affectedTrackIds,
-                    options.MaximumSegmentHashHammingDistance);
+                    options.MaximumSegmentHashHammingDistance,
+                    pairProgress);
+            }
         }
 
         var excluded = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
@@ -112,3 +148,20 @@ public sealed class CandidateGenerationService(
             fullRebuild);
     }
 }
+
+/// <summary>
+/// 候補生成処理の進捗段階を表す。
+/// </summary>
+public enum CandidateGenerationProgressPhase
+{
+    UpdatingIndex,
+    SearchingPairs,
+}
+
+/// <summary>
+/// 候補生成処理の件数進捗を表す。
+/// </summary>
+public sealed record CandidateGenerationProgress(
+    CandidateGenerationProgressPhase Phase,
+    int CompletedCount,
+    int TotalCount);
