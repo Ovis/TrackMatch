@@ -8,7 +8,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// Candidate生成・比較用RepositoryがLibrary境界を越えないことを実SQLiteで検証する。
+/// Candidate生成・比較用RepositoryがLibrary Membership境界を越えないことを実SQLiteで検証する。
 /// </summary>
 public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
 {
@@ -35,12 +35,20 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
         var libraryB = await libraries.CreateAsync("Library B", [rootB], TestContext.Current.CancellationToken);
         _libraryAId = libraryA.Id;
         _libraryBId = libraryB.Id;
+        var rootAId = Assert.Single(libraryA.Roots).Id;
+        var rootBId = Assert.Single(libraryB.Roots).Id;
 
         var tracks = new SqliteTrackRepository(_database);
         _a1 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootA, "a1.flac")), TestContext.Current.CancellationToken);
         _a2 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootA, "a2.flac")), TestContext.Current.CancellationToken);
         _b1 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootB, "b1.flac")), TestContext.Current.CancellationToken);
         _b2 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootB, "b2.flac")), TestContext.Current.CancellationToken);
+
+        // Global TrackのPathだけではLibrary Scopeは決まらない。候補系RepositoryはLibraryTracks Membershipを正本にする。
+        await tracks.EnsureMembershipAsync(_libraryAId, rootAId, _a1, "a1.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryAId, rootAId, _a2, "a2.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, rootBId, _b1, "b1.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, rootBId, _b2, "b2.flac", TestContext.Current.CancellationToken);
 
         await tracks.SaveFingerprintAsync(_a1, CreateFingerprint(Path.Combine(rootA, "a1.flac")), 2, TestContext.Current.CancellationToken);
         await tracks.SaveFingerprintAsync(_a2, CreateFingerprint(Path.Combine(rootA, "a2.flac")), 2, TestContext.Current.CancellationToken);
