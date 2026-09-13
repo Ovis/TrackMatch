@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using TrackMatch.App.Playback;
@@ -11,12 +13,14 @@ namespace TrackMatch.App;
 /// <summary>
 /// 確定済み重複グループの構成、残すファイル、確認根拠を参照する詳細画面。
 /// </summary>
-public partial class DuplicateGroupDetailsWindow : Window
+public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChanged
 {
     private readonly string _databasePath;
     private readonly long _groupId;
     private readonly SingleTrackPreviewPlayer _previewPlayer = new();
     private Button? _playingButton;
+    private string _groupTitle = "重複グループ";
+    private string _fileCountText = string.Empty;
 
     public DuplicateGroupDetailsWindow(string databasePath, long groupId)
     {
@@ -32,11 +36,32 @@ public partial class DuplicateGroupDetailsWindow : Window
         Closed += DuplicateGroupDetailsWindow_Closed;
     }
 
-    public string GroupTitle { get; private set; } = "重複グループ";
-    public string FileCountText { get; private set; } = string.Empty;
+    public string GroupTitle
+    {
+        get => _groupTitle;
+        private set
+        {
+            if (_groupTitle == value) return;
+            _groupTitle = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string FileCountText
+    {
+        get => _fileCountText;
+        private set
+        {
+            if (_fileCountText == value) return;
+            _fileCountText = value;
+            OnPropertyChanged();
+        }
+    }
+
     public ObservableCollection<DuplicateGroupTrackViewModel> KeepTracks { get; } = [];
     public ObservableCollection<DuplicateGroupTrackViewModel> OtherTracks { get; } = [];
     public ObservableCollection<string> ConfirmedRelations { get; } = [];
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     private async void DuplicateGroupDetailsWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -68,8 +93,7 @@ public partial class DuplicateGroupDetailsWindow : Window
 
             GroupTitle = $"重複グループ #{group.Id}";
             FileCountText = $"{group.TrackIds.Count}ファイル";
-            var keep = trackModels[group.KeepTrackId];
-            KeepTracks.Add(keep);
+            KeepTracks.Add(trackModels[group.KeepTrackId]);
             foreach (var item in group.TrackIds
                          .Where(trackId => trackId != group.KeepTrackId)
                          .Select(trackId => trackModels[trackId]))
@@ -90,9 +114,6 @@ public partial class DuplicateGroupDetailsWindow : Window
                 var right = trackModels[review.Pair.TrackIdB].Title;
                 ConfirmedRelations.Add($"{left} ↔ {right}    重複として確認済み");
             }
-
-            OnPropertyChanged(nameof(GroupTitle));
-            OnPropertyChanged(nameof(FileCountText));
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
@@ -156,7 +177,7 @@ public partial class DuplicateGroupDetailsWindow : Window
                 UseShellExecute = true,
             });
         }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException)
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or ArgumentException)
         {
             new ConfirmationDialog(
                 "フォルダ表示失敗",
@@ -188,6 +209,6 @@ public partial class DuplicateGroupDetailsWindow : Window
         _previewPlayer.Dispose();
     }
 
-    private void OnPropertyChanged(string propertyName)
-        => Dispatcher.Invoke(() => System.ComponentModel.PropertyChangedEventManager.AddHandler(this, (_, _) => { }, propertyName));
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
