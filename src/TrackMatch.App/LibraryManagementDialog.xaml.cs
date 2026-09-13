@@ -137,7 +137,7 @@ public partial class LibraryManagementDialog : Window
         var confirmation = new ConfirmationDialog(
             "ライブラリを削除",
             $"ライブラリ「{library.Name}」を削除しますか？",
-            $"対象フォルダ: {summary.RootCount:N0}\n音源: {summary.TrackCount:N0}\n\nフィンガープリント・候補・レビューなどのTrackMatch管理データも削除されます。元の音源ファイルは削除されません。",
+            $"対象フォルダ: {summary.RootCount:N0}\n登録音源: {summary.TrackCount:N0}\n\nこのライブラリの対象フォルダ・所属情報・ライブラリ固有のKeep状態を削除します。Global Track、フィンガープリント、比較結果、人間の重複判定、元の音源ファイルは削除されません。",
             "削除",
             "キャンセル",
             kind: AppDialogKind.Warning)
@@ -170,7 +170,7 @@ public partial class LibraryManagementDialog : Window
             var confirmation = new ConfirmationDialog(
                 "対象フォルダを削除",
                 $"対象フォルダ「{root.Path}」を削除しますか？",
-                $"対象音源: {count:N0}\nTrackMatch管理データは削除されますが、元の音源ファイルは削除されません。",
+                $"この対象フォルダ由来の所属情報 {count:N0} 件をライブラリから外します。Global Track、フィンガープリント、比較結果、人間の重複判定、元の音源ファイルは削除されません。",
                 "削除",
                 "キャンセル",
                 kind: AppDialogKind.Warning)
