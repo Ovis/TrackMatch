@@ -178,8 +178,10 @@ public partial class MainWindow
     private void RearrangeCandidateDetailLayout(Grid detailGrid, GroupBox comparisonGroup)
     {
         var sourceGrid = detailGrid.Children.OfType<Grid>().FirstOrDefault(item => Grid.GetRow(item) == 0);
+        var duplicateGroupSummary = detailGrid.Children.OfType<Border>().FirstOrDefault(item => Grid.GetRow(item) == 2);
         var playbackGroup = detailGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "A/B 同期再生", StringComparison.Ordinal));
-        var reviewGrid = detailGrid.Children.OfType<Grid>().FirstOrDefault(item => Grid.GetRow(item) == 6);
+        var reviewGrid = detailGrid.Children.OfType<Grid>()
+            .FirstOrDefault(item => item.Children.OfType<Button>().Any(button => string.Equals(button.Content?.ToString(), "重複ではない", StringComparison.Ordinal)));
         if (sourceGrid is null || playbackGroup is null || reviewGrid is null) return;
 
         ReplaceSourcePanels(sourceGrid);
@@ -193,7 +195,9 @@ public partial class MainWindow
         detailGrid.ColumnDefinitions.Clear();
         detailGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 120 });
-        detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
+        detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
+        detailGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
         detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 140 });
         detailGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
         detailGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -204,11 +208,19 @@ public partial class MainWindow
         Grid.SetColumn(sourceGrid, 0);
         detailGrid.Children.Add(sourceGrid);
 
+        // 重複グループ概要は今回追加された要素なので、品質UIの再構成時にも捨てずにそのまま保持する。
+        if (duplicateGroupSummary is not null)
+        {
+            Grid.SetRow(duplicateGroupSummary, 2);
+            Grid.SetColumn(duplicateGroupSummary, 0);
+            detailGrid.Children.Add(duplicateGroupSummary);
+        }
+
         var comparisonAndQuality = new Grid();
         comparisonAndQuality.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         comparisonAndQuality.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
         comparisonAndQuality.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
-        Grid.SetRow(comparisonAndQuality, 2);
+        Grid.SetRow(comparisonAndQuality, 4);
 
         // comparisonGroupは既存の中間Gridから外してから新しい比較領域へ付け替える。
         if (comparisonGroup.Parent is Panel previousParent)
@@ -224,9 +236,9 @@ public partial class MainWindow
         comparisonAndQuality.Children.Add(qualityPanel);
         detailGrid.Children.Add(comparisonAndQuality);
 
-        Grid.SetRow(playbackGroup, 4);
+        Grid.SetRow(playbackGroup, 6);
         detailGrid.Children.Add(playbackGroup);
-        Grid.SetRow(reviewGrid, 6);
+        Grid.SetRow(reviewGrid, 8);
         detailGrid.Children.Add(reviewGrid);
     }
 

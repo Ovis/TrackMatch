@@ -9,7 +9,7 @@ namespace TrackMatch.App.Quality;
 /// <summary>
 /// Candidateの片側音源について、識別情報と技術メタデータをコンパクトに表示する。
 /// </summary>
-internal sealed class CandidateSourceSummaryPanel : Grid
+internal sealed class CandidateSourceSummaryPanel : ScrollViewer
 {
     private readonly bool _isTrackA;
 
@@ -20,16 +20,24 @@ internal sealed class CandidateSourceSummaryPanel : Grid
     internal CandidateSourceSummaryPanel(bool isTrackA)
     {
         _isTrackA = isTrackA;
-        BuildLayout();
+
+        // 通常は情報をすべて見せ、重複グループ表示などで利用可能な高さが縮んだ場合だけ縦スクロールを出す。
+        // ファイルパスとフォルダー操作も含めてカード全体を同じスクロール領域にすることで、
+        // 限られた高さの中でも既存の情報密度を落とさず、必要な項目へ到達できるようにする。
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        CanContentScroll = false;
+        Content = BuildLayout();
     }
 
-    private void BuildLayout()
+    private Grid BuildLayout()
     {
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var identity = new StackPanel();
         identity.Children.Add(CreateBoundTextBlock(Property("Title"), fontSize: 18, fontWeight: FontWeights.SemiBold));
@@ -37,11 +45,11 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         identity.Children.Add(CreateBoundTextBlock(Property("Album"), margin: new Thickness(0, 2, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Genre"), margin: new Thickness(0, 2, 0, 0)));
         identity.Children.Add(CreateBoundTextBlock(Property("Year"), prefix: "年: ", margin: new Thickness(0, 2, 0, 0)));
-        Children.Add(identity);
+        content.Children.Add(identity);
 
         var separator = new Separator();
-        SetRow(separator, 1);
-        Children.Add(separator);
+        Grid.SetRow(separator, 1);
+        content.Children.Add(separator);
 
         var metadata = new StackPanel();
         metadata.Children.Add(CreateMetadataLine(
@@ -53,8 +61,8 @@ internal sealed class CandidateSourceSummaryPanel : Grid
             ("再生時間: ", Property("Duration"), null),
             ("ファイルサイズ: ", Property("FileSize"), null),
             ("ビットレート: ", Property("Bitrate"), null)));
-        SetRow(metadata, 2);
-        Children.Add(metadata);
+        Grid.SetRow(metadata, 2);
+        content.Children.Add(metadata);
 
         var bottom = new Grid();
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -95,11 +103,12 @@ internal sealed class CandidateSourceSummaryPanel : Grid
         };
         openFolderButton.SetBinding(TagProperty, new Binding(PathProperty()));
         openFolderButton.Click += OpenFolderButton_Click;
-        SetColumn(openFolderButton, 2);
+        Grid.SetColumn(openFolderButton, 2);
         bottom.Children.Add(openFolderButton);
 
-        SetRow(bottom, 4);
-        Children.Add(bottom);
+        Grid.SetRow(bottom, 4);
+        content.Children.Add(bottom);
+        return content;
     }
 
     private WrapPanel CreateMetadataLine(params (string? Prefix, string Path, string? Suffix)[] items)
