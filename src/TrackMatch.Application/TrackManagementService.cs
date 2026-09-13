@@ -34,30 +34,18 @@ public sealed class TrackManagementService
     }
 
     /// <summary>
-    /// 選択したGlobal TrackをForce Reanalysisする。
+    /// 選択したGlobal Trackを1 TransactionでForce Reanalysisする。
     /// </summary>
     public async Task<ForceReanalysisResult> ForceReanalysisTracksAsync(
         IReadOnlyCollection<long> trackIds,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(trackIds);
-        var ids = trackIds.Where(id => id > 0).Distinct().ToArray();
-        if (ids.Length == 0)
-        {
-            return new ForceReanalysisResult(ForceReanalysisScope.Track, 0, 0);
-        }
-
         var database = await OpenDatabaseAsync(cancellationToken);
-        var repository = new SqliteTrackManagementRepository(database);
-        var archived = 0;
-        foreach (var trackId in ids)
-        {
-            var result = await repository.ForceReanalysisTrackAsync(trackId, cancellationToken);
-            archived += result.ArchivedReviewCount;
-        }
-
+        var result = await new SqliteTrackManagementRepository(database)
+            .ForceReanalysisTracksAsync(trackIds, cancellationToken);
         await SynchronizeGroupsAsync(database, cancellationToken);
-        return new ForceReanalysisResult(ForceReanalysisScope.Track, ids.Length, archived);
+        return result;
     }
 
     /// <summary>
