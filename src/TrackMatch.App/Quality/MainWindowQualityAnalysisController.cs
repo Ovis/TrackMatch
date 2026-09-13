@@ -40,7 +40,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var libraryId = _viewModel.SelectedLibrary?.Id;
         if (libraryId is null)
         {
-            _setStatusText("音質解析: Library未選択");
+            _setStatusText("音質解析: ライブラリ未選択");
             return;
         }
 
@@ -93,7 +93,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             var candidateService = CreateCandidateService(trackRepository, candidateRepository);
             await candidateService.AnalyzeAsync(CreateRequest(selected.Row), force: true, cancellation.Token);
             await RefreshPresentationAsync(selected, trackRepository, candidateRepository, cancellation.Token);
-            _setStatusText("音質解析: 選択Candidateの再解析完了");
+            _setStatusText("音質解析: 選択中の候補を再解析しました");
         }
         catch (OperationCanceledException)
         {
@@ -143,7 +143,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken);
         if (rows.Count == 0)
         {
-            _setStatusText("音質解析: 対象Candidateなし");
+            _setStatusText("音質解析: 対象候補なし");
             return;
         }
 
