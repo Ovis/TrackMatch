@@ -172,8 +172,8 @@ public sealed class SqliteDatabase
                 ReviewedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
                 CHECK (TrackIdA < TrackIdB),
-                FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
-                FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE
+                FOREIGN KEY (TrackIdA, TrackIdB)
+                    REFERENCES CandidateComparisons (TrackIdA, TrackIdB) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateReviews_Decision ON CandidateReviews (Decision);
@@ -268,18 +268,6 @@ public sealed class SqliteDatabase
             """;
 
         await connection.ExecuteAsync(new CommandDefinition(schema, cancellationToken: cancellationToken));
-
-        // CREATE TABLE IF NOT EXISTSだけでは既存DBに新しい列が追加されない。
-        // 既存ライブラリを破棄せず利用できるよう、Year導入前のDBだけをインプレースで拡張する。
-        var trackColumns = await connection.QueryAsync<string>(new CommandDefinition(
-            "SELECT name FROM pragma_table_info('Tracks');",
-            cancellationToken: cancellationToken));
-        if (!trackColumns.Contains("Year", StringComparer.OrdinalIgnoreCase))
-        {
-            await connection.ExecuteAsync(new CommandDefinition(
-                "ALTER TABLE Tracks ADD COLUMN Year INTEGER NULL;",
-                cancellationToken: cancellationToken));
-        }
     }
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
