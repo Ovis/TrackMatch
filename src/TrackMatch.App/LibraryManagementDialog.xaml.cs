@@ -212,6 +212,21 @@ public partial class LibraryManagementDialog : Window
         StatusText.Text = "ごみ箱のパスは閉じるときに保存されます。";
     }
 
+    private async void ManageTracks_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await ConfirmUnsavedNameAsync()) return;
+
+        // Track管理はGlobal DB状態を変更するため、現在のLibrary一覧をSnapshotとして渡し、
+        // Dialogを閉じた後にLibrary表示も読み直してMembership削除等を反映する。
+        var selectedId = _selectedLibrary?.Id;
+        new TrackManagementDialog(
+            new TrackManagementService(_service.DatabasePath),
+            _libraries,
+            selectedId)
+        { Owner = this }.ShowDialog();
+        await ReloadAsync(selectedId);
+    }
+
     private async void Close_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmUnsavedNameAsync()) return;
