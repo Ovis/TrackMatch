@@ -43,4 +43,6 @@ public sealed record CandidateReviewReportRow(
     int? ChannelsA,
     int? ChannelsB,
     CandidateReviewDecision? ReviewDecision = null,
-    long? KeepTrackId = null);
+    long? KeepTrackId = null,
+    uint? YearA = null,
+    uint? YearB = null);
