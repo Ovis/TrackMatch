@@ -102,9 +102,22 @@ public partial class LibraryManagementDialog : Window
     private async Task<bool> ConfirmUnsavedNameAsync()
     {
         if (!_nameDirty) return true;
-        var result = MessageBox.Show(this, "Library名が変更されています。保存しますか？\n\nはい: 保存 / いいえ: 破棄 / キャンセル: 操作を中止", "未保存のLibrary名", MessageBoxButton.YesNoCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
-        if (result == MessageBoxResult.Cancel) return false;
-        if (result == MessageBoxResult.Yes) return await SaveNameAsync();
+
+        var dialog = new ConfirmationDialog(
+            "未保存のLibrary名",
+            "Library名が変更されています",
+            "変更を保存するか、破棄して続行するかを選択してください。",
+            "保存",
+            "破棄",
+            "キャンセル",
+            AppDialogKind.Question)
+        { Owner = this };
+        dialog.ShowDialog();
+
+        if (dialog.SelectedResult == AppDialogResult.Tertiary || dialog.SelectedResult == AppDialogResult.None)
+            return false;
+        if (dialog.SelectedResult == AppDialogResult.Primary)
+            return await SaveNameAsync();
         return true;
     }
 
@@ -120,8 +133,18 @@ public partial class LibraryManagementDialog : Window
         var library = _selectedLibrary;
         if (library is null) return;
         var summary = await _service.GetDeleteSummaryAsync(library.Id);
-        var confirmation = MessageBox.Show(this, $"Library '{library.Name}' を削除します。\n\nRoot: {summary.RootCount:N0}\nTrack: {summary.TrackCount:N0}\n\nFingerprint・Candidate・Review等のTrackMatch管理データも削除されます。\n元Audio Fileは削除されません。", "Libraryを削除", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (confirmation != MessageBoxResult.Yes) return;
+
+        var confirmation = new ConfirmationDialog(
+            "Libraryを削除",
+            $"Library '{library.Name}' を削除しますか？",
+            $"Root: {summary.RootCount:N0}\nTrack: {summary.TrackCount:N0}\n\nFingerprint・Candidate・Review等のTrackMatch管理データも削除されます。元Audio Fileは削除されません。",
+            "削除",
+            "キャンセル",
+            kind: AppDialogKind.Warning)
+        { Owner = this };
+        confirmation.ShowDialog();
+        if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+
         await _service.DeleteLibraryAsync(library.Id);
         await ReloadAsync(null);
     }
@@ -144,8 +167,17 @@ public partial class LibraryManagementDialog : Window
         try
         {
             var count = await _service.GetRootTrackCountAsync(root.Id);
-            var confirmation = MessageBox.Show(this, $"Root '{root.Path}' を削除します。\n\n対象Track: {count:N0}\nTrackMatch管理データは削除されますが、元Audio Fileは削除されません。", "Rootを削除", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-            if (confirmation != MessageBoxResult.Yes) return;
+            var confirmation = new ConfirmationDialog(
+                "Rootを削除",
+                $"Root '{root.Path}' を削除しますか？",
+                $"対象Track: {count:N0}\nTrackMatch管理データは削除されますが、元Audio Fileは削除されません。",
+                "削除",
+                "キャンセル",
+                kind: AppDialogKind.Warning)
+            { Owner = this };
+            confirmation.ShowDialog();
+            if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+
             await _service.RemoveRootAsync(library.Id, root.Id);
             await ReloadAsync(library.Id);
         }
