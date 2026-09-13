@@ -47,6 +47,10 @@
                 <TextBlock x:Name="StatusText" Grid.Row="14" TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"/>
             </Grid>
         </Border>
-        <Button Grid.Row="2" Grid.Column="2" Width="100" HorizontalAlignment="Right" Content="閉じる" IsDefault="True" Click="Close_Click"/>
+        <Grid Grid.Row="2" Grid.Column="2">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button Width="120" Content="音源管理..." Click="ManageTracks_Click"/>
+            <Button Grid.Column="2" Width="100" Content="閉じる" IsDefault="True" Click="Close_Click"/>
+        </Grid>
     </Grid>
 </Window>
