@@ -82,13 +82,21 @@ public sealed class DuplicateGroupService(
     /// Missing Trackを含むVerdictは履歴価値を残したままCurrent Group形成から除外する。
     /// Trash直前にも呼び出すことで、物理状態が変わったTrackを削除判断に使わない。
     /// </remarks>
-    public async Task SynchronizeAsync(long libraryId, CancellationToken cancellationToken = default)
+    public Task SynchronizeAsync(long libraryId, CancellationToken cancellationToken = default)
     {
         if (libraryId <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(libraryId));
         }
 
+        return SynchronizeGlobalAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Library Contextを必要としない管理操作後に、Current Global VerdictからGlobal Groupを再同期する。
+    /// </summary>
+    public async Task SynchronizeGlobalAsync(CancellationToken cancellationToken = default)
+    {
         var reviews = await GetActiveGlobalReviewsAsync(cancellationToken);
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
