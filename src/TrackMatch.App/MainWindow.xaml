@@ -43,9 +43,9 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <TextBlock Margin="12,12,12,6" Style="{StaticResource SectionTitleStyle}" Text="候補一覧"/>
                     <TabControl x:Name="CandidateTabs" Grid.Row="1" Margin="8,0,8,0" Height="40" SelectionChanged="CandidateTabs_SelectionChanged">
-                        <TabItem><TabItem.Header><TextBlock><Run Text="未レビュー ("/><Run Text="{Binding UnreviewedCount}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
-                        <TabItem><TabItem.Header><TextBlock><Run Text="レビュー済み ("/><Run Text="{Binding ReviewedCount}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
-                        <TabItem><TabItem.Header><TextBlock><Run Text="すべて ("/><Run Text="{Binding TotalCandidateCount}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
+                        <TabItem><TabItem.Header><TextBlock><Run Text="未レビュー ("/><Run Text="{Binding UnreviewedCount, Mode=OneWay}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
+                        <TabItem><TabItem.Header><TextBlock><Run Text="レビュー済み ("/><Run Text="{Binding ReviewedCount, Mode=OneWay}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
+                        <TabItem><TabItem.Header><TextBlock><Run Text="すべて ("/><Run Text="{Binding TotalCandidateCount, Mode=OneWay}"/><Run Text=")"/></TextBlock></TabItem.Header></TabItem>
                     </TabControl>
                     <Grid Grid.Row="2" Margin="12,8">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="6"/><ColumnDefinition Width="48"/><ColumnDefinition Width="4"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -134,7 +134,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <Slider x:Name="PlaybackSeekSlider" Minimum="0" Maximum="{Binding DurationSeconds}" Value="{Binding PositionSeconds, Mode=OneWay}"
                                     PreviewMouseLeftButtonUp="PlaybackSeekSlider_PreviewMouseLeftButtonUp" KeyUp="PlaybackSeekSlider_KeyUp"/>
-                            <TextBlock Grid.Column="2" VerticalAlignment="Center"><Run Text="{Binding PositionText}"/><Run Text=" / "/><Run Text="{Binding DurationText}"/></TextBlock>
+                            <TextBlock Grid.Column="2" VerticalAlignment="Center"><Run Text="{Binding PositionText, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding DurationText, Mode=OneWay}"/></TextBlock>
                         </Grid>
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="8"/><ColumnDefinition Width="54"/><ColumnDefinition Width="24"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -150,7 +150,7 @@
                             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="同期オフセット" ToolTip="Aを基準にしたBの相対開始位置です。"/>
                             <Button Grid.Column="2" Content="−10 ms" Click="RelativeOffsetMinus_Click"/>
                             <Border Grid.Column="4" Padding="8,5" Background="#F3F6F9" CornerRadius="4">
-                                <TextBlock HorizontalAlignment="Center" FontWeight="SemiBold"><TextBlock.Text><MultiBinding Converter="{StaticResource RelativeOffsetConverter}"><Binding Path="OffsetASeconds"/><Binding Path="OffsetBSeconds"/></MultiBinding></TextBlock.Text></TextBlock>
+                                <TextBlock HorizontalAlignment="Center" FontWeight="SemiBold"><TextBlock.Text><MultiBinding Converter="{StaticResource RelativeOffsetConverter}"><Binding Path="OffsetASeconds" Mode="OneWay"/><Binding Path="OffsetBSeconds" Mode="OneWay"/></MultiBinding></TextBlock.Text></TextBlock>
                             </Border>
                             <Button Grid.Column="6" Content="+10 ms" Click="RelativeOffsetPlus_Click"/>
                             <Button Grid.Column="8" Content="解析値に戻す" Click="ResetOffset_Click"/>
@@ -173,25 +173,16 @@
                     <Button Style="{StaticResource ReviewButtonStyle}" Content="重複ではない" IsEnabled="{Binding CanReview}" Click="NotDuplicate_Click"/>
                     <Button Grid.Column="2" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Aを残す" IsEnabled="{Binding CanReview}" Click="KeepA_Click"/>
                     <Button Grid.Column="4" Style="{StaticResource ReviewButtonStyle}" Content="重複 / Bを残す" IsEnabled="{Binding CanReview}" Click="KeepB_Click"/>
-                    <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}" Content="⋯" ToolTip="その他の操作">
-                        <Button.ContextMenu><ContextMenu><MenuItem Header="レビューを未確定に戻す" IsEnabled="{Binding PlacementTarget.DataContext.CanClearReview, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Click="ClearReview_Click"/></ContextMenu></Button.ContextMenu>
-                    </Button>
+                    <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}" Content="…" ToolTip="その他の操作" Click="CandidateMore_Click"/>
                 </Grid>
             </Grid>
         </Grid>
 
-        <Border Grid.Row="8" Margin="-16,0,-16,-16" Padding="16,9" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
-            <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="18"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="18"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="{Binding StatusText}"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal"><TextBlock Text="分析: "/><TextBlock Text="{Binding AnalysisStatusText}"/></StackPanel>
-                <Button Grid.Column="2" Width="0" Height="0" Visibility="Collapsed"/>
-                <StackPanel Grid.Column="3" Orientation="Horizontal"><TextBlock Text="再生: "/><TextBlock Text="{Binding Playback.StatusText}"/></StackPanel>
-                <StackPanel Grid.Column="5" Orientation="Horizontal"><TextBlock Text="Trash: "/><TextBlock Text="{Binding TrashStatusText}"/></StackPanel>
-                <Button Grid.Column="1" Margin="8,0,0,0" HorizontalAlignment="Right" Content="エラー詳細" Click="ShowAnalysisErrors_Click">
-                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding AnalysisErrorCount}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding AnalysisErrorCount}" Value="1"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Button.Style>
-                </Button>
-            </Grid>
-        </Border>
+        <Grid Grid.Row="8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock VerticalAlignment="Center" Text="{Binding StatusText}"/>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{Binding AnalysisStatusText}"/>
+            <TextBlock Grid.Column="4" VerticalAlignment="Center"><Run Text="再生: "/><Run Text="{Binding Playback.StatusText, Mode=OneWay}"/><Run Text="  |  "/><Run Text="{Binding TrashStatusText, Mode=OneWay}"/></TextBlock>
+        </Grid>
     </Grid>
 </Window>
