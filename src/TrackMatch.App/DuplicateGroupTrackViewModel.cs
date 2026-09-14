@@ -20,6 +20,9 @@ public sealed record DuplicateGroupTrackViewModel(
     /// <summary>現在Libraryとの関係を表示する短いラベル。</summary>
     public string ScopeLabel => IsInCurrentLibrary ? "現在のLibrary" : "Library外";
 
+    /// <summary>MissingでないGlobal Group構成Trackは、Library所属に関係なくKeepとして選択できる。</summary>
+    public bool CanSelectAsKeep => !IsMissing;
+
     /// <summary>保存済みGlobal Trackから詳細画面用モデルを生成する。</summary>
     public static DuplicateGroupTrackViewModel Create(StoredTrack track, bool isKeep, bool isInCurrentLibrary)
     {
