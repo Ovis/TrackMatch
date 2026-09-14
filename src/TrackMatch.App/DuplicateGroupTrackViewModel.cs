@@ -31,9 +31,9 @@ public sealed record DuplicateGroupTrackViewModel(
     public bool CanSelectAsKeep => !IsMissing && !IsKeep;
 
     /// <summary>
-    /// 現在のライブラリ外にあるファイルを、利用者が明示的にごみ箱へ移動できるかどうか。
+    /// 現在のライブラリ外にあり、かつ現在のライブラリで残す指定ではないファイルを、利用者が明示的にごみ箱へ移動できるかどうか。
     /// </summary>
-    public bool CanTrashGlobally => !IsInCurrentLibrary && !IsMissing;
+    public bool CanTrashGlobally => !IsInCurrentLibrary && !IsMissing && !IsKeep;
 
     /// <summary>保存済みTrackから詳細画面用モデルを生成する。</summary>
     public static DuplicateGroupTrackViewModel Create(StoredTrack track, bool isKeep, bool isInCurrentLibrary)
