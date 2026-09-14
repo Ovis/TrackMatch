@@ -44,7 +44,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    r.Decision AS ReviewDecision, s.KeepTrackId,
                    r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
-                   CAST(COALESCE(rl.Name, r.SourceLibraryNameSnapshot) AS TEXT) AS ReviewSourceLibraryName
+                   rl.Name AS CurrentReviewSourceLibraryName,
+                   r.SourceLibraryNameSnapshot AS ReviewSourceLibraryNameSnapshot
             FROM CandidateComparisons x
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
@@ -104,6 +105,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             reviewDecision = parsedDecision;
         }
 
+        var reviewSourceLibraryName = row.CurrentReviewSourceLibraryName ?? row.ReviewSourceLibraryNameSnapshot;
         return new CandidateReviewReportRow(
             row.TrackIdA, row.TrackIdB, kind, row.Reason,
             row.Similarity, row.CoverageA, row.CoverageB, row.DurationRatio,
@@ -117,7 +119,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             ToInt(row.BitDepthA), ToInt(row.BitDepthB), ToInt(row.ChannelsA), ToInt(row.ChannelsB),
             reviewDecision, row.KeepTrackId,
             ToUInt(row.YearA), ToUInt(row.YearB),
-            row.ReviewSourceLibraryId, row.ReviewSourceLibraryName,
+            row.ReviewSourceLibraryId, reviewSourceLibraryName,
             IsReReviewRecommended(
                 reviewDecision,
                 kind,
@@ -171,5 +173,5 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
         string? ReviewDecision, long? KeepTrackId, long? ReviewedAtUtcTicks,
-        long? ReviewSourceLibraryId, string? ReviewSourceLibraryName);
+        long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }
