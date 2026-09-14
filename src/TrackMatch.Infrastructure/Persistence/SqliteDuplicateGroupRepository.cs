@@ -620,14 +620,13 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             if (addedTrackIds.Length != 0)
             {
                 // Group IDや現在のGraph形状はMissing中のSplit/Merge/Verdict変更で変化し得る。
-                // そのため復帰判定は、今回追加された各Trackについて「そのTrackを含む直近Topology履歴」を見る。
-                // TrackRestored後に再度そのTrackがGroupから外れれば、その時のGroupSplit/GroupRebuildが
-                // TrackMissingより新しい履歴になるため、古いMissingを通常の再追加へ誤利用しない。
+                // 復帰判定には追加Trackを含む直近Topology履歴を使うが、Missing中にそのTrackのHuman Verdictを
+                // 解除・変更した場合は、古い物理Missingより新しいユーザー判断を優先して通常のGroup変更として扱う。
                 foreach (var addedTrackId in addedTrackIds)
                 {
                     var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
                         """
-                        SELECT ChangeKind, GraphKeySnapshot
+                        SELECT ChangeKind, GraphKeySnapshot, ChangedAtUtcTicks
                         FROM LibraryDuplicateGroupKeepHistory
                         WHERE LibraryId = @LibraryId
                           AND ChangeKind IN (
@@ -646,13 +645,23 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                         },
                         transaction,
                         cancellationToken: cancellationToken));
-                    if (latestTransition is not null
-                        && (string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal)
-                            || string.Equals(latestTransition.ChangeKind, "KeepMissing", StringComparison.Ordinal)))
+                    if (latestTransition is null
+                        || (!string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal)
+                            && !string.Equals(latestTransition.ChangeKind, "KeepMissing", StringComparison.Ordinal)))
                     {
-                        // MissingだったTrack自身が旧Keepだった場合、Missing中に代替Keepを選び直すと
-                        // Current StateはSelectedへ変わる。旧Keepの復帰もQ64の物理復帰なので、
-                        // KeepMissingをTrackMissingと同じ復帰Guardとして扱って再確認を要求する。
+                        continue;
+                    }
+
+                    var humanVerdictChangedAfterMissing = await HasHumanVerdictMutationAfterAsync(
+                        connection,
+                        transaction,
+                        addedTrackId,
+                        latestTransition.ChangedAtUtcTicks,
+                        cancellationToken);
+                    if (!humanVerdictChangedAfterMissing)
+                    {
+                        // MissingだったTrack自身が旧Keepだった場合、Missing中に代替Keepを選び直しても
+                        // Global Verdictが変わっていなければ物理復帰として扱う。Q64に従い旧Dispositionは自動適用しない。
                         return "TrackRestored";
                     }
                 }
@@ -675,6 +684,36 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
         }
 
         return "GroupRebuild";
+    }
+
+    private static async Task<bool> HasHumanVerdictMutationAfterAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        long trackId,
+        long transitionAtUtcTicks,
+        CancellationToken cancellationToken)
+    {
+        // Missing期間中に対象Trackを含むVerdictを解除・変更した場合、後日の再追加はユーザーの新しい判断である。
+        // Keep Historyだけから物理Restoreと推定すると古いTrackMissingを再利用してしまうため、Verdict時系列も境界に含める。
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT ReviewedAtUtcTicks AS ChangedAtUtcTicks
+                FROM CandidateReviews
+                WHERE (TrackIdA = @TrackId OR TrackIdB = @TrackId)
+                  AND ReviewedAtUtcTicks > @TransitionAtUtcTicks
+                UNION ALL
+                SELECT ChangedAtUtcTicks
+                FROM CandidateReviewHistory
+                WHERE (TrackIdA = @TrackId OR TrackIdB = @TrackId)
+                  AND ChangedAtUtcTicks > @TransitionAtUtcTicks
+            );
+            """,
+            new { TrackId = trackId, TransitionAtUtcTicks = transitionAtUtcTicks },
+            transaction,
+            cancellationToken: cancellationToken));
+        return count != 0;
     }
 
     private static async Task InsertKeepHistoryAsync(
@@ -752,7 +791,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
 
     private sealed record GroupTrackRow(long DuplicateGroupId, long TrackId);
     private sealed record TrackStateRow(long Id, long IsMissing);
-    private sealed record KeepHistoryTransitionRow(string ChangeKind, string GraphKeySnapshot);
+    private sealed record KeepHistoryTransitionRow(string ChangeKind, string GraphKeySnapshot, long ChangedAtUtcTicks);
     private sealed record KeepStateRow(
         long LibraryId,
         long DuplicateGroupId,
