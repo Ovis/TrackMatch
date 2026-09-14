@@ -81,6 +81,8 @@ public sealed class SqliteCandidateComparisonRepository(
             SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
                    c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
             FROM CandidateComparisons c
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
             WHERE c.ComparisonVersion = @ComparisonVersion
               AND (
                     @LibraryId IS NULL
@@ -109,6 +111,8 @@ public sealed class SqliteCandidateComparisonRepository(
         const string sql = """
             SELECT c.TrackIdA, c.TrackIdB, c.ComparedAtUtcTicks
             FROM CandidateComparisons c
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
             WHERE c.ComparisonVersion = @ComparisonVersion
               AND (
                     @LibraryId IS NULL
