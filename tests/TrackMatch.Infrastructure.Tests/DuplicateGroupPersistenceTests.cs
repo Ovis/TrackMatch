@@ -170,7 +170,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreAndRestoresKeep()
+    public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreButRequiresKeepReviewAfterRestore()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
@@ -194,8 +194,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 
         var restored = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds);
-        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
-        Assert.Equal(a, restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
+        Assert.Null(restored.KeepTrackId);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var changeKinds = (await connection.QueryAsync<string>(
@@ -203,6 +203,41 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             .ToArray();
         Assert.Contains("KeepMissing", changeKinds);
         Assert.Contains("KeepRestored", changeKinds);
+    }
+
+    [Fact]
+    public async Task ReplaceGlobalAsync_DoesNotRestoreKeepForLibraryUnrelatedToSplitComponent()
+    {
+        var (a, b, c) = await CreateTracksAsync();
+        var service = CreateService();
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        var oldGroup = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await repository.SetKeepAsync(_libraryId, oldGroup.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            // Split後のB-C成分からLibrary Membershipをすべて外し、LibraryがAだけに関与する状態を再現する。
+            await connection.ExecuteAsync(
+                "DELETE FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
+                new { LibraryId = _libraryId, TrackIds = new[] { b, c } });
+        }
+
+        await repository.ReplaceGlobalAsync(
+            [new DuplicateGroupRebuildItem(oldGroup.Id, [b, c])],
+            TestContext.Current.CancellationToken);
+
+        await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var currentKeepCount = await verifyConnection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepStates WHERE LibraryId = @LibraryId;",
+            new { LibraryId = _libraryId });
+        var historyCount = await verifyConnection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE LibraryId = @LibraryId;",
+            new { LibraryId = _libraryId });
+
+        Assert.Equal(0, currentKeepCount);
+        Assert.True(historyCount > 0);
     }
 
     [Fact]
