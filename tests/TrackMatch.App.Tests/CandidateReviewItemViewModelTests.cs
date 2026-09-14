@@ -15,7 +15,7 @@ public sealed class CandidateReviewItemViewModelTests
 
         var viewModel = new CandidateReviewItemViewModel(row);
 
-        Assert.Equal("重複として確認済み", viewModel.ReviewResult);
+        Assert.Equal("重複として確認済", viewModel.ReviewResult);
     }
 
     private static CandidateReviewReportRow CreateRow(CandidateReviewDecision decision)
