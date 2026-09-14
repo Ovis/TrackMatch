@@ -12,15 +12,41 @@ public sealed class DuplicateGroupService(
     IDuplicateGroupRepository groupRepository)
 {
     /// <summary>
-    /// Global Verdictを保存し、Global Groupを再構成したうえで現在LibraryのKeepを反映する。
+    /// Keep選択を伴わないGlobal Verdictを保存する。
     /// </summary>
-    public async Task SaveReviewAsync(
+    /// <remarks>
+    /// ConfirmedDuplicateではLibrary固有Keepが必要なため、Keepを受け取るOverloadを使用する。
+    /// </remarks>
+    public Task SaveReviewAsync(
         long libraryId,
         CandidateReview review,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(review);
+        if (review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
+        {
+            throw new ArgumentException("ConfirmedDuplicateではLibrary固有Keep Trackを指定してください。", nameof(review));
+        }
+
+        return SaveReviewAsync(libraryId, review, keepTrackId: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Global Verdictを保存し、Global Groupを再構成したうえで現在LibraryのKeepを反映する。
+    /// </summary>
+    /// <param name="libraryId">操作元Library ID</param>
+    /// <param name="review">Global Track Pairへ保存するHuman Verdict</param>
+    /// <param name="keepTrackId">ConfirmedDuplicate時に現在Libraryで残すTrack ID</param>
+    /// <param name="cancellationToken">Verdict Commit前までのキャンセル要求</param>
+    public async Task SaveReviewAsync(
+        long libraryId,
+        CandidateReview review,
+        long? keepTrackId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(review);
         review.Validate();
+        ValidateKeepSelection(review, keepTrackId);
         await EnsurePairBelongsToLibraryAsync(libraryId, review.Pair, cancellationToken);
 
         var currentReviews = await GetActiveGlobalReviewsAsync(cancellationToken);
@@ -41,7 +67,7 @@ public sealed class DuplicateGroupService(
                 await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
             }
 
-            if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || review.KeepTrackId is null)
+            if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || keepTrackId is null)
             {
                 return;
             }
@@ -49,14 +75,14 @@ public sealed class DuplicateGroupService(
             var group = await groupRepository.GetByTrackIdAsync(review.Pair.TrackIdA, libraryId, CancellationToken.None)
                 ?? throw new InvalidOperationException("保存した重複判定からGlobal Duplicate Groupを解決できませんでした。");
 
-            // 既存Group同士の結合でKeepが競合した場合は、今回のペア上のKeepで勝手に競合を解消しない。
+            // 既存Group同士の結合でKeepが競合した場合は、今回のPair操作だけで勝手に競合を解消しない。
             // 新規Groupまたは競合していないGroupでは、ユーザーが押したA/Bを現在Libraryの明示Keepとして反映する。
             if (group.KeepStatus != DuplicateGroupKeepStatus.Conflict)
             {
                 await groupRepository.SetKeepAsync(
                     libraryId,
                     group.Id,
-                    review.KeepTrackId.Value,
+                    keepTrackId.Value,
                     "UserReview",
                     CancellationToken.None);
             }
@@ -204,6 +230,29 @@ public sealed class DuplicateGroupService(
         var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
         cache[trackId] = track;
         return track;
+    }
+
+    private static void ValidateKeepSelection(CandidateReview review, long? keepTrackId)
+    {
+        if (review.Decision == CandidateReviewDecision.NotDuplicate)
+        {
+            if (keepTrackId is not null)
+            {
+                throw new ArgumentException("NotDuplicateではLibrary Keep Trackを指定できません。", nameof(keepTrackId));
+            }
+
+            return;
+        }
+
+        if (keepTrackId is null)
+        {
+            throw new ArgumentException("ConfirmedDuplicateではLibrary Keep Trackが必要です。", nameof(keepTrackId));
+        }
+
+        if (keepTrackId != review.Pair.TrackIdA && keepTrackId != review.Pair.TrackIdB)
+        {
+            throw new ArgumentException("Candidate Review操作で選ぶKeep TrackはPairを構成するTrackのいずれかである必要があります。", nameof(keepTrackId));
+        }
     }
 
     private static bool HasTopologyChanged(
