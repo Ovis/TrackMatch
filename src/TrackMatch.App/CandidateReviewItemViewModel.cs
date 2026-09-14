@@ -13,6 +13,7 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
     public long TrackIdA => Row.TrackIdA;
     public long TrackIdB => Row.TrackIdB;
     public bool IsReviewed => Row.ReviewDecision is not null;
+    public bool IsReReviewRecommended => Row.ReReviewRecommended;
 
     public string Kind => Row.Kind switch
     {
@@ -25,12 +26,18 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
 
     public string ReviewResult => Row.ReviewDecision switch
     {
-        CandidateReviewDecision.NotDuplicate => "重複ではない",
-        CandidateReviewDecision.ConfirmedDuplicate when Row.KeepTrackId == TrackIdA => "重複 / Aを残す",
-        CandidateReviewDecision.ConfirmedDuplicate when Row.KeepTrackId == TrackIdB => "重複 / Bを残す",
-        CandidateReviewDecision.ConfirmedDuplicate => "重複",
+        CandidateReviewDecision.NotDuplicate => AppendReReview("重複ではない"),
+        CandidateReviewDecision.ConfirmedDuplicate when Row.KeepTrackId == TrackIdA => AppendReReview("重複 / Aを残す"),
+        CandidateReviewDecision.ConfirmedDuplicate when Row.KeepTrackId == TrackIdB => AppendReReview("重複 / Bを残す"),
+        CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複"),
         _ => "未レビュー",
     };
+
+    public string ReviewOriginText => Row.ReviewDecision is null
+        ? string.Empty
+        : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
+            ? "判定元: 不明"
+            : $"判定元: {Row.ReviewSourceLibraryName}";
 
     public string Reason => Row.Reason ?? "自動判定は未実施";
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);
@@ -63,6 +70,9 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
     public string BitDepthB => FormatUnit(Row.BitDepthB, "bit");
     public string ChannelsA => Row.ChannelsA?.ToString() ?? "-";
     public string ChannelsB => Row.ChannelsB?.ToString() ?? "-";
+
+    private string AppendReReview(string value)
+        => IsReReviewRecommended ? $"{value} / 再確認推奨" : value;
 
     private static string FormatList(IReadOnlyList<string> values) => values.Count == 0 ? "-" : string.Join("; ", values);
     private static string FormatYear(uint? value) => value?.ToString() ?? "-";
