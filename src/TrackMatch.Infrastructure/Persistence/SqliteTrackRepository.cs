@@ -247,6 +247,39 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task MarkMissingBatchAsync(
+        IReadOnlyCollection<long> trackIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trackIds);
+        var ids = trackIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        if (ids.Any(trackId => trackId <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackIds));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var updatedAtUtcTicks = DateTime.UtcNow.Ticks;
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET IsMissing = 1, UpdatedAtUtcTicks = @UpdatedAtUtcTicks WHERE Id IN @TrackIds;",
+            new { TrackIds = ids, UpdatedAtUtcTicks = updatedAtUtcTicks },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (affected != ids.Length)
+        {
+            throw new InvalidOperationException("Missing確定対象の一部Trackが見つからないため、Root ScanのMissing更新を中止しました。");
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task SaveFingerprintAsync(
         long trackId,
         AudioFingerprint fingerprint,
@@ -344,7 +377,6 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             transaction,
             cancellationToken: cancellationToken));
 
-        // Current Verdictを無効化するとSelectionもCASCADEで消える。
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateReviews WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
             new { TrackId = trackId },
