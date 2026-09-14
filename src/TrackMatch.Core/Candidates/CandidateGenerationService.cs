@@ -47,9 +47,6 @@ public sealed class CandidateGenerationService(
                 || cachedAt != item.ExtractedAtUtc)
             .Select(item => item.TrackId)
             .ToHashSet();
-        var inactiveTrackIds = cachedStates.Keys
-            .Where(trackId => !activeByTrackId.ContainsKey(trackId))
-            .ToHashSet();
 
         // キャッシュがない初回や候補生成パラメータ変更時は全Trackを索引対象にし、候補集合も全再構築する。
         var fullRebuild = cachedStates.Count == 0;
@@ -92,8 +89,10 @@ public sealed class CandidateGenerationService(
                 value.CompletedSketches,
                 value.TotalSketches)));
 
+        // Missing TrackはActive Fingerprint集合から外れるが、それだけを理由にMachine Comparison Cacheまで失効させない。
+        // Content ChangeとForce Reanalysisは各専用経路でCandidatePairsを明示的に無効化するため、
+        // Candidate Generationでは「現在再評価が必要なTrack」だけを差分置換対象にする。
         var affectedTrackIds = changedTrackIds
-            .Concat(inactiveTrackIds)
             .Concat(pendingTrackIds)
             .ToHashSet();
         IReadOnlyList<CandidatePair> generatedPairs;
