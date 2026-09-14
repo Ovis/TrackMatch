@@ -354,16 +354,28 @@ public partial class MainWindow : Window
     {
         var selected = _viewModel.SelectedCandidate;
         var library = _viewModel.SelectedLibrary;
-        if (selected?.Row.ReviewSourceLibraryId is not { } sourceLibraryId
-            || library is null
-            || sourceLibraryId == library.Id)
+        if (selected is null || library is null || selected.Row.ReviewDecision is null)
         {
             return true;
         }
 
-        var sourceName = string.IsNullOrWhiteSpace(selected.Row.ReviewSourceLibraryName)
-            ? $"Library #{sourceLibraryId}"
-            : selected.Row.ReviewSourceLibraryName;
+        var sourceLibraryId = selected.Row.ReviewSourceLibraryId;
+        var sourceNameSnapshot = selected.Row.ReviewSourceLibraryName;
+        if (sourceLibraryId == library.Id)
+        {
+            return true;
+        }
+
+        // Source Library削除後はFKがNULLになるが、Snapshotが残っていれば別Libraryで確定したVerdictである。
+        // NULLだけを「出所なし」と扱うと、削除済みLibrary由来のGlobal Verdictを警告なしで変更できてしまう。
+        if (sourceLibraryId is null && string.IsNullOrWhiteSpace(sourceNameSnapshot))
+        {
+            return true;
+        }
+
+        var sourceName = !string.IsNullOrWhiteSpace(sourceNameSnapshot)
+            ? sourceNameSnapshot
+            : $"Library #{sourceLibraryId}";
         var confirmation = new ConfirmationDialog(
             "他のLibraryで確定した判定を変更します",
             $"この判定は「{sourceName}」で確定されています。",
