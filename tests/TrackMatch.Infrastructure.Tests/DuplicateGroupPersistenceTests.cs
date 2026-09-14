@@ -9,7 +9,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// Global Verdict更新とSQLite上のGlobal Duplicate Group、Library固有Keepが一貫することを検証する。
+/// Global Verdict更新とSQLite上のGlobal Duplicate Group、Library固有Keepが一貫することを実SQLiteで検証する。
 /// </summary>
 public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 {
@@ -190,6 +190,34 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             a,
             "UserSelected",
             TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SetKeepAsync_RejectsMissingKeepWhenOtherGroupMemberIsActive()
+    {
+        var (a, b, _) = await CreateTracksAsync();
+        var service = CreateService();
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        var tracks = new SqliteTrackRepository(_database);
+
+        // Library自体はBのActive MembershipでGroupへ関与し続けるため、Membership有無だけの検証では
+        // MissingになったAをSelected Keepとして保存できてしまう。Keep対象自身のActive状態もRepository境界で検証する。
+        await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+            _libraryId,
+            group.Id,
+            a,
+            "UserSelected",
+            TestContext.Current.CancellationToken));
+
+        var projection = Assert.Single(await repository.GetByLibraryIdAsync(
+            _libraryId,
+            TestContext.Current.CancellationToken));
+        Assert.NotEqual(DuplicateGroupKeepStatus.Selected, projection.KeepStatus);
+        Assert.Null(projection.KeepTrackId);
     }
 
     [Fact]
