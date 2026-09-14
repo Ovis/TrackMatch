@@ -24,7 +24,7 @@ public sealed class SqliteCandidateReviewRepository(
         var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
             """
             SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId,
-                   r.ReviewedAtUtcTicks, s.KeepTrackId
+                   r.SourceLibraryNameSnapshot, r.ReviewedAtUtcTicks, s.KeepTrackId
             FROM CandidateReviews r
             LEFT JOIN CandidateReviewSelections s
                 ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
@@ -44,14 +44,29 @@ public sealed class SqliteCandidateReviewRepository(
                 cancellationToken);
         }
 
+        string? sourceLibraryNameSnapshot = null;
+        if (sourceLibraryId is { } sourceId)
+        {
+            sourceLibraryNameSnapshot = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT Name FROM Libraries WHERE Id = @LibraryId;",
+                new { LibraryId = sourceId },
+                transaction,
+                cancellationToken: cancellationToken));
+            if (sourceLibraryNameSnapshot is null)
+            {
+                throw new InvalidOperationException("操作元Libraryが存在しません。");
+            }
+        }
+
         const string reviewSql = """
             INSERT INTO CandidateReviews (
-                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, ReviewedAtUtcTicks)
-            VALUES (@TrackIdA, @TrackIdB, @Decision, @Note, @SourceLibraryId, @ReviewedAtUtcTicks)
+                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot, ReviewedAtUtcTicks)
+            VALUES (@TrackIdA, @TrackIdB, @Decision, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot, @ReviewedAtUtcTicks)
             ON CONFLICT(TrackIdA, TrackIdB) DO UPDATE SET
                 Decision = excluded.Decision,
                 Note = excluded.Note,
                 SourceLibraryId = excluded.SourceLibraryId,
+                SourceLibraryNameSnapshot = excluded.SourceLibraryNameSnapshot,
                 ReviewedAtUtcTicks = excluded.ReviewedAtUtcTicks;
             """;
         const string selectionSql = """
@@ -72,6 +87,7 @@ public sealed class SqliteCandidateReviewRepository(
             Decision = review.Decision.ToString(),
             review.Note,
             SourceLibraryId = sourceLibraryId,
+            SourceLibraryNameSnapshot = sourceLibraryNameSnapshot,
             review.KeepTrackId,
             ReviewedAtUtcTicks = DateTime.UtcNow.Ticks,
         };
@@ -101,7 +117,7 @@ public sealed class SqliteCandidateReviewRepository(
         var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
             """
             SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId,
-                   r.ReviewedAtUtcTicks, s.KeepTrackId
+                   r.SourceLibraryNameSnapshot, r.ReviewedAtUtcTicks, s.KeepTrackId
             FROM CandidateReviews r
             LEFT JOIN CandidateReviewSelections s
                 ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
@@ -169,16 +185,6 @@ public sealed class SqliteCandidateReviewRepository(
         string? invalidationReason,
         CancellationToken cancellationToken)
     {
-        string? sourceLibraryName = null;
-        if (current.SourceLibraryId is { } originalSourceLibraryId)
-        {
-            sourceLibraryName = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
-                "SELECT Name FROM Libraries WHERE Id = @LibraryId;",
-                new { LibraryId = originalSourceLibraryId },
-                transaction,
-                cancellationToken: cancellationToken));
-        }
-
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO CandidateReviewHistory (
@@ -194,8 +200,8 @@ public sealed class SqliteCandidateReviewRepository(
                 current.TrackIdB,
                 current.Decision,
                 current.Note,
-                SourceLibraryId = sourceLibraryName is null ? (long?)null : current.SourceLibraryId,
-                SourceLibraryNameSnapshot = sourceLibraryName,
+                current.SourceLibraryId,
+                current.SourceLibraryNameSnapshot,
                 ChangedAtUtcTicks = DateTime.UtcNow.Ticks,
                 ChangeKind = changeKind,
                 InvalidationReason = invalidationReason,
@@ -232,6 +238,7 @@ public sealed class SqliteCandidateReviewRepository(
         string Decision,
         string? Note,
         long? SourceLibraryId,
+        string? SourceLibraryNameSnapshot,
         long ReviewedAtUtcTicks,
         long? KeepTrackId);
 }
