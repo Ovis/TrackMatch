@@ -189,6 +189,51 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestoreAfterMissingSplitWithKeepOnNewGroupId_StillRequiresReview()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "split-a.flac");
+        var b = await CreateTrackAsync(tracks, "split-b.flac");
+        var c = await CreateTrackAsync(tracks, "split-c.flac");
+        var d = await CreateTrackAsync(tracks, "split-d.flac");
+        var e = await CreateTrackAsync(tracks, "split-e.flac");
+        var service = CreateService();
+        var groups = new SqliteDuplicateGroupRepository(_database);
+
+        // A-B-C-D-Eの一本鎖を作り、KeepをEにする。
+        // CがMissingになるとA-BとD-Eへ2:2でSplitし、旧Group IDは小さいTrack側A-Bへ継承される。
+        // Keep=Eは新しいGroup IDのD-Eへ移るため、Restore判定をGroup IDだけへ結び付けると復帰を見失う。
+        await SaveConfirmedAsync(service, a, b, a);
+        await SaveConfirmedAsync(service, b, c, b);
+        await SaveConfirmedAsync(service, c, d, d);
+        await SaveConfirmedAsync(service, d, e, e);
+        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(_libraryId, original.Id, e, "UserSelected", TestContext.Current.CancellationToken);
+
+        await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var splitGroups = await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken);
+        Assert.Equal(2, splitGroups.Count);
+        var keepGroup = Assert.Single(splitGroups, group => group.GlobalTrackIds.Contains(e));
+        Assert.Equal(e, keepGroup.KeepTrackId);
+        Assert.NotEqual(original.Id, keepGroup.Id);
+
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("split-c.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(c, restoredId);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
+        Assert.Null(restored.KeepTrackId);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var restoredCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE ChangeKind = 'TrackRestored';");
+        Assert.Equal(1, restoredCount);
+    }
+
+    [Fact]
     public async Task ReAddingVerdictAfterOtherTopologyChange_DoesNotReuseOldTrackMissingAsRestoreReason()
     {
         var tracks = new SqliteTrackRepository(_database);
