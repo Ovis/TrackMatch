@@ -164,6 +164,38 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidatePairRepository_RegenerationPreservesReviewedPairAndComparison()
+    {
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var pairs = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await pairs.ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database, _libraryAId).UpsertAsync(
+            [CreateComparison(_a1, _a2, 0.99)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateReviewRepository(_database, _libraryAId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken);
+
+        // Generation Version更新などで新GeneratorがこのPairを候補に返さなくても、
+        // Human Verdictとそれを表示するMachine Current Stateは保持する。
+        await pairs.ReplaceForTracksAsync(
+            [_a1, _a2],
+            [],
+            TestContext.Current.CancellationToken);
+
+        var persistedPair = Assert.Single(await pairs.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(persistedPair.TrackIdA, persistedPair.TrackIdB));
+        var persistedComparison = Assert.Single(await new SqliteCandidateComparisonRepository(_database, _libraryAId)
+            .GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(persistedComparison.TrackIdA, persistedComparison.TrackIdB));
+        var report = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
+            .GetAsync(_libraryAId, TestContext.Current.CancellationToken));
+        Assert.Equal(CandidateReviewDecision.NotDuplicate, report.ReviewDecision);
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_RejectsCrossLibraryPair()
     {
         var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
