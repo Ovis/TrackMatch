@@ -98,6 +98,38 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ForceReanalysisTrackAsync_PreservesDeletedSourceLibraryNameInReviewHistory()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "source-a.flac", addMembership: true);
+        var trackB = await AddTrackAsync(tracks, "source-b.flac", addMembership: true);
+        var pair = CandidatePairKey.Create(trackA, trackB);
+        await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken);
+
+        await new SqliteLibraryRepository(_database).DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        await new SqliteTrackManagementRepository(_database)
+            .ForceReanalysisTrackAsync(trackA, TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT SourceLibraryNameSnapshot
+            FROM CandidateReviewHistory
+            WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB
+              AND ChangeKind = 'ForceReanalysis'
+            ORDER BY Id DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$trackIdA", pair.TrackIdA);
+        command.Parameters.AddWithValue("$trackIdB", pair.TrackIdB);
+        var sourceName = (string?)await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("Music", sourceName);
+    }
+
+    [Fact]
     public async Task DeleteTracksAsync_RemovesTrackMatchDataWithoutDeletingAudioFile()
     {
         var path = Path.Combine(_directory, "unowned.flac");
