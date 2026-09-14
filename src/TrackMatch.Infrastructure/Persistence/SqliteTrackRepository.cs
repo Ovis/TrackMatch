@@ -335,10 +335,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             INSERT INTO CandidateReviewHistory (
                 TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot,
                 ChangedAtUtcTicks, ChangeKind, InvalidationReason)
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId, l.Name,
+            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId, r.SourceLibraryNameSnapshot,
                    @ChangedAtUtcTicks, 'ContentChanged', 'FileSizeOrLastWriteTimeChanged'
             FROM CandidateReviews r
-            LEFT JOIN Libraries l ON l.Id = r.SourceLibraryId
             WHERE r.TrackIdA = @TrackId OR r.TrackIdB = @TrackId;
             """,
             new { TrackId = trackId, ChangedAtUtcTicks = now },
