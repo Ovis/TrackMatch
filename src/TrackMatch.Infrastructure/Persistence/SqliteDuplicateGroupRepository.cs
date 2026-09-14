@@ -96,8 +96,8 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             transaction: transaction,
             cancellationToken: cancellationToken))).ToArray();
 
-        // Keep Current StateをTopology変更前にHistoryへ退避する。Merge/Split後に同じ値を継承する場合でも、
-        // どの旧Groupから引き継がれたか追跡できるようGraphKey Snapshotを残す。
+        // Keep Current StateをTopology変更前にHistoryへ退避する。
+        // Missing/Merge/Split/Restoreは後から判断理由を追えるよう、単なる再構築ではなく遷移理由も記録する。
         foreach (var state in oldKeepStates)
         {
             var oldGroup = oldGroups.SingleOrDefault(group => group.Id == state.DuplicateGroupId);
@@ -106,6 +106,14 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 continue;
             }
 
+            var changeKind = await ResolveRebuildChangeKindAsync(
+                connection,
+                transaction,
+                oldGroup,
+                state,
+                oldGroups,
+                groups,
+                cancellationToken);
             await InsertKeepHistoryAsync(
                 connection,
                 transaction,
@@ -114,7 +122,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 BuildGraphKey(oldGroup.TrackIds),
                 state.KeepTrackId,
                 state.Status,
-                "GroupRebuild",
+                changeKind,
                 note: null,
                 cancellationToken);
         }
@@ -283,7 +291,6 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
         IReadOnlyList<(long Id, DuplicateGroupRebuildItem Plan)> newGroups,
         CancellationToken cancellationToken)
     {
-        var oldGroupById = oldGroups.ToDictionary(group => group.Id);
         var libraryIds = oldStates.Select(state => state.LibraryId).Distinct().ToArray();
 
         foreach (var newGroup in newGroups)
@@ -304,37 +311,44 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                     continue;
                 }
 
-                var selectedKeeps = relevantStates
-                    .Where(state => string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal)
-                        && state.KeepTrackId is not null
-                        && newTrackSet.Contains(state.KeepTrackId.Value))
+                // Missing状態でもKeep ID自体はCurrent Stateへ保持する。
+                // これにより同じTrackが復帰したとき、ユーザーが以前選んだKeepを自動的に復元できる。
+                var priorKeepIds = relevantStates
+                    .Where(state => state.KeepTrackId is not null
+                        && (string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal)
+                            || string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Missing), StringComparison.Ordinal)))
                     .Select(state => state.KeepTrackId!.Value)
                     .Distinct()
                     .ToArray();
 
                 long? keepTrackId = null;
                 var status = DuplicateGroupKeepStatus.Unselected;
-                if (selectedKeeps.Length == 1)
+                if (relevantStates.Any(state => string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Conflict), StringComparison.Ordinal))
+                    || priorKeepIds.Length > 1)
                 {
-                    var isMissing = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-                        "SELECT IsMissing FROM Tracks WHERE Id = @TrackId;",
-                        new { TrackId = selectedKeeps[0] },
+                    // Mergeで異なるKeepが集まった場合は、Missingを含めて自動選択せず再確認を要求する。
+                    status = DuplicateGroupKeepStatus.Conflict;
+                }
+                else if (priorKeepIds.Length == 1)
+                {
+                    var priorKeepId = priorKeepIds[0];
+                    var trackState = await connection.QuerySingleOrDefaultAsync<TrackStateRow>(new CommandDefinition(
+                        "SELECT Id, IsMissing FROM Tracks WHERE Id = @TrackId;",
+                        new { TrackId = priorKeepId },
                         transaction,
-                        cancellationToken: cancellationToken)) != 0;
-                    if (isMissing)
+                        cancellationToken: cancellationToken));
+
+                    if (trackState is not null && trackState.IsMissing != 0)
                     {
+                        keepTrackId = priorKeepId;
                         status = DuplicateGroupKeepStatus.Missing;
                     }
-                    else
+                    else if (trackState is not null && newTrackSet.Contains(priorKeepId))
                     {
-                        keepTrackId = selectedKeeps[0];
+                        keepTrackId = priorKeepId;
                         status = DuplicateGroupKeepStatus.Selected;
                     }
-                }
-                else if (selectedKeeps.Length > 1
-                         || relevantStates.Any(state => string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Conflict), StringComparison.Ordinal)))
-                {
-                    status = DuplicateGroupKeepStatus.Conflict;
+                    // Split後にKeepが別成分へ移った場合、この成分へはKeepを引き継がない。
                 }
 
                 await connection.ExecuteAsync(new CommandDefinition(
@@ -439,6 +453,61 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
         return rows.ToDictionary(row => row.DuplicateGroupId);
     }
 
+    private static async Task<string> ResolveRebuildChangeKindAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        GlobalDuplicateGroup oldGroup,
+        KeepStateRow state,
+        IReadOnlyList<GlobalDuplicateGroup> oldGroups,
+        IReadOnlyCollection<DuplicateGroupRebuildItem> newGroups,
+        CancellationToken cancellationToken)
+    {
+        var overlappingNewGroups = newGroups
+            .Where(group => group.TrackIds.Any(oldGroup.TrackIds.Contains))
+            .ToArray();
+
+        if (state.KeepTrackId is { } keepTrackId)
+        {
+            var trackState = await connection.QuerySingleOrDefaultAsync<TrackStateRow>(new CommandDefinition(
+                "SELECT Id, IsMissing FROM Tracks WHERE Id = @TrackId;",
+                new { TrackId = keepTrackId },
+                transaction,
+                cancellationToken: cancellationToken));
+            if (trackState is not null)
+            {
+                if (string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal)
+                    && trackState.IsMissing != 0)
+                {
+                    return "KeepMissing";
+                }
+
+                if (string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Missing), StringComparison.Ordinal)
+                    && trackState.IsMissing == 0
+                    && overlappingNewGroups.Any(group => group.TrackIds.Contains(keepTrackId)))
+                {
+                    return "KeepRestored";
+                }
+            }
+        }
+
+        if (overlappingNewGroups.Length > 1)
+        {
+            return "GroupSplit";
+        }
+
+        if (overlappingNewGroups.Length == 1)
+        {
+            var newTrackSet = overlappingNewGroups[0].TrackIds.ToHashSet();
+            var overlappingOldCount = oldGroups.Count(group => group.TrackIds.Any(newTrackSet.Contains));
+            if (overlappingOldCount > 1)
+            {
+                return "GroupMerge";
+            }
+        }
+
+        return "GroupRebuild";
+    }
+
     private static async Task InsertKeepHistoryAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
@@ -510,6 +579,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
     }
 
     private sealed record GroupTrackRow(long DuplicateGroupId, long TrackId);
+    private sealed record TrackStateRow(long Id, long IsMissing);
     private sealed record KeepStateRow(
         long LibraryId,
         long DuplicateGroupId,
