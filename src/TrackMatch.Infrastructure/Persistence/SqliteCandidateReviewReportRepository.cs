@@ -26,6 +26,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             SELECT x.TrackIdA, x.TrackIdB, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
                    x.BestOffsetTicks, x.MatchedDurationTicks,
+                   x.ComparedAtUtcTicks,
                    a.Path AS PathA, b.Path AS PathB,
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
@@ -41,6 +42,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
                    a.Channels AS ChannelsA, b.Channels AS ChannelsB,
                    r.Decision AS ReviewDecision, s.KeepTrackId,
+                   r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
                    rl.Name AS ReviewSourceLibraryName
             FROM CandidateComparisons x
@@ -116,23 +118,38 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             reviewDecision, row.KeepTrackId,
             ToUInt(row.YearA), ToUInt(row.YearB),
             row.ReviewSourceLibraryId, row.ReviewSourceLibraryName,
-            IsReReviewRecommended(reviewDecision, kind));
+            IsReReviewRecommended(
+                reviewDecision,
+                kind,
+                row.ComparedAtUtcTicks,
+                row.ReviewedAtUtcTicks));
     }
 
     /// <summary>
-    /// Human Verdictと現在のMachine Classificationが明確に逆方向の場合だけ再確認対象にする。
-    /// NeedsReviewは機械側が断定していないため、単独では再確認対象にしない。
+    /// レビュー後にMachine Resultが更新され、かつHuman Verdictと現在分類が明確に逆方向の場合だけ再確認対象にする。
+    /// ユーザーが機械判定を意図的に覆した直後まで再確認扱いにしないため、時系列も判定条件へ含める。
     /// </summary>
     private static bool IsReReviewRecommended(
         CandidateReviewDecision? reviewDecision,
-        AudioRelationshipKind? kind)
-        => reviewDecision switch
+        AudioRelationshipKind? kind,
+        long comparedAtUtcTicks,
+        long? reviewedAtUtcTicks)
+    {
+        if (reviewDecision is null
+            || reviewedAtUtcTicks is null
+            || comparedAtUtcTicks <= reviewedAtUtcTicks.Value)
+        {
+            return false;
+        }
+
+        return reviewDecision switch
         {
             CandidateReviewDecision.NotDuplicate => kind == AudioRelationshipKind.DuplicateCandidate,
             CandidateReviewDecision.ConfirmedDuplicate => kind is AudioRelationshipKind.ShortVersionCandidate
                 or AudioRelationshipKind.AlternateVersionCandidate,
             _ => false,
         };
+    }
 
     private static int? ToInt(long? value) => value is null ? null : checked((int)value.Value);
     private static uint? ToUInt(long? value) => value is null ? null : checked((uint)value.Value);
@@ -144,7 +161,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     private sealed record ReportRow(
         long TrackIdA, long TrackIdB, string? Kind, string? Reason,
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
-        long BestOffsetTicks, long MatchedDurationTicks,
+        long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks,
         string PathA, string PathB, string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
@@ -153,6 +170,6 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
-        string? ReviewDecision, long? KeepTrackId,
+        string? ReviewDecision, long? KeepTrackId, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? ReviewSourceLibraryName);
 }
