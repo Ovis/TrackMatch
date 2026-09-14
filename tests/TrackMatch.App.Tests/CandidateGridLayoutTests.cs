@@ -54,7 +54,7 @@ public sealed class CandidateGridLayoutTests
                 Assert.Equal(verticalScrollBarPosition.X, headerCornerOverlayPosition.X, precision: 5);
                 Assert.Equal(headerTop, headerCornerOverlayPosition.Y, precision: 5);
                 Assert.IsType<CandidateRow>(candidateGrid.SelectedItem);
-                Assert.Equal(["分類", "A", "B", "音響一致度", "レビュー結果"], headerTexts);
+                Assert.Equal(["分類", "A", "B", "音響一致度", "レビュー結果", "判定元"], headerTexts);
             }
             catch (Exception caught)
             {
@@ -129,6 +129,7 @@ public sealed class CandidateGridLayoutTests
         public string TitleB => $"B {Index}";
         public string Similarity => "99%";
         public string ReviewResult => "未レビュー";
+        public string ReviewOriginText => string.Empty;
     }
 
     private sealed class QualityPanelRow
