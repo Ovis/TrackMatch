@@ -237,6 +237,24 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             throw new InvalidOperationException("Keepを設定するLibraryが存在しません。");
         }
 
+        // Library外TrackをKeepにすること自体は許可するが、そのLibraryがGroupへ全く関与していない状態では
+        // Library固有Dispositionを作成できない。少なくとも1件の構成TrackがLibrary Membershipに存在することを要求する。
+        var libraryHasGroupMembership = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+            FROM DuplicateGroupTracks gt
+            INNER JOIN LibraryTracks lt ON lt.TrackId = gt.TrackId
+            WHERE gt.DuplicateGroupId = @GroupId
+              AND lt.LibraryId = @LibraryId;
+            """,
+            new { LibraryId = libraryId, GroupId = groupId },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (libraryHasGroupMembership == 0)
+        {
+            throw new InvalidOperationException("現在Libraryと無関係なGlobal Duplicate GroupへKeepを設定できません。");
+        }
+
         var current = await connection.QuerySingleOrDefaultAsync<KeepStateRow>(new CommandDefinition(
             """
             SELECT LibraryId, DuplicateGroupId, KeepTrackId, Status, UpdatedAtUtcTicks
