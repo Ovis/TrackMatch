@@ -108,8 +108,8 @@ public sealed class RejectedTrackTrashService(
     /// </summary>
     /// <remarks>
     /// Library単位の一括Trashとは別の明示操作用APIである。
-    /// 現在Library所属TrackはLibrary固有Keepを考慮する一括Trash経路で扱う必要があるため、このAPIでは拒否する。
-    /// これによりUIのボタン制御に依存せず、Library外Trackだけを明示的なGlobal物理操作の対象にする。
+    /// 現在Library所属Trackと現在LibraryのKeep TrackはLibrary固有Dispositionを考慮する必要があるため、このAPIでは拒否する。
+    /// これによりUIのボタン制御に依存せず、Library外のReject候補だけを明示的なGlobal物理操作の対象にする。
     /// </remarks>
     /// <param name="currentLibraryId">操作元画面のLibrary。対象がLibrary外であることと他Libraryへの影響判定に使用する</param>
     /// <param name="trackId">明示的にTrash対象として選択されたGlobal Track</param>
@@ -149,6 +149,16 @@ public sealed class RejectedTrackTrashService(
         {
             throw new InvalidOperationException(
                 "現在のライブラリに所属するファイルは、ライブラリ外ファイル用の明示的なごみ箱操作では移動できません。");
+        }
+
+        // KeepはLibrary外Trackを指すこともできる。Membershipだけで判定すると、現在Libraryが残すよう指定した
+        // 外部ファイルをこのGlobal操作で消せるため、Projection上のKeepも独立してGuardする。
+        var currentGroup = await groupRepository.GetByTrackIdAsync(trackId, currentLibraryId, cancellationToken);
+        if (currentGroup?.KeepStatus == DuplicateGroupKeepStatus.Selected
+            && currentGroup.KeepTrackId == trackId)
+        {
+            throw new InvalidOperationException(
+                "このファイルは現在のライブラリで残すファイルに指定されているため、ごみ箱へ移動できません。");
         }
 
         var sourcePath = Path.GetFullPath(track.Metadata.Path);
