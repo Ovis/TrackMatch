@@ -94,6 +94,31 @@ public sealed class MissingMachineCurrentStateTests : IAsyncLifetime
         Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task MachineStateReplacement_PreservesMissingPairCache()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "replace-a.flac");
+        var b = await CreateTrackAsync(tracks, "replace-b.flac");
+        var pair = CandidatePairKey.Create(a, b);
+        var (comparisons, classifications) = await SeedMachineStateAsync(pair);
+
+        await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
+
+        // ReplaceAllは「今回のCurrent入力で全件置換する」APIだが、Missing Pairは今回の入力集合に現れない。
+        // Membershipだけを基準に削除すると再利用可能なComparison/Classificationまで失うため、Active Pairだけを置換する。
+        await comparisons.ReplaceAllAsync([], TestContext.Current.CancellationToken);
+        await classifications.ReplaceAllAsync([], TestContext.Current.CancellationToken);
+
+        Assert.Empty(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("replace-b.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(b, restoredId);
+        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+    }
+
     private async Task<(SqliteCandidateComparisonRepository Comparisons, SqliteCandidateClassificationRepository Classifications)> SeedMachineStateAsync(
         CandidatePairKey pair)
     {
