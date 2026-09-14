@@ -23,12 +23,10 @@ public sealed class SqliteCandidateReviewRepository(
 
         var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
             """
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId,
-                   r.SourceLibraryNameSnapshot, r.ReviewedAtUtcTicks, s.KeepTrackId
-            FROM CandidateReviews r
-            LEFT JOIN CandidateReviewSelections s
-                ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
-            WHERE r.TrackIdA = @TrackIdA AND r.TrackIdB = @TrackIdB;
+            SELECT TrackIdA, TrackIdB, Decision, Note, SourceLibraryId,
+                   SourceLibraryNameSnapshot, ReviewedAtUtcTicks
+            FROM CandidateReviews
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
             """,
             new { review.Pair.TrackIdA, review.Pair.TrackIdB },
             transaction,
@@ -69,16 +67,6 @@ public sealed class SqliteCandidateReviewRepository(
                 SourceLibraryNameSnapshot = excluded.SourceLibraryNameSnapshot,
                 ReviewedAtUtcTicks = excluded.ReviewedAtUtcTicks;
             """;
-        const string selectionSql = """
-            INSERT INTO CandidateReviewSelections (TrackIdA, TrackIdB, KeepTrackId)
-            VALUES (@TrackIdA, @TrackIdB, @KeepTrackId)
-            ON CONFLICT(TrackIdA,TrackIdB) DO UPDATE SET
-                KeepTrackId = excluded.KeepTrackId;
-            """;
-        const string deleteSelectionSql = """
-            DELETE FROM CandidateReviewSelections
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
-            """;
 
         var parameters = new
         {
@@ -88,15 +76,10 @@ public sealed class SqliteCandidateReviewRepository(
             review.Note,
             SourceLibraryId = sourceLibraryId,
             SourceLibraryNameSnapshot = sourceLibraryNameSnapshot,
-            review.KeepTrackId,
             ReviewedAtUtcTicks = DateTime.UtcNow.Ticks,
         };
 
         await connection.ExecuteAsync(new CommandDefinition(reviewSql, parameters, transaction, cancellationToken: cancellationToken));
-        var selectionCommand = review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-            ? selectionSql
-            : deleteSelectionSql;
-        await connection.ExecuteAsync(new CommandDefinition(selectionCommand, parameters, transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -116,12 +99,10 @@ public sealed class SqliteCandidateReviewRepository(
 
         var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
             """
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId,
-                   r.SourceLibraryNameSnapshot, r.ReviewedAtUtcTicks, s.KeepTrackId
-            FROM CandidateReviews r
-            LEFT JOIN CandidateReviewSelections s
-                ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
-            WHERE r.TrackIdA = @TrackIdA AND r.TrackIdB = @TrackIdB;
+            SELECT TrackIdA, TrackIdB, Decision, Note, SourceLibraryId,
+                   SourceLibraryNameSnapshot, ReviewedAtUtcTicks
+            FROM CandidateReviews
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
             """,
             new { pair.TrackIdA, pair.TrackIdB },
             transaction,
@@ -156,11 +137,9 @@ public sealed class SqliteCandidateReviewRepository(
     public async Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, s.KeepTrackId
-            FROM CandidateReviews r
-            LEFT JOIN CandidateReviewSelections s
-                ON s.TrackIdA = r.TrackIdA AND s.TrackIdB = r.TrackIdB
-            ORDER BY r.TrackIdA, r.TrackIdB;
+            SELECT TrackIdA, TrackIdB, Decision, Note
+            FROM CandidateReviews
+            ORDER BY TrackIdA, TrackIdB;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -225,13 +204,13 @@ public sealed class SqliteCandidateReviewRepository(
             throw new InvalidDataException($"未知の候補レビュー判定です: {row.Decision}");
         }
 
-        var review = new CandidateReview(CandidatePairKey.Create(row.TrackIdA, row.TrackIdB), decision, row.Note, row.KeepTrackId);
+        var review = new CandidateReview(CandidatePairKey.Create(row.TrackIdA, row.TrackIdB), decision, row.Note);
         review.Validate();
         return review;
     }
 
     private sealed record ReviewPairRow(long TrackIdA, long TrackIdB);
-    private sealed record ReviewRow(long TrackIdA, long TrackIdB, string Decision, string? Note, long? KeepTrackId);
+    private sealed record ReviewRow(long TrackIdA, long TrackIdB, string Decision, string? Note);
     private sealed record CurrentReviewRow(
         long TrackIdA,
         long TrackIdB,
@@ -239,6 +218,5 @@ public sealed class SqliteCandidateReviewRepository(
         string? Note,
         long? SourceLibraryId,
         string? SourceLibraryNameSnapshot,
-        long ReviewedAtUtcTicks,
-        long? KeepTrackId);
+        long ReviewedAtUtcTicks);
 }
