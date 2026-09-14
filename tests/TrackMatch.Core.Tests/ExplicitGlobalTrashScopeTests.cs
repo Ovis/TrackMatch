@@ -8,7 +8,7 @@ using Xunit;
 namespace TrackMatch.Core.Tests;
 
 /// <summary>
-/// Library外ファイル向けの明示Global TrashがLibrary内ファイルへ誤用されないことを検証する。
+/// Library外ファイル向けの明示Global TrashがLibrary内ファイルや現在Keepへ誤用されないことを検証する。
 /// </summary>
 public sealed class ExplicitGlobalTrashScopeTests
 {
@@ -33,6 +33,38 @@ public sealed class ExplicitGlobalTrashScopeTests
         Assert.Empty(tracks.MarkedMissing);
     }
 
+    [Fact]
+    public async Task ProcessTrackGloballyAsync_ExternalCurrentKeepIsRejectedBeforePhysicalMove()
+    {
+        var source = Path.Combine(Path.GetTempPath(), "TrackMatch", "external-keep.flac");
+        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
+        var tracks = new FakeTrackRepository(CreateTrack(1, source), libraryId: 20);
+        var files = new FakeFileOperations(source);
+        var currentProjection = new DuplicateGroup(
+            5,
+            10,
+            1,
+            DuplicateGroupKeepStatus.Selected,
+            [2],
+            [1, 2]);
+        var service = new RejectedTrackTrashService(
+            new FakeGroupRepository(currentProjection),
+            tracks,
+            tracks,
+            files);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ProcessTrackGloballyAsync(
+            10,
+            1,
+            trash,
+            execute: true,
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("残すファイル", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(files.Moves);
+        Assert.Empty(tracks.MarkedMissing);
+    }
+
     private static StoredTrack CreateTrack(long id, string path)
         => new(
             id,
@@ -49,19 +81,26 @@ public sealed class ExplicitGlobalTrashScopeTests
                 ["J-POPS"]),
             IsMissing: false);
 
-    private sealed class FakeGroupRepository : IDuplicateGroupRepository
+    private sealed class FakeGroupRepository(DuplicateGroup? group = null) : IDuplicateGroupRepository
     {
         public Task<IReadOnlyList<GlobalDuplicateGroup>> GetAllGlobalAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<GlobalDuplicateGroup>>([]);
 
         public Task<IReadOnlyList<DuplicateGroup>> GetByLibraryIdAsync(long libraryId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<DuplicateGroup>>([]);
+            => Task.FromResult<IReadOnlyList<DuplicateGroup>>(
+                group is not null && group.LibraryId == libraryId ? [group] : []);
 
         public Task<DuplicateGroup?> GetByTrackIdAsync(long trackId, long libraryId, CancellationToken cancellationToken = default)
-            => Task.FromResult<DuplicateGroup?>(null);
+            => Task.FromResult(
+                group is not null
+                && group.LibraryId == libraryId
+                && group.GlobalTrackIds.Contains(trackId)
+                    ? group
+                    : null);
 
         public Task<DuplicateGroup?> GetByIdAsync(long groupId, long libraryId, CancellationToken cancellationToken = default)
-            => Task.FromResult<DuplicateGroup?>(null);
+            => Task.FromResult(
+                group is not null && group.Id == groupId && group.LibraryId == libraryId ? group : null);
 
         public Task ReplaceGlobalAsync(IReadOnlyCollection<DuplicateGroupRebuildItem> groups, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -85,7 +124,7 @@ public sealed class ExplicitGlobalTrashScopeTests
 
         public Task<IReadOnlyList<TrackLibraryReference>> GetLibrariesAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<TrackLibraryReference>>(
-                track.Id == trackId ? [new TrackLibraryReference(libraryId, "Current")] : []);
+                track.Id == trackId ? [new TrackLibraryReference(libraryId, $"Library {libraryId}")] : []);
 
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
