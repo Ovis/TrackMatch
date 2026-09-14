@@ -123,14 +123,12 @@ public sealed class IncrementalLibraryScanService(
                 progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
             }
 
-            // Membership上このRootに属していて今回の列挙で見えなかった場合でも、Global Trackの物理Pathが存在するなら
-            // 他Library/Rootから同じ物理ファイルを共有している可能性がある。Root差分だけを根拠にGlobal Missingへ遷移させない。
+            // Root列挙が正常完了した場合は、そのScanで見つからなかった既存Membership TrackをMissingへ遷移させる。
+            // File.Existsの個別確認を追加するとScannerの正常完了結果と別の観測結果が競合し、仕様上のMissing確定条件が曖昧になる。
             foreach (var storedEntry in storedEntries)
             {
-                var storedPath = Path.GetFullPath(storedEntry.Track.Metadata.Path);
                 if (storedEntry.Track.IsMissing
-                    || seenPaths.Contains(storedPath)
-                    || File.Exists(storedPath))
+                    || seenPaths.Contains(Path.GetFullPath(storedEntry.Track.Metadata.Path)))
                 {
                     continue;
                 }
