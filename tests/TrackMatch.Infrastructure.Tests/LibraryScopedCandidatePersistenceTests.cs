@@ -16,6 +16,8 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     private SqliteDatabase _database = null!;
     private long _libraryAId;
     private long _libraryBId;
+    private long _rootAId;
+    private long _rootBId;
     private long _a1;
     private long _a2;
     private long _b1;
@@ -35,8 +37,8 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
         var libraryB = await libraries.CreateAsync("Library B", [rootB], TestContext.Current.CancellationToken);
         _libraryAId = libraryA.Id;
         _libraryBId = libraryB.Id;
-        var rootAId = Assert.Single(libraryA.Roots).Id;
-        var rootBId = Assert.Single(libraryB.Roots).Id;
+        _rootAId = Assert.Single(libraryA.Roots).Id;
+        _rootBId = Assert.Single(libraryB.Roots).Id;
 
         var tracks = new SqliteTrackRepository(_database);
         _a1 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootA, "a1.flac")), TestContext.Current.CancellationToken);
@@ -45,10 +47,10 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
         _b2 = await tracks.UpsertMetadataAsync(CreateMetadata(Path.Combine(rootB, "b2.flac")), TestContext.Current.CancellationToken);
 
         // Global TrackのPathだけではLibrary Scopeは決まらない。候補系RepositoryはLibraryTracks Membershipを正本にする。
-        await tracks.EnsureMembershipAsync(_libraryAId, rootAId, _a1, "a1.flac", TestContext.Current.CancellationToken);
-        await tracks.EnsureMembershipAsync(_libraryAId, rootAId, _a2, "a2.flac", TestContext.Current.CancellationToken);
-        await tracks.EnsureMembershipAsync(_libraryBId, rootBId, _b1, "b1.flac", TestContext.Current.CancellationToken);
-        await tracks.EnsureMembershipAsync(_libraryBId, rootBId, _b2, "b2.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryAId, _rootAId, _a1, "a1.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryAId, _rootAId, _a2, "a2.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, _rootBId, _b1, "b1.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, _rootBId, _b2, "b2.flac", TestContext.Current.CancellationToken);
 
         await tracks.SaveFingerprintAsync(_a1, CreateFingerprint(Path.Combine(rootA, "a1.flac")), 2, TestContext.Current.CancellationToken);
         await tracks.SaveFingerprintAsync(_a2, CreateFingerprint(Path.Combine(rootA, "a2.flac")), 2, TestContext.Current.CancellationToken);
@@ -110,7 +112,7 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CandidatePairRepository_DeletePreservesReviewedPairInOtherLibrary()
+    public async Task CandidatePairRepository_DeletePreservesPairOutsideCurrentLibrary()
     {
         var all = new SqliteCandidatePairRepository(_database);
         var pairA = CandidatePairKey.Create(_a1, _a2);
@@ -124,6 +126,41 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
 
         var remaining = Assert.Single(await all.GetAllAsync(TestContext.Current.CancellationToken));
         Assert.Equal(pairB, CandidatePairKey.Create(remaining.TrackIdA, remaining.TrackIdB));
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_ReplaceForSharedTrackPreservesOtherLibraryPair()
+    {
+        var sharedRoot = Path.Combine(_directory, "Shared");
+        Directory.CreateDirectory(sharedRoot);
+        var libraries = new SqliteLibraryRepository(_database);
+        var sharedRootA = await libraries.AddRootAsync(_libraryAId, sharedRoot, TestContext.Current.CancellationToken);
+        var sharedRootB = await libraries.AddRootAsync(_libraryBId, sharedRoot, TestContext.Current.CancellationToken);
+        var tracks = new SqliteTrackRepository(_database);
+        var sharedPath = Path.Combine(sharedRoot, "shared.flac");
+        var sharedTrackId = await tracks.UpsertMetadataAsync(CreateMetadata(sharedPath), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryAId, sharedRootA.Id, sharedTrackId, "shared.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, sharedRootB.Id, sharedTrackId, "shared.flac", TestContext.Current.CancellationToken);
+
+        var pairA = CandidatePairKey.Create(sharedTrackId, _a1);
+        var pairB = CandidatePairKey.Create(sharedTrackId, _b1);
+        var all = new SqliteCandidatePairRepository(_database);
+        await all.ReplaceAllAsync(
+            [
+                new CandidatePair(pairA.TrackIdA, pairA.TrackIdB, 1),
+                new CandidatePair(pairB.TrackIdA, pairB.TrackIdB, 2),
+            ],
+            TestContext.Current.CancellationToken);
+
+        await new SqliteCandidatePairRepository(_database, _libraryAId).ReplaceForTracksAsync(
+            [sharedTrackId],
+            [new CandidatePair(pairA.TrackIdA, pairA.TrackIdB, 3)],
+            TestContext.Current.CancellationToken);
+
+        var remaining = await all.GetAllAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, remaining.Count);
+        Assert.Contains(remaining, pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB) == pairA);
+        Assert.Contains(remaining, pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB) == pairB);
     }
 
     [Fact]
