@@ -87,66 +87,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         Loaded -= DuplicateGroupDetailsWindow_Loaded;
         try
         {
-            var database = new SqliteDatabase(_databasePath);
-            await database.InitializeAsync();
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var group = await groups.GetByIdAsync(_groupId, _libraryId);
-            if (group is null)
-            {
-                throw new InvalidOperationException("指定された重複グループは現在のLibraryから参照できません。");
-            }
-
-            var trackLookup = new SqliteTrackLookupRepository(database);
-            var localTrackIds = group.TrackIds.ToHashSet();
-            var trackModels = new Dictionary<long, DuplicateGroupTrackViewModel>();
-            foreach (var trackId in group.GlobalTrackIds)
-            {
-                var track = await trackLookup.GetByIdAsync(trackId)
-                    ?? throw new InvalidDataException($"重複グループ内のTrack #{trackId} が見つかりません。");
-                trackModels[trackId] = DuplicateGroupTrackViewModel.Create(
-                    track,
-                    group.KeepTrackId == trackId,
-                    localTrackIds.Contains(trackId));
-            }
-
-            GroupTitle = $"重複グループ #{group.Id}";
-            var externalCount = group.GlobalTrackIds.Count - group.TrackIds.Count;
-            FileCountText = externalCount > 0
-                ? $"現在のLibrary: {group.TrackIds.Count}ファイル / Global Group: {group.GlobalTrackIds.Count}ファイル（Library外 {externalCount}件）"
-                : $"{group.TrackIds.Count}ファイル";
-            KeepStateText = group.KeepStatus switch
-            {
-                DuplicateGroupKeepStatus.Selected => "このLibraryで残すファイル",
-                DuplicateGroupKeepStatus.Conflict => "複数の過去Keepが競合しています。残すファイルを再確認してください。",
-                DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
-                _ => "残すファイルはまだ選択されていません。",
-            };
-
-            if (group.KeepTrackId is { } keepTrackId)
-            {
-                KeepTracks.Add(trackModels[keepTrackId]);
-            }
-
-            foreach (var item in group.GlobalTrackIds
-                         .Where(trackId => trackId != group.KeepTrackId)
-                         .Select(trackId => trackModels[trackId]))
-            {
-                OtherTracks.Add(item);
-            }
-
-            var globalMemberIds = group.GlobalTrackIds.ToHashSet();
-            var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
-            foreach (var review in reviews
-                         .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-                             && globalMemberIds.Contains(review.Pair.TrackIdA)
-                             && globalMemberIds.Contains(review.Pair.TrackIdB))
-                         .OrderBy(review => review.Pair.TrackIdA)
-                         .ThenBy(review => review.Pair.TrackIdB))
-            {
-                var left = trackModels[review.Pair.TrackIdA].Title;
-                var right = trackModels[review.Pair.TrackIdB].Title;
-                ConfirmedRelations.Add($"{left} ↔ {right}    重複として確認済み");
-            }
+            await LoadGroupAsync();
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
@@ -158,6 +99,125 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
                 kind: AppDialogKind.Error)
             { Owner = this }.ShowDialog();
             Close();
+        }
+    }
+
+    private async Task LoadGroupAsync()
+    {
+        var database = new SqliteDatabase(_databasePath);
+        await database.InitializeAsync();
+        var groups = new SqliteDuplicateGroupRepository(database);
+        var group = await groups.GetByIdAsync(_groupId, _libraryId);
+        if (group is null)
+        {
+            throw new InvalidOperationException("指定された重複グループは現在のLibraryから参照できません。");
+        }
+
+        var trackLookup = new SqliteTrackLookupRepository(database);
+        var localTrackIds = group.TrackIds.ToHashSet();
+        var trackModels = new Dictionary<long, DuplicateGroupTrackViewModel>();
+        foreach (var trackId in group.GlobalTrackIds)
+        {
+            var track = await trackLookup.GetByIdAsync(trackId)
+                ?? throw new InvalidDataException($"重複グループ内のTrack #{trackId} が見つかりません。");
+            trackModels[trackId] = DuplicateGroupTrackViewModel.Create(
+                track,
+                group.KeepTrackId == trackId,
+                localTrackIds.Contains(trackId));
+        }
+
+        GroupTitle = $"重複グループ #{group.Id}";
+        var externalCount = group.GlobalTrackIds.Count - group.TrackIds.Count;
+        FileCountText = externalCount > 0
+            ? $"現在のLibrary: {group.TrackIds.Count}ファイル / Global Group: {group.GlobalTrackIds.Count}ファイル（Library外 {externalCount}件）"
+            : $"{group.TrackIds.Count}ファイル";
+        KeepStateText = group.KeepStatus switch
+        {
+            DuplicateGroupKeepStatus.Selected => "このLibraryで残すファイル",
+            DuplicateGroupKeepStatus.Conflict => "複数の過去Keepが競合しています。残すファイルを再確認してください。",
+            DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
+            _ => "残すファイルはまだ選択されていません。",
+        };
+
+        KeepTracks.Clear();
+        OtherTracks.Clear();
+        ConfirmedRelations.Clear();
+
+        if (group.KeepTrackId is { } keepTrackId)
+        {
+            KeepTracks.Add(trackModels[keepTrackId]);
+        }
+
+        foreach (var item in group.GlobalTrackIds
+                     .Where(trackId => trackId != group.KeepTrackId)
+                     .Select(trackId => trackModels[trackId]))
+        {
+            OtherTracks.Add(item);
+        }
+
+        var globalMemberIds = group.GlobalTrackIds.ToHashSet();
+        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        foreach (var review in reviews
+                     .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
+                         && globalMemberIds.Contains(review.Pair.TrackIdA)
+                         && globalMemberIds.Contains(review.Pair.TrackIdB))
+                     .OrderBy(review => review.Pair.TrackIdA)
+                     .ThenBy(review => review.Pair.TrackIdB))
+        {
+            var left = trackModels[review.Pair.TrackIdA].Title;
+            var right = trackModels[review.Pair.TrackIdB].Title;
+            ConfirmedRelations.Add($"{left} ↔ {right}    重複として確認済み");
+        }
+    }
+
+    private async void SetKeep_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not long trackId)
+        {
+            return;
+        }
+
+        var track = OtherTracks.FirstOrDefault(item => item.TrackId == trackId);
+        if (track is null || !track.CanSelectAsKeep)
+        {
+            return;
+        }
+
+        var detail = track.IsInCurrentLibrary
+            ? "このLibraryの重複グループで、このファイル以外がごみ箱移動対象になります。"
+            : "このファイルは現在のLibrary外ですが、Global Duplicate Groupの構成TrackなのでKeepとして選択できます。Library Membership自体は追加されません。";
+        var confirmation = new ConfirmationDialog(
+            "残すファイルを変更",
+            $"「{track.Title}」をこのLibraryで残すファイルに設定しますか？",
+            detail,
+            "このファイルを残す",
+            "キャンセル",
+            kind: AppDialogKind.Warning)
+        { Owner = this };
+        confirmation.ShowDialog();
+        if (confirmation.SelectedResult != AppDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            _previewPlayer.Stop();
+            var database = new SqliteDatabase(_databasePath);
+            await database.InitializeAsync();
+            var groups = new SqliteDuplicateGroupRepository(database);
+            await groups.SetKeepAsync(_libraryId, _groupId, trackId, "UserSelected");
+            await LoadGroupAsync();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            new ConfirmationDialog(
+                "残すファイル変更失敗",
+                "残すファイルを変更できませんでした",
+                exception.Message,
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = this }.ShowDialog();
         }
     }
 
