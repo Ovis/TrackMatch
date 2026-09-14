@@ -170,6 +170,29 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SetKeepAsync_RejectsLibraryThatHasOnlyMissingMembershipInGroup()
+    {
+        var (a, b, _) = await CreateTracksAsync();
+        var service = CreateService();
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        var tracks = new SqliteTrackRepository(_database);
+
+        // Missing TrackはMembership自体を保持するが、Library Projectionからは除外される。
+        // その状態で隠れたKeep Current Stateを新規作成できないことをRepository境界でも保証する。
+        await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
+        await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+            _libraryId,
+            group.Id,
+            a,
+            "UserSelected",
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreButRequiresKeepReviewAfterRestore()
     {
         var (a, b, c) = await CreateTracksAsync();
