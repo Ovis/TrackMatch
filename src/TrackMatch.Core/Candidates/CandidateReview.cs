@@ -1,34 +1,24 @@
 namespace TrackMatch.Core.Candidates;
 
 /// <summary>
-/// 候補ペアに対する人手レビュー結果を表す。
+/// Global Track Pairに対する人手の確定判定を表す。
 /// </summary>
+/// <remarks>
+/// どのTrackを残すかはLibrary固有のDuplicate Group状態であり、このGlobal Verdictには保持しない。
+/// </remarks>
 public sealed record CandidateReview(
     CandidatePairKey Pair,
     CandidateReviewDecision Decision,
-    string? Note,
-    long? KeepTrackId = null)
+    string? Note)
 {
+    /// <summary>
+    /// 永続化前にGlobal Verdictとして有効な値であることを検証する。
+    /// </summary>
     public void Validate()
     {
-        if (Decision == CandidateReviewDecision.NotDuplicate)
+        if (!Enum.IsDefined(Decision))
         {
-            if (KeepTrackId is not null)
-            {
-                throw new ArgumentException("NotDuplicateではKeepTrackIdを指定できない。", nameof(KeepTrackId));
-            }
-
-            return;
-        }
-
-        if (KeepTrackId is null)
-        {
-            throw new ArgumentException("ConfirmedDuplicateではKeepTrackIdが必要である。", nameof(KeepTrackId));
-        }
-
-        if (KeepTrackId != Pair.TrackIdA && KeepTrackId != Pair.TrackIdB)
-        {
-            throw new ArgumentException("KeepTrackIdは候補ペアを構成するTrackのいずれかである必要がある。", nameof(KeepTrackId));
+            throw new ArgumentOutOfRangeException(nameof(Decision));
         }
     }
 }
