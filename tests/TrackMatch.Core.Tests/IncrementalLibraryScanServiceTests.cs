@@ -51,32 +51,22 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
-    public async Task ScanAsync_DoesNotMarkGlobalTrackMissingWhenPhysicalFileStillExists()
+    public async Task ScanAsync_NormalCompletionMarksStoredTrackMissingWhenScannerDidNotFindIt()
     {
-        var root = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var sharedPath = Path.Combine(root, "shared.flac");
-        await File.WriteAllBytesAsync(sharedPath, [1, 2, 3], TestContext.Current.CancellationToken);
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "missing.flac");
+        var repository = new FakeTrackRepository([Stored(1, Metadata(path, 100, 10))]);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
 
-        try
-        {
-            var repository = new FakeTrackRepository([Stored(1, Metadata(sharedPath, 3, 10))]);
-            var service = new IncrementalLibraryScanService(
-                new FakeLibraryScanner([]),
-                repository,
-                new FakeScanSessionRepository(),
-                new FakeFingerprintExtractor(),
-                2);
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
 
-            var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
-
-            Assert.Equal(0, result.Summary.RemovedFiles);
-            Assert.Empty(repository.MissingTrackIds);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.Equal(1, result.Summary.RemovedFiles);
+        Assert.Equal([1L], repository.MissingTrackIds);
     }
 
     [Fact]
