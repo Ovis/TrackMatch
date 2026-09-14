@@ -74,6 +74,56 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ClassificationRepository_UnchangedReplacementPreservesClassifiedAt()
+    {
+        var trackRepository = new SqliteTrackRepository(_database);
+        var idA = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "stable-A.flac"), "Artist", "A", "Album", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var idB = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "stable-B.flac"), "Artist", "B", "Album", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var pair = CandidatePairKey.Create(idA, idB);
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [new CandidateComparison(
+                pair.TrackIdA, pair.TrackIdB, 0.98, 0, TimeSpan.Zero, 100,
+                TimeSpan.FromSeconds(12), 0.97, 0.96, 0.99)],
+            TestContext.Current.CancellationToken);
+
+        var repository = new SqliteCandidateClassificationRepository(_database);
+        var classification = new CandidateClassification(
+            pair.TrackIdA,
+            pair.TrackIdB,
+            AudioRelationshipKind.DuplicateCandidate,
+            "stable reason",
+            "{\"profile\":1}");
+        await repository.ReplaceAllAsync([classification], TestContext.Current.CancellationToken);
+
+        long firstTicks;
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT ClassifiedAtUtcTicks FROM CandidateClassifications WHERE TrackIdA = $a AND TrackIdB = $b;";
+            command.Parameters.AddWithValue("$a", pair.TrackIdA);
+            command.Parameters.AddWithValue("$b", pair.TrackIdB);
+            firstTicks = (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        }
+
+        await repository.ReplaceAllAsync([classification], TestContext.Current.CancellationToken);
+
+        await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var verifyCommand = verifyConnection.CreateCommand();
+        verifyCommand.CommandText = "SELECT ClassifiedAtUtcTicks FROM CandidateClassifications WHERE TrackIdA = $a AND TrackIdB = $b;";
+        verifyCommand.Parameters.AddWithValue("$a", pair.TrackIdA);
+        verifyCommand.Parameters.AddWithValue("$b", pair.TrackIdB);
+        var secondTicks = (long)(await verifyCommand.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        Assert.Equal(firstTicks, secondTicks);
+    }
+
+    [Fact]
     public async Task ClassificationRepository_DoesNotExposeClassificationBackedByOlderComparisonVersion()
     {
         var trackRepository = new SqliteTrackRepository(_database);
