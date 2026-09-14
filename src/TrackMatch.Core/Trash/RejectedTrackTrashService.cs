@@ -103,6 +103,62 @@ public sealed class RejectedTrackTrashService(
         return new RejectedTrackTrashResult(items, execute, impacts.Values.OrderBy(item => item.TrackId).ToArray());
     }
 
+    /// <summary>
+    /// ユーザーが明示的に選択したGlobal Track 1件だけをPreviewまたはTrashへ移動する。
+    /// </summary>
+    /// <remarks>
+    /// Library単位の一括Trashとは別の明示操作用APIであり、現在LibraryへのMembershipを要求しない。
+    /// これによりLibrary外Trackを処置できる一方、一括TrashがLibrary外Trackまで暗黙に巻き込むことはない。
+    /// </remarks>
+    /// <param name="currentLibraryId">操作元画面のLibrary。影響する他Libraryの判定基準に使用する</param>
+    /// <param name="trackId">明示的にTrash対象として選択されたGlobal Track</param>
+    /// <param name="trashRoot">App-wide Trashのルート</param>
+    /// <param name="execute">falseはPreview、trueは実移動</param>
+    /// <param name="collisionBehavior">移動先衝突時の処理</param>
+    /// <param name="cancellationToken">キャンセルToken</param>
+    public async Task<RejectedTrackTrashResult> ProcessTrackGloballyAsync(
+        long currentLibraryId,
+        long trackId,
+        string trashRoot,
+        bool execute,
+        TrashDestinationCollisionBehavior collisionBehavior = TrashDestinationCollisionBehavior.Skip,
+        CancellationToken cancellationToken = default)
+    {
+        if (currentLibraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(currentLibraryId));
+        }
+
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(trashRoot);
+        var fullTrashRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(trashRoot));
+        var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
+        if (track is null)
+        {
+            return new RejectedTrackTrashResult([], execute, []);
+        }
+
+        var sourcePath = Path.GetFullPath(track.Metadata.Path);
+        var destinationPath = TrashPathRules.CreateDestinationPath(fullTrashRoot, sourcePath);
+        var impact = await CreateSharedImpactAsync(currentLibraryId, trackId, cancellationToken);
+        var item = await ProcessKnownTrackAsync(
+            track,
+            sourcePath,
+            destinationPath,
+            execute,
+            collisionBehavior,
+            cancellationToken);
+
+        return new RejectedTrackTrashResult(
+            [item],
+            execute,
+            impact.IsShared ? [impact] : []);
+    }
+
     private async Task AddBlockedGroupItemsAsync(
         DuplicateGroup group,
         long libraryId,
