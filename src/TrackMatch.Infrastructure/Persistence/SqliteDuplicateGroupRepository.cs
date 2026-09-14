@@ -603,20 +603,23 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             var addedTrackIds = newTrackIds.Where(trackId => !oldGroup.TrackIds.Contains(trackId)).ToArray();
             if (addedTrackIds.Length != 0)
             {
-                // TrackMissing時のHistoryにはMissing直前のGraph Keyが残る。
-                // 同じLibraryでそのGraph構成が再成立した場合だけ、一般的なGroup拡張ではなく復帰として扱う。
-                var priorMissingHistory = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                // TrackMissing直後のTopology復帰だけをTrackRestoredとして記録する。
+                // 古いMissing履歴が残っているだけの通常Group拡張をRestoreと誤認しないよう、同じGroup IDの直近履歴を確認する。
+                var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
                     """
-                    SELECT COUNT(*)
+                    SELECT ChangeKind, GraphKeySnapshot
                     FROM LibraryDuplicateGroupKeepHistory
                     WHERE LibraryId = @LibraryId
-                      AND ChangeKind = 'TrackMissing'
-                      AND GraphKeySnapshot = @GraphKey;
+                      AND DuplicateGroupId = @DuplicateGroupId
+                    ORDER BY Id DESC
+                    LIMIT 1;
                     """,
-                    new { LibraryId = state.LibraryId, GraphKey = BuildGraphKey(newTrackIds) },
+                    new { LibraryId = state.LibraryId, DuplicateGroupId = state.DuplicateGroupId },
                     transaction,
                     cancellationToken: cancellationToken));
-                if (priorMissingHistory != 0)
+                if (latestTransition is not null
+                    && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal)
+                    && string.Equals(latestTransition.GraphKeySnapshot, BuildGraphKey(newTrackIds), StringComparison.Ordinal))
                 {
                     return "TrackRestored";
                 }
@@ -716,6 +719,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
 
     private sealed record GroupTrackRow(long DuplicateGroupId, long TrackId);
     private sealed record TrackStateRow(long Id, long IsMissing);
+    private sealed record KeepHistoryTransitionRow(string ChangeKind, string GraphKeySnapshot);
     private sealed record KeepStateRow(
         long LibraryId,
         long DuplicateGroupId,
