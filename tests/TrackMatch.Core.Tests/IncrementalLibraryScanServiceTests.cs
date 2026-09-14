@@ -111,6 +111,87 @@ public sealed class IncrementalLibraryScanServiceTests
         Assert.Equal("Metadata", Assert.Single(result.Errors).Stage);
     }
 
+    [Fact]
+    public async Task ScanAsync_CancellationDuringEnumerationPreservesCompletedWorkAndSkipsMissingFinalization()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var seenPath = Path.Combine(root, "seen.flac");
+        var unseenPath = Path.Combine(root, "unseen.flac");
+        using var cancellation = new CancellationTokenSource();
+        var repository = new FakeTrackRepository(
+        [
+            Stored(1, Metadata(seenPath, 100, 10)),
+            Stored(2, Metadata(unseenPath, 100, 10)),
+        ]);
+        var sessions = new FakeScanSessionRepository();
+        var service = new IncrementalLibraryScanService(
+            new CancellingLibraryScanner(LibraryScanResult.Success(Metadata(seenPath, 100, 10)), cancellation),
+            repository,
+            sessions,
+            new FakeFingerprintExtractor(),
+            2);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ScanAsync(1, 1, root, cancellation.Token));
+
+        Assert.Equal([seenPath], repository.UpsertedPaths);
+        Assert.Empty(repository.MissingTrackIds);
+        Assert.NotNull(sessions.FailedSummary);
+    }
+
+    [Fact]
+    public async Task ScanAsync_EnumerationFailurePreservesCompletedWorkAndSkipsMissingFinalization()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var seenPath = Path.Combine(root, "seen.flac");
+        var unseenPath = Path.Combine(root, "unseen.flac");
+        var repository = new FakeTrackRepository(
+        [
+            Stored(1, Metadata(seenPath, 100, 10)),
+            Stored(2, Metadata(unseenPath, 100, 10)),
+        ]);
+        var sessions = new FakeScanSessionRepository();
+        var service = new IncrementalLibraryScanService(
+            new ThrowingLibraryScanner(LibraryScanResult.Success(Metadata(seenPath, 100, 10))),
+            repository,
+            sessions,
+            new FakeFingerprintExtractor(),
+            2);
+
+        await Assert.ThrowsAsync<IOException>(() => service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken));
+
+        Assert.Equal([seenPath], repository.UpsertedPaths);
+        Assert.Empty(repository.MissingTrackIds);
+        Assert.NotNull(sessions.FailedSummary);
+    }
+
+    [Fact]
+    public async Task ScanAsync_AfterMissingFinalizationStartsCallerCancellationCannotPartiallyApplyMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var firstPath = Path.Combine(root, "first.flac");
+        var secondPath = Path.Combine(root, "second.flac");
+        using var cancellation = new CancellationTokenSource();
+        var repository = new FakeTrackRepository(
+        [
+            Stored(1, Metadata(firstPath, 100, 10)),
+            Stored(2, Metadata(secondPath, 100, 10)),
+        ],
+        cancelDuringMissingBatch: cancellation);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
+
+        var result = await service.ScanAsync(1, 1, root, cancellation.Token);
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(2, result.Summary.RemovedFiles);
+        Assert.Equal([1L, 2L], repository.MissingTrackIds.Order().ToArray());
+        Assert.Equal([false], repository.MissingBatchCancellationStates);
+    }
+
     private static StoredTrack Stored(long id, AudioTrackMetadata metadata)
         => new(id, metadata, false);
 
@@ -132,6 +213,26 @@ public sealed class IncrementalLibraryScanServiceTests
         public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default) => results;
     }
 
+    private sealed class CancellingLibraryScanner(
+        LibraryScanResult first,
+        CancellationTokenSource cancellation) : ILibraryScanner
+    {
+        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        {
+            yield return first;
+            cancellation.Cancel();
+        }
+    }
+
+    private sealed class ThrowingLibraryScanner(LibraryScanResult first) : ILibraryScanner
+    {
+        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        {
+            yield return first;
+            throw new IOException("enumeration failed");
+        }
+    }
+
     private sealed class FakeFingerprintExtractor(string? failingPath = null) : IFingerprintExtractor
     {
         public List<string> Paths { get; } = [];
@@ -150,11 +251,13 @@ public sealed class IncrementalLibraryScanServiceTests
 
     private sealed class FakeTrackRepository(
         IReadOnlyList<StoredTrack> initialTracks,
-        IReadOnlySet<long>? missingFingerprintIds = null) : ITrackRepository
+        IReadOnlySet<long>? missingFingerprintIds = null,
+        CancellationTokenSource? cancelDuringMissingBatch = null) : ITrackRepository
     {
         private long _nextId = 100;
         public List<string> UpsertedPaths { get; } = [];
         public List<long> MissingTrackIds { get; } = [];
+        public List<bool> MissingBatchCancellationStates { get; } = [];
         public List<(long TrackId, AudioFingerprint Fingerprint, int Algorithm)> SavedFingerprints { get; } = [];
         public List<(long LibraryId, long RootId, long TrackId, string RelativePath)> Memberships { get; } = [];
         public HashSet<long> MissingFingerprintIds { get; } = missingFingerprintIds?.ToHashSet() ?? [];
@@ -201,6 +304,16 @@ public sealed class IncrementalLibraryScanServiceTests
             return Task.CompletedTask;
         }
 
+        public Task MarkMissingBatchAsync(
+            IReadOnlyCollection<long> trackIds,
+            CancellationToken cancellationToken = default)
+        {
+            MissingBatchCancellationStates.Add(cancellationToken.IsCancellationRequested);
+            cancelDuringMissingBatch?.Cancel();
+            MissingTrackIds.AddRange(trackIds);
+            return Task.CompletedTask;
+        }
+
         public Task SaveFingerprintAsync(long trackId, AudioFingerprint fingerprint, int algorithm, CancellationToken cancellationToken = default)
         {
             SavedFingerprints.Add((trackId, fingerprint, algorithm));
@@ -221,6 +334,7 @@ public sealed class IncrementalLibraryScanServiceTests
     private sealed class FakeScanSessionRepository : IScanSessionRepository
     {
         public ScanSessionSummary? CompletedSummary { get; private set; }
+        public ScanSessionSummary? FailedSummary { get; private set; }
 
         public Task<long> StartAsync(string rootPath, DateTime startedAtUtc, CancellationToken cancellationToken = default)
             => Task.FromResult(42L);
@@ -232,6 +346,9 @@ public sealed class IncrementalLibraryScanServiceTests
         }
 
         public Task FailAsync(long sessionId, DateTime completedAtUtc, ScanSessionSummary summary, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            FailedSummary = summary;
+            return Task.CompletedTask;
+        }
     }
 }
