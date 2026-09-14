@@ -15,13 +15,14 @@ using TrackMatch.Infrastructure.Trash;
 namespace TrackMatch.App;
 
 /// <summary>
-/// Global Duplicate Groupの構成、Library固有Keep、確認根拠と明示的なGlobal Track操作を扱う詳細画面。
+/// 重複グループの構成、ライブラリ固有の残すファイル、確認根拠と明示的な物理ファイル操作を扱う詳細画面。
 /// </summary>
 public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChanged
 {
     private readonly string _databasePath;
     private readonly long _libraryId;
     private readonly long _groupId;
+    private readonly List<CandidatePairKey> _confirmedRelationPairs = [];
     private string _trashRoot;
     private readonly SingleTrackPreviewPlayer _previewPlayer = new();
     private Button? _playingButton;
@@ -104,11 +105,18 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             _previewPlayer.Stop();
             _selectedTrack = value;
             OnPropertyChanged();
+            RefreshSelectedRelations();
         }
     }
 
     public ObservableCollection<DuplicateGroupTrackViewModel> AllTracks { get; } = [];
-    public ObservableCollection<string> ConfirmedRelations { get; } = [];
+    public ObservableCollection<DuplicateGroupRelationViewModel> SelectedRelations { get; } = [];
+
+    /// <summary>選択中のファイルに直接つながる確定済み重複がない場合だけ表示する案内。</summary>
+    public string RelationEmptyText => SelectedRelations.Count == 0
+        ? "このファイルと直接結び付く、確認済みの重複判定はありません。"
+        : string.Empty;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private async void DuplicateGroupDetailsWindow_Loaded(object sender, RoutedEventArgs e)
@@ -147,7 +155,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         var group = await groups.GetByIdAsync(_groupId, _libraryId);
         if (group is null)
         {
-            throw new InvalidOperationException("指定された重複グループは現在のLibraryから参照できません。");
+            throw new InvalidOperationException("指定された重複グループは現在のライブラリから参照できません。");
         }
 
         var trackLookup = new SqliteTrackLookupRepository(database);
@@ -156,7 +164,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         foreach (var trackId in group.GlobalTrackIds)
         {
             var track = await trackLookup.GetByIdAsync(trackId)
-                ?? throw new InvalidDataException($"重複グループ内のTrack #{trackId} が見つかりません。");
+                ?? throw new InvalidDataException($"重複グループ内のファイル #{trackId} が見つかりません。");
             trackModels[trackId] = DuplicateGroupTrackViewModel.Create(
                 track,
                 group.KeepTrackId == trackId,
@@ -166,18 +174,18 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         GroupTitle = $"重複グループ #{group.Id}";
         var externalCount = group.GlobalTrackIds.Count - group.TrackIds.Count;
         FileCountText = externalCount > 0
-            ? $"Track数: {group.GlobalTrackIds.Count}（現在のLibrary: {group.TrackIds.Count} / Library外: {externalCount}）"
-            : $"Track数: {group.TrackIds.Count}（すべて現在のLibrary）";
+            ? $"ファイル数: {group.GlobalTrackIds.Count}（現在のライブラリ: {group.TrackIds.Count} / 現在のライブラリ外: {externalCount}）"
+            : $"ファイル数: {group.TrackIds.Count}（すべて現在のライブラリ）";
         KeepStateText = group.KeepStatus switch
         {
-            DuplicateGroupKeepStatus.Selected => "このLibraryのKeepは確定済みです。",
-            DuplicateGroupKeepStatus.Conflict => "複数の過去Keepが競合しています。残すファイルを再確認してください。",
+            DuplicateGroupKeepStatus.Selected => "このライブラリで残すファイルは確定済みです。",
+            DuplicateGroupKeepStatus.Conflict => "以前の指定が競合しています。残すファイルを再確認してください。",
             DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
             _ => "残すファイルはまだ選択されていません。",
         };
 
         AllTracks.Clear();
-        ConfirmedRelations.Clear();
+        _confirmedRelationPairs.Clear();
         foreach (var item in group.GlobalTrackIds.Select(trackId => trackModels[trackId]))
         {
             AllTracks.Add(item);
@@ -192,14 +200,52 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
                      .OrderBy(review => review.Pair.TrackIdA)
                      .ThenBy(review => review.Pair.TrackIdB))
         {
-            var left = trackModels[review.Pair.TrackIdA].Title;
-            var right = trackModels[review.Pair.TrackIdB].Title;
-            ConfirmedRelations.Add($"{left} ↔ {right}    重複として確認済み");
+            _confirmedRelationPairs.Add(review.Pair);
         }
 
         SelectedTrack = previouslySelectedTrackId is { } selectedId
             ? AllTracks.FirstOrDefault(item => item.TrackId == selectedId) ?? AllTracks.FirstOrDefault()
             : AllTracks.FirstOrDefault(item => item.IsKeep) ?? AllTracks.FirstOrDefault();
+
+        // 再読み込み前後で同じインスタンスが選ばれるケースでも、判定一覧は最新レビューから作り直す。
+        RefreshSelectedRelations();
+    }
+
+    private void RefreshSelectedRelations()
+    {
+        SelectedRelations.Clear();
+        var selected = SelectedTrack;
+        if (selected is null)
+        {
+            OnPropertyChanged(nameof(RelationEmptyText));
+            return;
+        }
+
+        foreach (var pair in _confirmedRelationPairs)
+        {
+            long? counterpartId = pair.TrackIdA == selected.TrackId
+                ? pair.TrackIdB
+                : pair.TrackIdB == selected.TrackId
+                    ? pair.TrackIdA
+                    : null;
+            if (counterpartId is null)
+            {
+                continue;
+            }
+
+            var counterpart = AllTracks.FirstOrDefault(item => item.TrackId == counterpartId.Value);
+            if (counterpart is null)
+            {
+                continue;
+            }
+
+            SelectedRelations.Add(new DuplicateGroupRelationViewModel(
+                counterpart.Title,
+                counterpart.Path,
+                counterpart.ScopeLabel));
+        }
+
+        OnPropertyChanged(nameof(RelationEmptyText));
     }
 
     private async void SetSelectedKeep_Click(object sender, RoutedEventArgs e)
@@ -211,11 +257,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
 
         var detail = track.IsInCurrentLibrary
-            ? "このLibraryの重複グループで、このファイル以外がごみ箱移動対象になります。"
-            : "このファイルは現在のLibrary外ですが、Global Duplicate Groupの構成TrackなのでKeepとして選択できます。Library Membership自体は追加されません。";
+            ? "このライブラリの重複グループで、このファイル以外がごみ箱への移動対象になります。"
+            : "このファイルは現在のライブラリ外ですが、この重複グループを構成するファイルなので残すファイルとして選択できます。現在のライブラリへ追加されることはありません。";
         var confirmation = new ConfirmationDialog(
             "残すファイルを変更",
-            $"「{track.Title}」をこのLibraryで残すファイルに設定しますか？",
+            $"「{track.Title}」をこのライブラリで残すファイルに設定しますか？",
             detail,
             "このファイルを残す",
             "キャンセル",
@@ -255,7 +301,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             new ConfirmationDialog(
                 "ごみ箱フォルダ未設定",
                 "ごみ箱フォルダが設定されていません",
-                "メイン画面のLibrary設定からApp-wideのごみ箱フォルダを設定してから実行してください。",
+                "メイン画面のライブラリ設定からごみ箱フォルダを設定してから実行してください。",
                 "閉じる",
                 kind: AppDialogKind.Warning)
             { Owner = this }.ShowDialog();
@@ -277,23 +323,23 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             var previewItem = preview.Items.SingleOrDefault();
             if (previewItem is null)
             {
-                ShowError("ごみ箱処理失敗", "対象Trackを確認できませんでした", track.Path);
+                ShowError("ごみ箱処理失敗", "対象ファイルを確認できませんでした", track.Path);
                 return;
             }
 
             var impact = preview.SharedTrackImpacts.SingleOrDefault();
-            var detail = "このTrackは現在のLibraryには所属していません。物理ファイルを移動するGlobal操作であり、Library Membershipを追加する操作ではありません。";
+            var detail = "このファイルは現在のライブラリには所属していません。元の物理ファイルをごみ箱へ移動するため、他のライブラリから同じファイルを参照している場合も影響します。";
             if (impact is not null && impact.OtherLibraries.Count > 0)
             {
-                detail += $"\n\n参照中の他Library: {string.Join("、", impact.OtherLibraries.Select(item => item.Name))}";
+                detail += $"\n\n参照中の他のライブラリ: {string.Join("、", impact.OtherLibraries.Select(item => item.Name))}";
             }
             if (impact is not null && impact.KeepLibraries.Count > 0)
             {
-                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのTrackがKeepに指定されています。移動後はKeep不在となり再確認が必要です。";
+                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのファイルが「残すファイル」に指定されています。移動後は残すファイルを再確認する必要があります。";
             }
 
             var confirmation = new ConfirmationDialog(
-                "Library外Trackをごみ箱へ移動",
+                "現在のライブラリ外のファイルをごみ箱へ移動",
                 $"「{track.Title}」の物理ファイルをごみ箱へ移動しますか？",
                 detail,
                 "影響を確認して続行",
@@ -312,7 +358,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
                 var collisionDialog = new ConfirmationDialog(
                     "移動先のファイル重複",
                     "ごみ箱側に同じパスのファイルがあります",
-                    "別名で移動するか、このTrackの移動を中止するかを選択してください。",
+                    "別名で移動するか、このファイルの移動を中止するかを選択してください。",
                     "別名で移動",
                     "中止",
                     kind: AppDialogKind.Warning)
@@ -326,7 +372,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             }
             else if (previewItem.Status != RejectedTrackMoveStatus.Ready)
             {
-                ShowError("ごみ箱へ移動できません", previewItem.Message ?? "このTrackは現在移動できません。", track.Path);
+                ShowError("ごみ箱へ移動できません", previewItem.Message ?? "このファイルは現在移動できません。", track.Path);
                 return;
             }
 
@@ -358,7 +404,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
-            ShowError("ごみ箱処理失敗", "Library外Trackのごみ箱処理を完了できませんでした", exception.Message);
+            ShowError("ごみ箱処理失敗", "現在のライブラリ外にあるファイルのごみ箱処理を完了できませんでした", exception.Message);
         }
     }
 
@@ -469,3 +515,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
+
+/// <summary>
+/// 選択中のファイルから見た、重複として確認済みの相手ファイルを表示するモデル。
+/// </summary>
+public sealed record DuplicateGroupRelationViewModel(
+    string Title,
+    string Path,
+    string ScopeLabel);
