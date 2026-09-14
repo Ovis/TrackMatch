@@ -29,21 +29,35 @@ public sealed class SqliteCandidateClassificationRepository(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         if (libraryId is null)
         {
+            // Missing Trackを含むClassificationは今回の再分類対象ではない。
+            // ここで削除すると同Content復帰時に再利用できるMachine Cacheまで失うため、Active Pairだけを置換する。
             await connection.ExecuteAsync(new CommandDefinition(
-                "DELETE FROM CandidateClassifications;",
+                """
+                DELETE FROM CandidateClassifications
+                WHERE EXISTS (
+                        SELECT 1 FROM Tracks a
+                        WHERE a.Id = CandidateClassifications.TrackIdA AND a.IsMissing = 0)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks b
+                        WHERE b.Id = CandidateClassifications.TrackIdB AND b.IsMissing = 0);
+                """,
                 transaction: transaction,
                 cancellationToken: cancellationToken));
         }
         else
         {
+            // Library MembershipはMissing中も保持されるためMembership条件だけでは不十分。
+            // 現在の再分類で評価できたActive Pairだけを置換し、Missingを含む保存済みClassificationは保持する。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidateClassifications
                 WHERE EXISTS (
                         SELECT 1 FROM LibraryTracks a
+                        INNER JOIN Tracks ta ON ta.Id = a.TrackId AND ta.IsMissing = 0
                         WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateClassifications.TrackIdA)
                   AND EXISTS (
                         SELECT 1 FROM LibraryTracks b
+                        INNER JOIN Tracks tb ON tb.Id = b.TrackId AND tb.IsMissing = 0
                         WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateClassifications.TrackIdB);
                 """,
                 new { LibraryId = libraryId },
