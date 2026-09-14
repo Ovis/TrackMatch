@@ -114,6 +114,38 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         Assert.True(File.Exists(path));
     }
 
+    [Fact]
+    public async Task DeleteTracksAsync_RemovesKeepHistoryWhenTrackExistsOnlyInGraphSnapshot()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var keepTrackId = await AddTrackAsync(tracks, "keep.flac", addMembership: true);
+        var deletedTrackId = await AddTrackAsync(tracks, "delete.flac", addMembership: true);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO LibraryDuplicateGroupKeepHistory (
+                    LibraryId, LibraryNameSnapshot, DuplicateGroupId, GraphKeySnapshot,
+                    KeepTrackId, Status, ChangeKind, ChangedAtUtcTicks, Note)
+                VALUES ($libraryId, 'Music', NULL, $graphKey, $keepTrackId, 'Selected', 'Test', $ticks, NULL);
+                """;
+            command.Parameters.AddWithValue("$libraryId", _libraryId);
+            command.Parameters.AddWithValue("$graphKey", $"{Math.Min(keepTrackId, deletedTrackId)},{Math.Max(keepTrackId, deletedTrackId)}");
+            command.Parameters.AddWithValue("$keepTrackId", keepTrackId);
+            command.Parameters.AddWithValue("$ticks", DateTime.UtcNow.Ticks);
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        await new SqliteTrackManagementRepository(_database)
+            .DeleteTracksAsync([deletedTrackId], TestContext.Current.CancellationToken);
+
+        await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var verifyCommand = verifyConnection.CreateCommand();
+        verifyCommand.CommandText = "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;";
+        Assert.Equal(0L, (long)(await verifyCommand.ExecuteScalarAsync(TestContext.Current.CancellationToken))!);
+    }
+
     private async Task<long> AddTrackAsync(
         SqliteTrackRepository tracks,
         string fileName,
