@@ -182,6 +182,58 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
         Assert.Equal(diffRoot.Id, Assert.Single(reloadedDiff.Roots).Id);
     }
 
+    [Fact]
+    public async Task Remap_UpdatesRelativePathForUnaffectedParentRootMembership()
+    {
+        var parentRootPath = Path.Combine(_directory, "Parent");
+        var oldChildRootPath = Path.Combine(parentRootPath, "Child");
+        var newChildRootPath = Path.Combine(parentRootPath, "MovedChild");
+        Directory.CreateDirectory(oldChildRootPath);
+        Directory.CreateDirectory(newChildRootPath);
+
+        var oldTrackPath = Path.Combine(oldChildRootPath, "track.flac");
+        var newTrackPath = Path.Combine(newChildRootPath, "track.flac");
+        await File.WriteAllBytesAsync(newTrackPath, [1], TestContext.Current.CancellationToken);
+
+        var libraries = new SqliteLibraryRepository(_database);
+        var parentLibrary = await libraries.CreateAsync("Parent Library", [parentRootPath], TestContext.Current.CancellationToken);
+        var childLibrary = await libraries.CreateAsync("Child Library", [oldChildRootPath], TestContext.Current.CancellationToken);
+        var parentRoot = Assert.Single(parentLibrary.Roots);
+        var childRoot = Assert.Single(childLibrary.Roots);
+        var tracks = new SqliteTrackRepository(_database);
+        var trackId = await tracks.UpsertMetadataAsync(CreateMetadata(oldTrackPath), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            parentLibrary.Id,
+            parentRoot.Id,
+            trackId,
+            Path.Combine("Child", "track.flac"),
+            TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            childLibrary.Id,
+            childRoot.Id,
+            trackId,
+            "track.flac",
+            TestContext.Current.CancellationToken);
+
+        await new SqliteLibraryRootRemapService(_database).ApplyAsync(
+            childLibrary.Id,
+            childRoot.Id,
+            newChildRootPath,
+            TestContext.Current.CancellationToken);
+
+        var parentEntry = Assert.Single(await tracks.GetByRootAsync(
+            parentLibrary.Id,
+            parentRoot.Id,
+            TestContext.Current.CancellationToken));
+        Assert.Equal(Path.Combine("MovedChild", "track.flac"), parentEntry.Membership.RelativePath);
+        var childEntry = Assert.Single(await tracks.GetByRootAsync(
+            childLibrary.Id,
+            childRoot.Id,
+            TestContext.Current.CancellationToken));
+        Assert.Equal("track.flac", childEntry.Membership.RelativePath);
+        Assert.Equal(trackId, childEntry.Track.Id);
+    }
+
     private static AudioTrackMetadata CreateMetadata(string path)
         => new(
             path,
