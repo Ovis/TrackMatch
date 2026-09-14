@@ -72,8 +72,7 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
             new CandidateReview(
                 CandidatePairKey.Create(trackA, trackB),
                 CandidateReviewDecision.ConfirmedDuplicate,
-                "confirmed",
-                trackA),
+                "confirmed"),
             TestContext.Current.CancellationToken);
         var repository = new SqliteTrackManagementRepository(_database);
 
