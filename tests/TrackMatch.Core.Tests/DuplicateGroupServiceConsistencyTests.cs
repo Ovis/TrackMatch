@@ -66,7 +66,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
             CandidateReviewDecision.NotDuplicate,
             null);
         var reviews = new RecordingReviewRepository(initial);
-        var tracks = new FakeTrackLookupRepository(missingTrackId: 2);
+        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
         var groups = new RecordingGroupRepository();
         var service = new DuplicateGroupService(reviews, tracks, groups);
 
@@ -81,6 +81,28 @@ public sealed class DuplicateGroupServiceConsistencyTests
     }
 
     [Fact]
+    public async Task SaveReviewAsync_RejectsConflictWithCurrentVerdictsHiddenByMissingTrack()
+    {
+        var reviews = new RecordingReviewRepository(
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null),
+            new CandidateReview(CandidatePairKey.Create(2, 3), CandidateReviewDecision.ConfirmedDuplicate, null));
+        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
+        var groups = new RecordingGroupRepository();
+        var service = new DuplicateGroupService(reviews, tracks, groups);
+
+        // BがMissingでもA-B/B-CのCurrent Verdict自体は有効な正本として残る。
+        // A-CをNotDuplicateにするとB復帰時に矛盾するため、保存時点で拒否する。
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveReviewAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, reviews.SaveCount);
+        var stored = await reviews.GetAllAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, stored.Count);
+    }
+
+    [Fact]
     public async Task DeleteReviewAsync_AllowsClearingExistingVerdictWhileTrackIsMissing()
     {
         var initial = new CandidateReview(
@@ -88,7 +110,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
             CandidateReviewDecision.ConfirmedDuplicate,
             null);
         var reviews = new RecordingReviewRepository(initial);
-        var tracks = new FakeTrackLookupRepository(missingTrackId: 2);
+        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
         var groups = new RecordingGroupRepository();
         var service = new DuplicateGroupService(reviews, tracks, groups);
 
@@ -131,9 +153,9 @@ public sealed class DuplicateGroupServiceConsistencyTests
     {
         private readonly List<CandidateReview> _reviews;
 
-        public RecordingReviewRepository(CandidateReview initial)
+        public RecordingReviewRepository(params CandidateReview[] initial)
         {
-            _reviews = [initial];
+            _reviews = [.. initial];
         }
 
         public int SaveCount { get; private set; }
@@ -161,8 +183,10 @@ public sealed class DuplicateGroupServiceConsistencyTests
             => Task.FromResult<IReadOnlySet<CandidatePairKey>>(_reviews.Select(item => item.Pair).ToHashSet());
     }
 
-    private sealed class FakeTrackLookupRepository(long? missingTrackId = null) : ITrackLookupRepository
+    private sealed class FakeTrackLookupRepository(IReadOnlySet<long>? missingTrackIds = null) : ITrackLookupRepository
     {
+        private readonly IReadOnlySet<long> _missingTrackIds = missingTrackIds ?? new HashSet<long>();
+
         public Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<StoredTrack?>(new StoredTrack(
                 trackId,
@@ -177,10 +201,10 @@ public sealed class DuplicateGroupServiceConsistencyTests
                     1,
                     1,
                     ["Genre"]),
-                trackId == missingTrackId));
+                _missingTrackIds.Contains(trackId)));
 
         public Task<bool> IsInLibraryAsync(long trackId, long libraryId, CancellationToken cancellationToken = default)
-            => Task.FromResult(libraryId == 10 && trackId is 1 or 2);
+            => Task.FromResult(libraryId == 10 && trackId is >= 1 and <= 3);
 
         public Task<IReadOnlyList<long>> GetLibraryIdsAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<long>>([10]);
