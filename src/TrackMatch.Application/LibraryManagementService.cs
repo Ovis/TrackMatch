@@ -1,3 +1,4 @@
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
@@ -127,6 +128,10 @@ public sealed class LibraryManagementService
     /// <summary>
     /// Trash Rootとの配置を再検証し、Preview済みGlobal Root relocationを適用する。
     /// </summary>
+    /// <remarks>
+    /// Remap本体のCommit後はTrackのMissing状態やMembershipが正本となるため、呼び出し元Cancelでは
+    /// Keep Current State整理とGlobal Duplicate Group再同期を中断しない。
+    /// </remarks>
     public async Task<LibraryRootRemapResult> RemapRootAsync(
         long libraryId,
         long rootId,
@@ -135,8 +140,20 @@ public sealed class LibraryManagementService
     {
         ValidateAgainstTrash([newRootPath]);
         var database = await OpenDatabaseAsync(cancellationToken);
-        return await new SqliteLibraryRootRemapService(database)
+        var result = await new SqliteLibraryRootRemapService(database)
             .ApplyAsync(libraryId, rootId, newRootPath, cancellationToken);
+
+        // Remapでは複数LibraryのRoot/MembershipとGlobal Missingが同時に変わり得る。
+        // Commit後に古いLibrary固有KeepやMaterialized Groupを残さないよう、正本から必ず再整合する。
+        await new SqliteLibraryKeepStateMaintenance(database)
+            .CleanupUnrelatedCurrentStatesAsync(CancellationToken.None);
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var tracks = new SqliteTrackLookupRepository(database);
+        var groups = new SqliteDuplicateGroupRepository(database);
+        await new DuplicateGroupService(reviews, tracks, groups)
+            .SynchronizeGlobalAsync(CancellationToken.None);
+
+        return result;
     }
 
     private void ValidateAgainstTrash(IEnumerable<string> rootPaths)
