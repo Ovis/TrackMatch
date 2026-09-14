@@ -26,7 +26,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             SELECT x.TrackIdA, x.TrackIdB, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
                    x.BestOffsetTicks, x.MatchedDurationTicks,
-                   x.ComparedAtUtcTicks,
+                   x.ComparedAtUtcTicks, c.ClassifiedAtUtcTicks,
                    a.Path AS PathA, b.Path AS PathB,
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
@@ -127,6 +127,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 reviewDecision,
                 kind,
                 row.ComparedAtUtcTicks,
+                row.ClassifiedAtUtcTicks,
                 row.ReviewedAtUtcTicks));
     }
 
@@ -138,11 +139,20 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         CandidateReviewDecision? reviewDecision,
         AudioRelationshipKind? kind,
         long comparedAtUtcTicks,
+        long? classifiedAtUtcTicks,
         long? reviewedAtUtcTicks)
     {
-        if (reviewDecision is null
-            || reviewedAtUtcTicks is null
-            || comparedAtUtcTicks <= reviewedAtUtcTicks.Value)
+        if (reviewDecision is null || reviewedAtUtcTicks is null)
+        {
+            return false;
+        }
+
+        // Comparison値が同じでも分類Profileや分類ロジックだけが更新されることがある。
+        // 「Machine Result更新後」の判定なので、比較と分類のうち新しい方をHuman Verdict時刻と比較する。
+        var latestMachineResultAtUtcTicks = classifiedAtUtcTicks is { } classifiedAt
+            ? Math.Max(comparedAtUtcTicks, classifiedAt)
+            : comparedAtUtcTicks;
+        if (latestMachineResultAtUtcTicks <= reviewedAtUtcTicks.Value)
         {
             return false;
         }
@@ -166,7 +176,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     private sealed record ReportRow(
         long TrackIdA, long TrackIdB, string? Kind, string? Reason,
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
-        long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks,
+        long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks, long? ClassifiedAtUtcTicks,
         string PathA, string PathB, string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
