@@ -44,7 +44,59 @@ public sealed class MissingMachineCurrentStateTests : IAsyncLifetime
         var a = await CreateTrackAsync(tracks, "machine-a.flac");
         var b = await CreateTrackAsync(tracks, "machine-b.flac");
         var pair = CandidatePairKey.Create(a, b);
+        var (comparisons, classifications) = await SeedMachineStateAsync(pair);
 
+        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+
+        await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
+
+        // MissingはIdentityや再利用可能なMachine Cacheを削除しないが、Current処理対象からは外す。
+        Assert.Empty(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+
+        // Content Versionが変わらず同じPathへ戻った場合は保存済みMachine Cacheを再利用できる。
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("machine-b.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(b, restoredId);
+        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CandidateRegeneration_PreservesPairWhenCounterpartIsMissing()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "pending-a.flac");
+        var b = await CreateTrackAsync(tracks, "missing-b.flac");
+        var pair = CandidatePairKey.Create(a, b);
+        var (comparisons, classifications) = await SeedMachineStateAsync(pair);
+        var pairs = new SqliteCandidatePairRepository(_database, _libraryId);
+
+        await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
+
+        // AだけがPending/更新対象になっても、Missing中のBとのPairは今回の候補探索では評価していない。
+        // そのためPairを候補外と解釈してComparison/ClassificationまでCASCADE削除してはならない。
+        await pairs.ReplaceForTracksAsync(
+            [a],
+            [],
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(await pairs.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("missing-b.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(b, restoredId);
+        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+    }
+
+    private async Task<(SqliteCandidateComparisonRepository Comparisons, SqliteCandidateClassificationRepository Classifications)> SeedMachineStateAsync(
+        CandidatePairKey pair)
+    {
         await new SqliteCandidatePairRepository(_database, _libraryId).ReplaceAllAsync(
             [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 0)],
             TestContext.Current.CancellationToken);
@@ -74,23 +126,7 @@ public sealed class MissingMachineCurrentStateTests : IAsyncLifetime
                 "{}")],
             TestContext.Current.CancellationToken);
 
-        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
-        Assert.Single(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
-        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
-
-        await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
-
-        // MissingはIdentityや再利用可能なMachine Cacheを削除しないが、Current処理対象からは外す。
-        Assert.Empty(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
-
-        // Content Versionが変わらず同じPathへ戻った場合は保存済みMachine Cacheを再利用できる。
-        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("machine-b.flac"), TestContext.Current.CancellationToken);
-        Assert.Equal(b, restoredId);
-        Assert.Single(await comparisons.GetAllAsync(TestContext.Current.CancellationToken));
-        Assert.Single(await comparisons.GetComparedAtUtcAsync(TestContext.Current.CancellationToken));
-        Assert.Single(await classifications.GetReportAsync(TestContext.Current.CancellationToken));
+        return (comparisons, classifications);
     }
 
     private async Task<long> CreateTrackAsync(SqliteTrackRepository repository, string fileName)
