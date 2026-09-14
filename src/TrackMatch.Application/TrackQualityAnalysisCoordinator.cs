@@ -153,36 +153,59 @@ public sealed class TrackQualityAnalysisCoordinator
         while (TryTake(out var request))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var analyzingStartedAtUtc = DateTime.UtcNow;
 
+            // 開始時刻を所有権トークンとしてAnalyzing行へ保存する。旧セッションの完了/Cancelが
+            // 新セッションやForce Reanalysis後の状態を上書きしないよう、最終更新はこのトークンで条件付きCommitする。
+            await _repository.UpsertAsync(
+                CreateState(
+                    request.TrackId,
+                    QualityAnalysisStatus.Analyzing,
+                    analyzedAtUtc: analyzingStartedAtUtc),
+                cancellationToken);
+
+            TrackQualityAnalysis result;
             try
             {
-                await _repository.UpsertAsync(
-                    CreateState(request.TrackId, QualityAnalysisStatus.Analyzing),
-                    cancellationToken);
-                var result = await _analyzer.AnalyzeAsync(request.TrackId, request.Path, cancellationToken);
-                await _repository.UpsertAsync(result, cancellationToken);
-                counters.RecordCompleted(result.Status == QualityAnalysisStatus.Failed);
-                progress?.Report(counters.Snapshot());
+                result = await _analyzer.AnalyzeAsync(request.TrackId, request.Path, cancellationToken);
             }
             catch (OperationCanceledException)
             {
-                // Analyzingは実行中だけ成立するCurrent Stateであり、キャンセル後まで永続化すると
-                // 次回起動時に実行中でない解析が「解析中」に見える。DB整合を優先してCancel不可で待機状態へ戻す。
-                await _repository.UpsertAsync(
-                    CreateState(request.TrackId, QualityAnalysisStatus.NotAnalyzed),
+                // 新しいセッションが既に同Trackを解析中なら開始時刻が異なるため、その状態は削除しない。
+                await _repository.DeleteAnalyzingAsync(
+                    request.TrackId,
+                    analyzingStartedAtUtc,
                     CancellationToken.None);
                 throw;
             }
             catch (Exception ex)
             {
                 // 1 Trackの予期しない解析失敗で残りのCandidate品質解析を止めない。
-                // エラー自体はFailedとして保存し、次回実行時に再試行可能な状態へする。
-                await _repository.UpsertAsync(
-                    CreateState(request.TrackId, QualityAnalysisStatus.Failed, ex.Message),
-                    cancellationToken);
-                counters.RecordCompleted(failed: true);
-                progress?.Report(counters.Snapshot());
+                // Failedもこの解析がまだCurrentを所有している場合だけ保存する。
+                result = CreateState(request.TrackId, QualityAnalysisStatus.Failed, ex.Message);
             }
+
+            bool committed;
+            try
+            {
+                committed = await _repository.TryCompleteAnalyzingAsync(
+                    result,
+                    analyzingStartedAtUtc,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                await _repository.DeleteAnalyzingAsync(
+                    request.TrackId,
+                    analyzingStartedAtUtc,
+                    CancellationToken.None);
+                throw;
+            }
+
+            // Force Reanalysis/Content Change/新セッションで所有権を失っていた場合は解析結果を捨てる。
+            // Workerとしては処理済みなので進捗だけ完了させ、Current Stateには触れない。
+            counters.RecordCompleted(committed && result.Status == QualityAnalysisStatus.Failed);
+            progress?.Report(counters.Snapshot());
         }
     }
 
@@ -254,7 +277,8 @@ public sealed class TrackQualityAnalysisCoordinator
     private static TrackQualityAnalysis CreateState(
         long trackId,
         QualityAnalysisStatus status,
-        string? failureReason = null)
+        string? failureReason = null,
+        DateTime? analyzedAtUtc = null)
         => new(
             trackId,
             QualityAnalysisVersions.TrackQualityAnalysis,
@@ -273,7 +297,7 @@ public sealed class TrackQualityAnalysisCoordinator
             null,
             null,
             null,
-            null,
+            analyzedAtUtc,
             failureReason);
 
     /// <summary>
