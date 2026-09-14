@@ -66,7 +66,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
             CandidateReviewDecision.NotDuplicate,
             null);
         var reviews = new RecordingReviewRepository(initial);
-        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
+        var tracks = new FakeTrackLookupRepository(new HashSet<long> { 2 });
         var groups = new RecordingGroupRepository();
         var service = new DuplicateGroupService(reviews, tracks, groups);
 
@@ -86,7 +86,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
         var reviews = new RecordingReviewRepository(
             new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null),
             new CandidateReview(CandidatePairKey.Create(2, 3), CandidateReviewDecision.ConfirmedDuplicate, null));
-        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
+        var tracks = new FakeTrackLookupRepository(new HashSet<long> { 2 });
         var groups = new RecordingGroupRepository();
         var service = new DuplicateGroupService(reviews, tracks, groups);
 
@@ -110,7 +110,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
             CandidateReviewDecision.ConfirmedDuplicate,
             null);
         var reviews = new RecordingReviewRepository(initial);
-        var tracks = new FakeTrackLookupRepository(missingTrackIds: [2]);
+        var tracks = new FakeTrackLookupRepository(new HashSet<long> { 2 });
         var groups = new RecordingGroupRepository();
         var service = new DuplicateGroupService(reviews, tracks, groups);
 
