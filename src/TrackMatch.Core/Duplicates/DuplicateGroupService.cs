@@ -51,7 +51,11 @@ public sealed class DuplicateGroupService(
         ArgumentNullException.ThrowIfNull(review);
         review.Validate();
         ValidateKeepSelection(review, keepTrackId);
-        await EnsurePairBelongsToLibraryAsync(libraryId, review.Pair, cancellationToken);
+        await EnsurePairBelongsToLibraryAsync(
+            libraryId,
+            review.Pair,
+            requireActiveTracks: true,
+            cancellationToken);
 
         var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
         var existingReview = allReviews.SingleOrDefault(item => item.Pair == review.Pair);
@@ -115,7 +119,12 @@ public sealed class DuplicateGroupService(
         CandidatePairKey pair,
         CancellationToken cancellationToken = default)
     {
-        await EnsurePairBelongsToLibraryAsync(libraryId, pair, cancellationToken);
+        // Missing中でも既存Verdictを明示的に解除できるよう、削除時はMembershipだけを要求する。
+        await EnsurePairBelongsToLibraryAsync(
+            libraryId,
+            pair,
+            requireActiveTracks: false,
+            cancellationToken);
 
         var currentReviews = await GetActiveGlobalReviewsAsync(cancellationToken);
         var proposedReviews = currentReviews.Where(item => item.Pair != pair).ToArray();
@@ -236,6 +245,7 @@ public sealed class DuplicateGroupService(
     private async Task EnsurePairBelongsToLibraryAsync(
         long libraryId,
         CandidatePairKey pair,
+        bool requireActiveTracks,
         CancellationToken cancellationToken)
     {
         if (libraryId <= 0)
@@ -248,6 +258,13 @@ public sealed class DuplicateGroupService(
         if (trackA is null || trackB is null)
         {
             throw new InvalidOperationException("レビュー対象のTrackが見つかりません。");
+        }
+
+        // Current Human Verdictはユーザーが現在確認できる物理状態に対してだけ新規保存する。
+        // Missing中に隠れたVerdictを作ると、後日復帰した瞬間に未確認のGroupが有効化されるため禁止する。
+        if (requireActiveTracks && (trackA.IsMissing || trackB.IsMissing))
+        {
+            throw new InvalidOperationException("Missing状態のTrackを新しいHuman Verdictとして保存できません。再スキャンで利用可能状態を確認してください。");
         }
 
         if (!await trackLookupRepository.IsInLibraryAsync(pair.TrackIdA, libraryId, cancellationToken)
