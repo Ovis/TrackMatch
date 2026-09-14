@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Management;
 using TrackMatch.Core.Models;
@@ -143,6 +144,50 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         Assert.Equal(1, deleted);
         Assert.Null(await tracks.GetByPathAsync(path, TestContext.Current.CancellationToken));
         Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task DeleteTracksAsync_RemovesSelectedKeepBeforeDeletedTrackFkCanNullIt()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await AddTrackAsync(tracks, "a.flac", addMembership: true);
+        var b = await AddTrackAsync(tracks, "b.flac", addMembership: true);
+        var c = await AddTrackAsync(tracks, "c.flac", addMembership: true);
+        var groups = new SqliteDuplicateGroupRepository(_database);
+        var service = new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(_database),
+            new SqliteTrackLookupRepository(_database),
+            groups);
+
+        // TriangleにしておくことでKeep=Aを完全削除してもB-CのGlobal VerdictとGroup自体は残る。
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
+            a,
+            TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(CandidatePairKey.Create(b, c), CandidateReviewDecision.ConfirmedDuplicate, null),
+            b,
+            TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.ConfirmedDuplicate, null),
+            a,
+            TestContext.Current.CancellationToken);
+
+        var before = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, before.KeepStatus);
+        Assert.Equal(a, before.KeepTrackId);
+
+        await new SqliteTrackManagementRepository(_database)
+            .DeleteTracksAsync([a], TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var after = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { b, c }.Order().ToArray(), after.GlobalTrackIds.Order().ToArray());
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, after.KeepStatus);
+        Assert.Null(after.KeepTrackId);
     }
 
     [Fact]
