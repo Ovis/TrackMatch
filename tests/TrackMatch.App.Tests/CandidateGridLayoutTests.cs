@@ -51,10 +51,12 @@ public sealed class CandidateGridLayoutTests
                 application.Shutdown();
 
                 Assert.Equal(verticalScrollBar.ActualWidth, headerCornerOverlay.ActualWidth, precision: 5);
-                Assert.Equal(verticalScrollBarPosition.X, headerCornerOverlayPosition.X, precision: 5);
+                // DataGridの外枠1px分だけScrollBar本体とOverlayのX座標がずれるため、
+                // 完全一致ではなく同じ右端予約領域を覆っていることを1px許容で検証する。
+                Assert.InRange(Math.Abs(verticalScrollBarPosition.X - headerCornerOverlayPosition.X), 0, 1.1);
                 Assert.Equal(headerTop, headerCornerOverlayPosition.Y, precision: 5);
                 Assert.IsType<CandidateRow>(candidateGrid.SelectedItem);
-                Assert.Equal(["分類", "A", "B", "音響一致度", "レビュー結果", "判定元"], headerTexts);
+                Assert.Equal(["分類", "A", "B", "一致度", "レビュー結果"], headerTexts);
             }
             catch (Exception caught)
             {
@@ -129,7 +131,6 @@ public sealed class CandidateGridLayoutTests
         public string TitleB => $"B {Index}";
         public string Similarity => "99%";
         public string ReviewResult => "未レビュー";
-        public string ReviewOriginText => string.Empty;
     }
 
     private sealed class QualityPanelRow
