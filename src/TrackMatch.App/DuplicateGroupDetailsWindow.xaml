@@ -63,6 +63,7 @@
                                         <TextBlock Margin="0,5,0,0" Text="{Binding Path}" TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Bottom" Orientation="Horizontal">
+                                        <Button Margin="0,0,8,0" Padding="12,6" Content="このファイルを残す" Tag="{Binding TrackId}" IsEnabled="{Binding CanSelectAsKeep}" Click="SetKeep_Click"/>
                                         <Button Margin="0,0,8,0" Padding="12,6" Content="▶ 再生" Tag="{Binding Path}" Click="Preview_Click"/>
                                         <Button Padding="12,6" Content="📁" ToolTip="エクスプローラーで表示" Tag="{Binding Path}" Click="OpenFolder_Click"/>
                                     </StackPanel>
