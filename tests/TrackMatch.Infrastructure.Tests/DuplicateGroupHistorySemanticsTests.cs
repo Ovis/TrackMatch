@@ -127,14 +127,16 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
             Assert.Contains("TrackMissing", kinds);
         }
 
-        // 同じContentのTrackが再発見された場合は旧Verdictを維持したままGroupへ復帰し、復帰理由を履歴へ残す。
-        await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        // 同じTrackが再発見されても旧Dispositionは自動適用しない。
+        // Trashから手動復元したファイルを再び無確認でTrash対象にしないため、Current Keepは要確認へ戻す。
+        var restoredTrackId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(c, restoredTrackId);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
-        Assert.Equal(a, restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
+        Assert.Null(restored.KeepTrackId);
 
         await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var changeKinds = (await verifyConnection.QueryAsync<string>(
