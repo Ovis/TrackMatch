@@ -52,6 +52,8 @@ public sealed class LibraryAnalysisWorkflow
     /// 異なるLibraryで同一Rootを登録できるため、同一Pathが複数Libraryに存在する場合は曖昧として拒否する。
     /// GUIの通常処理ではLibrary ID指定APIを使用する。Scan Jobはプロセス全体で同時に1件へ制限する。
     /// </remarks>
+    /// <param name="rootPath">走査対象として登録済みのRoot Path</param>
+    /// <param name="cancellationToken">走査のキャンセル要求</param>
     public async Task<IncrementalScanResult> ScanAsync(
         string rootPath,
         CancellationToken cancellationToken = default)
@@ -98,6 +100,9 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Libraryに登録された全Rootを順に増分走査する。
     /// </summary>
+    /// <param name="libraryId">走査対象LibraryのID</param>
+    /// <param name="cancellationToken">走査のキャンセル要求</param>
+    /// <param name="progress">Root数とファイル処理件数を通知する進捗通知先</param>
     public async Task<LibraryRootScanBatchResult> ScanLibraryAsync(
         long libraryId,
         CancellationToken cancellationToken = default,
@@ -151,6 +156,8 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 保存済みFingerprintから候補ペアを増分生成する。
     /// </summary>
+    /// <param name="options">候補生成設定。nullの場合は既定値を使用する</param>
+    /// <param name="cancellationToken">候補生成のキャンセル要求</param>
     public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
         CandidateGenerationOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -166,6 +173,10 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定LibraryのMembershipに属するTrackだけを対象に候補ペアを増分生成する。
     /// </summary>
+    /// <param name="libraryId">候補生成対象LibraryのID</param>
+    /// <param name="options">候補生成設定。nullの場合は既定値を使用する</param>
+    /// <param name="cancellationToken">候補生成のキャンセル要求</param>
+    /// <param name="progress">索引更新と候補探索の件数を通知する進捗通知先</param>
     public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
         long libraryId,
         CandidateGenerationOptions? options = null,
@@ -184,6 +195,7 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 候補ペアを詳細比較し、変更されていないGlobal ComparisonはDBから再利用する。
     /// </summary>
+    /// <param name="cancellationToken">詳細比較のキャンセル要求</param>
     public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -195,6 +207,9 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Library内の候補ペアだけを詳細比較する。
     /// </summary>
+    /// <param name="libraryId">詳細比較対象LibraryのID</param>
+    /// <param name="cancellationToken">詳細比較のキャンセル要求</param>
+    /// <param name="progress">候補ペア単位の比較進捗通知先</param>
     public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
         long libraryId,
         CancellationToken cancellationToken = default,
@@ -209,6 +224,9 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Library内の詳細比較済み候補へ関係分類を適用する。
     /// </summary>
+    /// <param name="libraryId">分類対象LibraryのID</param>
+    /// <param name="profile">分類に使用するしきい値プロファイル</param>
+    /// <param name="cancellationToken">分類処理のキャンセル要求</param>
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesAsync(
         long libraryId,
         RelationshipThresholdProfile profile,
@@ -227,6 +245,9 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// Pathで一意に特定できるRootの走査から候補詳細比較までを一連の処理として実行する。
     /// </summary>
+    /// <param name="rootPath">解析対象として登録済みのRoot Path</param>
+    /// <param name="progress">現在の処理段階を通知する進捗通知先</param>
+    /// <param name="cancellationToken">Workflow全体のキャンセル要求</param>
     public async Task<LibraryAnalysisWorkflowResult> RunAsync(
         string rootPath,
         IProgress<LibraryAnalysisStage>? progress = null,
@@ -247,6 +268,9 @@ public sealed class LibraryAnalysisWorkflow
     /// <summary>
     /// 指定Libraryの全Root走査からLibrary内候補の詳細比較・自動分類までを一連の処理として実行する。
     /// </summary>
+    /// <param name="libraryId">解析対象LibraryのID</param>
+    /// <param name="progress">処理段階と実処理件数をUI等へ通知するための進捗通知先</param>
+    /// <param name="cancellationToken">Workflow全体のキャンセル要求</param>
     public async Task<LibraryScopedAnalysisWorkflowResult> RunAsync(
         long libraryId,
         IProgress<LibraryAnalysisProgress>? progress = null,
@@ -381,6 +405,10 @@ public enum LibraryAnalysisStage
 /// <summary>
 /// ライブラリ分析の実処理件数を含む進捗を表す。
 /// </summary>
+/// <param name="Stage">現在の処理段階</param>
+/// <param name="CompletedCount">現在の段階で処理を完了した件数</param>
+/// <param name="TotalCount">現在の段階の総件数。不明な場合はnull</param>
+/// <param name="Detail">処理段階内の補足表示</param>
 public sealed record LibraryAnalysisProgress(
     LibraryAnalysisStage Stage,
     int CompletedCount,
@@ -390,6 +418,11 @@ public sealed record LibraryAnalysisProgress(
 /// <summary>
 /// 複数対象フォルダを走査するときの進捗を表す。
 /// </summary>
+/// <param name="RootIndex">現在処理中のRoot番号。1始まり</param>
+/// <param name="RootCount">対象Libraryに登録されているRoot総数</param>
+/// <param name="CompletedFiles">現在Rootで処理済みのファイル数</param>
+/// <param name="TotalFiles">現在Rootの対象ファイル総数。不明な場合はnull</param>
+/// <param name="CurrentPath">直近に処理したファイルPath</param>
 public sealed record LibraryScanBatchProgress(
     int RootIndex,
     int RootCount,
