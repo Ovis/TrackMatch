@@ -647,8 +647,12 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                         transaction,
                         cancellationToken: cancellationToken));
                     if (latestTransition is not null
-                        && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal))
+                        && (string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal)
+                            || string.Equals(latestTransition.ChangeKind, "KeepMissing", StringComparison.Ordinal)))
                     {
+                        // MissingだったTrack自身が旧Keepだった場合、Missing中に代替Keepを選び直すと
+                        // Current StateはSelectedへ変わる。旧Keepの復帰もQ64の物理復帰なので、
+                        // KeepMissingをTrackMissingと同じ復帰Guardとして扱って再確認を要求する。
                         return "TrackRestored";
                     }
                 }
