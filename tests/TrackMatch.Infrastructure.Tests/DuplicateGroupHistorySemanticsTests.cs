@@ -228,9 +228,19 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         Assert.Null(restored.KeepTrackId);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        var restoredCount = await connection.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE ChangeKind = 'TrackRestored';");
-        Assert.Equal(1, restoredCount);
+        // Split後は複数の旧Component Current Stateが同じ復帰Topologyへ合流するため、
+        // TrackRestored履歴自体は複数行になり得る。旧Keep=Eを保持していたSelected Stateが
+        // 復帰として履歴化されたことを確認すれば、Q64の安全条件を直接検証できる。
+        var selectedRestoreCount = await connection.ExecuteScalarAsync<long>(
+            """
+            SELECT COUNT(*)
+            FROM LibraryDuplicateGroupKeepHistory
+            WHERE ChangeKind = 'TrackRestored'
+              AND Status = 'Selected'
+              AND KeepTrackId = @KeepTrackId;
+            """,
+            new { KeepTrackId = e });
+        Assert.Equal(1, selectedRestoreCount);
     }
 
     [Fact]
