@@ -1,3 +1,4 @@
+using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
@@ -80,7 +81,7 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RemapRootAsync_RemovesKeepStateForLibraryThatLosesAllGroupMembership()
+    public async Task RemapRootAsync_ArchivesAndRemovesKeepStateForLibraryThatLosesAllGroupMembership()
     {
         var parentRoot = Path.Combine(_directory, "Parent");
         var oldChildRoot = Path.Combine(parentRoot, "Child");
@@ -128,6 +129,21 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
 
         Assert.False(await new SqliteTrackLookupRepository(_database)
             .IsInLibraryAsync(a, parentLibrary.Id, TestContext.Current.CancellationToken));
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            var history = await connection.QuerySingleAsync<(long? KeepTrackId, string Status, string ChangeKind)>(
+                """
+                SELECT KeepTrackId, Status, ChangeKind
+                FROM LibraryDuplicateGroupKeepHistory
+                WHERE LibraryId = @LibraryId AND ChangeKind = 'ScopeRemoved'
+                ORDER BY Id DESC LIMIT 1;
+                """,
+                new { LibraryId = parentLibrary.Id });
+            Assert.Equal(b, history.KeepTrackId);
+            Assert.Equal(nameof(DuplicateGroupKeepStatus.Selected), history.Status);
+            Assert.Equal("ScopeRemoved", history.ChangeKind);
+        }
 
         // 後から再び同GroupへMembershipしても、Remap前のKeepがCurrent Stateとして復活してはいけない。
         var newParentRoot = await libraries.AddRootAsync(parentLibrary.Id, newChildRoot, TestContext.Current.CancellationToken);
