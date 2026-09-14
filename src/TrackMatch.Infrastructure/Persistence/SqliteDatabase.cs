@@ -43,7 +43,7 @@ public sealed class SqliteDatabase
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
 
-        // GUIとScannerが同じDBを扱うため、読み取りと書き込みを並行しやすいWALを最初から使用する。
+        // WPFアプリ内の読み取りと書き込みを並行しやすくするため、WALを最初から使用する。
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA journal_mode = WAL;", cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA synchronous = NORMAL;", cancellationToken: cancellationToken));
 
@@ -199,12 +199,14 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_CandidateClassifications_Kind ON CandidateClassifications (Kind);
 
             -- Current Human VerdictはGlobal Pair単位で1件だけ保持する。
+            -- 操作元Libraryが削除されても判定元表示とHistory退避時の出所を失わないよう名前SnapshotもCurrentに保持する。
             CREATE TABLE IF NOT EXISTS CandidateReviews (
                 TrackIdA INTEGER NOT NULL,
                 TrackIdB INTEGER NOT NULL,
                 Decision TEXT NOT NULL,
                 Note TEXT NULL,
                 SourceLibraryId INTEGER NULL,
+                SourceLibraryNameSnapshot TEXT NULL,
                 ReviewedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
                 CHECK (TrackIdA < TrackIdB),
@@ -231,7 +233,7 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_CandidateReviewHistory_Pair
                 ON CandidateReviewHistory (TrackIdA, TrackIdB, ChangedAtUtcTicks DESC);
 
-            -- Pair上のKeepは既存UIとの橋渡しとしてCurrentだけ保持する。
+            -- Pair上のKeepはレビュー入力時のA/B選択をGroup Keepへ受け渡すためCurrentだけ保持する。
             -- Duplicate Group単位のLibrary固有KeepはLibraryDuplicateGroupKeepStatesへ正規化する。
             CREATE TABLE IF NOT EXISTS CandidateReviewSelections (
                 TrackIdA INTEGER NOT NULL,
