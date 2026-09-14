@@ -143,8 +143,12 @@ public sealed class CandidateGenerationService(
 
         if (workRepository is not null && pendingTrackIds.Count != 0)
         {
-            // Fingerprint生成に失敗したTrackは候補探索を完了できていないためPendingを残す。
-            var completedPending = pendingTrackIds.Where(activeByTrackId.ContainsKey).ToArray();
+            // Pendingの完了条件はFingerprintの存在そのものではなく、このGenerate実行で候補探索と
+            // CandidatePairs永続化が正常完了したこと。ここへ到達した時点でのみActiveなPendingを完了扱いにする。
+            var completedPending = pendingTrackIds
+                .Where(activeByTrackId.ContainsKey)
+                .Where(affectedTrackIds.Contains)
+                .ToArray();
             await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
         }
 
