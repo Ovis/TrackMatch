@@ -233,19 +233,6 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_CandidateReviewHistory_Pair
                 ON CandidateReviewHistory (TrackIdA, TrackIdB, ChangedAtUtcTicks DESC);
 
-            -- Pair上のKeepはレビュー入力時のA/B選択をGroup Keepへ受け渡すためCurrentだけ保持する。
-            -- Duplicate Group単位のLibrary固有KeepはLibraryDuplicateGroupKeepStatesへ正規化する。
-            CREATE TABLE IF NOT EXISTS CandidateReviewSelections (
-                TrackIdA INTEGER NOT NULL,
-                TrackIdB INTEGER NOT NULL,
-                KeepTrackId INTEGER NOT NULL,
-                PRIMARY KEY (TrackIdA, TrackIdB),
-                CHECK (KeepTrackId = TrackIdA OR KeepTrackId = TrackIdB),
-                FOREIGN KEY (TrackIdA, TrackIdB)
-                    REFERENCES CandidateReviews (TrackIdA, TrackIdB) ON DELETE CASCADE,
-                FOREIGN KEY (KeepTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
-            );
-
             -- Duplicate GroupのIdentityはGlobal ConfirmedDuplicate Graphから再構成する。
             CREATE TABLE IF NOT EXISTS DuplicateGroups (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
