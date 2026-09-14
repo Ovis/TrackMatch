@@ -19,58 +19,66 @@ public sealed class SqliteCandidateClassificationRepository(
     {
         ArgumentNullException.ThrowIfNull(classifications);
 
-        const string insertSql = """
-            INSERT INTO CandidateClassifications (
-                TrackIdA, TrackIdB, Kind, Reason, ThresholdProfileJson, ClassifiedAtUtcTicks)
-            VALUES (@TrackIdA, @TrackIdB, @Kind, @Reason, @ThresholdProfileJson, @ClassifiedAtUtcTicks);
-            """;
-
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        if (libraryId is null)
+        await EnsureClassificationsInScopeAsync(connection, transaction, classifications, cancellationToken);
+
+        var existingRows = (await connection.QueryAsync<StoredClassificationRow>(new CommandDefinition(
+            """
+            SELECT c.TrackIdA, c.TrackIdB, c.Kind, c.Reason, c.ThresholdProfileJson
+            FROM CandidateClassifications c
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            WHERE @LibraryId IS NULL
+               OR (
+                    EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB));
+            """,
+            new { LibraryId = libraryId },
+            transaction,
+            cancellationToken: cancellationToken))).ToArray();
+        var existingByPair = existingRows.ToDictionary(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB));
+        var incomingByPair = classifications.ToDictionary(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB));
+
+        // Missing Trackを含むClassificationは今回の再分類対象ではないためexistingRowsへ含めない。
+        // Active Pairのうち今回の入力から消えたものだけを削除し、同Content復帰用Machine Cacheは保持する。
+        var obsoletePairs = existingByPair.Keys.Where(key => !incomingByPair.ContainsKey(key)).ToArray();
+        if (obsoletePairs.Length != 0)
         {
-            // Missing Trackを含むClassificationは今回の再分類対象ではない。
-            // ここで削除すると同Content復帰時に再利用できるMachine Cacheまで失うため、Active Pairだけを置換する。
             await connection.ExecuteAsync(new CommandDefinition(
-                """
-                DELETE FROM CandidateClassifications
-                WHERE EXISTS (
-                        SELECT 1 FROM Tracks a
-                        WHERE a.Id = CandidateClassifications.TrackIdA AND a.IsMissing = 0)
-                  AND EXISTS (
-                        SELECT 1 FROM Tracks b
-                        WHERE b.Id = CandidateClassifications.TrackIdB AND b.IsMissing = 0);
-                """,
-                transaction: transaction,
-                cancellationToken: cancellationToken));
-        }
-        else
-        {
-            // Library MembershipはMissing中も保持されるためMembership条件だけでは不十分。
-            // 現在の再分類で評価できたActive Pairだけを置換し、Missingを含む保存済みClassificationは保持する。
-            await connection.ExecuteAsync(new CommandDefinition(
-                """
-                DELETE FROM CandidateClassifications
-                WHERE EXISTS (
-                        SELECT 1 FROM LibraryTracks a
-                        INNER JOIN Tracks ta ON ta.Id = a.TrackId AND ta.IsMissing = 0
-                        WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateClassifications.TrackIdA)
-                  AND EXISTS (
-                        SELECT 1 FROM LibraryTracks b
-                        INNER JOIN Tracks tb ON tb.Id = b.TrackId AND tb.IsMissing = 0
-                        WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateClassifications.TrackIdB);
-                """,
-                new { LibraryId = libraryId },
+                "DELETE FROM CandidateClassifications WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+                obsoletePairs.Select(key => new { key.TrackIdA, key.TrackIdB }),
                 transaction,
                 cancellationToken: cancellationToken));
         }
 
-        await EnsureClassificationsInScopeAsync(connection, transaction, classifications, cancellationToken);
+        // 同じ入力を再分類しただけでClassifiedAtを更新すると、Human Verdict後の通常Scanまで
+        // 「Machine Resultが更新された」と誤認する。分類内容またはProfileが実際に変化したPairだけ更新する。
+        var changed = classifications
+            .Where(item =>
+            {
+                var key = CandidatePairKey.Create(item.TrackIdA, item.TrackIdB);
+                return !existingByPair.TryGetValue(key, out var existing)
+                    || !string.Equals(existing.Kind, item.Kind.ToString(), StringComparison.Ordinal)
+                    || !string.Equals(existing.Reason, item.Reason, StringComparison.Ordinal)
+                    || !string.Equals(existing.ThresholdProfileJson, item.ThresholdProfileJson, StringComparison.Ordinal);
+            })
+            .ToArray();
 
-        if (classifications.Count != 0)
+        if (changed.Length != 0)
         {
+            const string upsertSql = """
+                INSERT INTO CandidateClassifications (
+                    TrackIdA, TrackIdB, Kind, Reason, ThresholdProfileJson, ClassifiedAtUtcTicks)
+                VALUES (@TrackIdA, @TrackIdB, @Kind, @Reason, @ThresholdProfileJson, @ClassifiedAtUtcTicks)
+                ON CONFLICT (TrackIdA, TrackIdB) DO UPDATE SET
+                    Kind = excluded.Kind,
+                    Reason = excluded.Reason,
+                    ThresholdProfileJson = excluded.ThresholdProfileJson,
+                    ClassifiedAtUtcTicks = excluded.ClassifiedAtUtcTicks;
+                """;
             var classifiedAt = DateTime.UtcNow.Ticks;
-            var parameters = classifications.Select(item => new
+            var parameters = changed.Select(item => new
             {
                 item.TrackIdA,
                 item.TrackIdB,
@@ -80,7 +88,7 @@ public sealed class SqliteCandidateClassificationRepository(
                 ClassifiedAtUtcTicks = classifiedAt,
             });
             await connection.ExecuteAsync(new CommandDefinition(
-                insertSql,
+                upsertSql,
                 parameters,
                 transaction,
                 cancellationToken: cancellationToken));
@@ -143,7 +151,7 @@ public sealed class SqliteCandidateClassificationRepository(
         IReadOnlyCollection<CandidateClassification> classifications,
         CancellationToken cancellationToken)
     {
-        if (libraryId is null || classifications.Count == 0)
+        if (classifications.Count == 0)
         {
             return;
         }
@@ -153,13 +161,23 @@ public sealed class SqliteCandidateClassificationRepository(
             .Distinct()
             .ToArray();
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
+            """
+            SELECT COUNT(*)
+            FROM Tracks t
+            WHERE t.Id IN @TrackIds
+              AND t.IsMissing = 0
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id));
+            """,
             new { LibraryId = libraryId, TrackIds = trackIds },
             transaction,
             cancellationToken: cancellationToken));
         if (count != trackIds.Length)
         {
-            throw new InvalidOperationException("現在LibraryのMembership外TrackをCandidate Classificationとして保存できません。");
+            throw new InvalidOperationException("Missingまたは現在LibraryのMembership外TrackをCandidate Classificationとして保存できません。");
         }
     }
 
@@ -196,6 +214,13 @@ public sealed class SqliteCandidateClassificationRepository(
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
             ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
+
+    private sealed record StoredClassificationRow(
+        long TrackIdA,
+        long TrackIdB,
+        string Kind,
+        string Reason,
+        string ThresholdProfileJson);
 
     private sealed record ReportRow(
         long TrackIdA,
