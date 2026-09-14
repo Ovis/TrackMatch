@@ -87,6 +87,55 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetAsync_ReReviewUsesClassificationUpdateEvenWhenComparisonIsUnchanged()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "classification-a.flac");
+        var trackB = await AddTrackAsync(tracks, "classification-b.flac");
+        await AddComparisonAsync(trackA, trackB);
+
+        var pair = CandidatePairKey.Create(trackA, trackB);
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO CandidateClassifications (
+                    TrackIdA, TrackIdB, Kind, Reason, ThresholdProfileJson, ClassifiedAtUtcTicks)
+                VALUES (@TrackIdA, @TrackIdB, 'DuplicateCandidate', 'before review', '{}', @Ticks);
+                """,
+                new { pair.TrackIdA, pair.TrackIdB, Ticks = DateTime.UtcNow.Ticks });
+        }
+
+        await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken);
+
+        var report = new SqliteCandidateReviewReportRepository(_database);
+        Assert.False(Assert.Single(await report.GetAsync(_libraryId, TestContext.Current.CancellationToken)).ReReviewRecommended);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            // Comparisonを再計算せず分類Profile/ロジックだけが更新されたケースを再現する。
+            // 現在分類がHuman Verdictと強く矛盾する以上、この更新もMachine Result更新として再確認対象にする。
+            await connection.ExecuteAsync(
+                """
+                UPDATE CandidateClassifications
+                SET ClassifiedAtUtcTicks = @Ticks,
+                    Reason = 'classification changed after review'
+                WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
+                """,
+                new
+                {
+                    pair.TrackIdA,
+                    pair.TrackIdB,
+                    Ticks = DateTime.UtcNow.AddSeconds(1).Ticks,
+                });
+        }
+
+        Assert.True(Assert.Single(await report.GetAsync(_libraryId, TestContext.Current.CancellationToken)).ReReviewRecommended);
+    }
+
+    [Fact]
     public async Task GetAsync_DoesNotExposeOlderComparisonAlgorithmVersion()
     {
         var tracks = new SqliteTrackRepository(_database);
