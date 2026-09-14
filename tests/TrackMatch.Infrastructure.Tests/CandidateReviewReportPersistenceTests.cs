@@ -87,6 +87,32 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetAsync_DoesNotExposeOlderComparisonAlgorithmVersion()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "old-a.flac");
+        var trackB = await AddTrackAsync(tracks, "old-b.flac");
+        await AddComparisonAsync(trackA, trackB);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                "UPDATE CandidateComparisons SET ComparisonVersion = @Version WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+                new
+                {
+                    TrackIdA = Math.Min(trackA, trackB),
+                    TrackIdB = Math.Max(trackA, trackB),
+                    Version = CandidateComparisonAlgorithmVersion.Current - 1,
+                });
+        }
+
+        var rows = await new SqliteCandidateReviewReportRepository(_database)
+            .GetAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
     public async Task ReviewSourceNameSurvivesSourceLibraryDeletionAndLaterHistoryArchive()
     {
         var tracks = new SqliteTrackRepository(_database);
@@ -117,7 +143,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         // Source Library削除後に別LibraryからVerdictを変更しても、旧判定の出所名SnapshotをHistoryへそのまま退避する。
         await new SqliteCandidateReviewRepository(_database, viewer.Id).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, trackA),
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null),
             TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
