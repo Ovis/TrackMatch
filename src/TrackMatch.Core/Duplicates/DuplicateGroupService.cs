@@ -75,13 +75,20 @@ public sealed class DuplicateGroupService(
             return;
         }
 
-        var currentReviews = await GetActiveGlobalReviewsAsync(allReviews, cancellationToken);
-        var proposedReviews = currentReviews
+        var proposedAllReviews = allReviews
             .Where(item => item.Pair != review.Pair)
             .Append(review)
             .ToArray();
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
-        var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
+
+        // Missing Trackを含むVerdictもCurrent Human Verdictとして保持され、Track復帰時には再び有効になる。
+        // そのため論理矛盾だけは全Current Verdictで先に検証し、復帰時に初めて矛盾が露呈する状態を作らない。
+        _ = DuplicateGroupPlanner.Build(proposedAllReviews, existingGroups);
+
+        // Materialized Global Groupは現在利用可能なTrackだけから構成する。
+        // Missing Verdictを正本から消さず、物理状態と論理整合性を別の関心事として扱う。
+        var proposedActiveReviews = await GetActiveGlobalReviewsAsync(proposedAllReviews, cancellationToken);
+        var rebuild = DuplicateGroupPlanner.Build(proposedActiveReviews, existingGroups);
 
         // 矛盾検証を終えてからCurrent Verdictを先にCommitする。
         // 以降はCurrent Verdictが正本になっているため、呼び出し元Cancelで派生Group更新だけを中断しない。
