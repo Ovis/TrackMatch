@@ -181,26 +181,12 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
         }
 
-        // Root削除で現在Libraryから到達できなくなったGlobal GroupのKeepだけを除去する。
-        // 他Rootに同じGroupのActive Trackが残る場合はLibrary固有Dispositionとして維持する。
-        await connection.ExecuteAsync(new CommandDefinition(
-            """
-            DELETE FROM LibraryDuplicateGroupKeepStates
-            WHERE LibraryId = @LibraryId
-              AND NOT EXISTS (
-                    SELECT 1
-                    FROM DuplicateGroupTracks gt
-                    INNER JOIN LibraryTracks lt
-                        ON lt.TrackId = gt.TrackId
-                       AND lt.LibraryId = @LibraryId
-                    INNER JOIN Tracks t
-                        ON t.Id = lt.TrackId
-                       AND t.IsMissing = 0
-                    WHERE gt.DuplicateGroupId = LibraryDuplicateGroupKeepStates.DuplicateGroupId);
-            """,
-            new { LibraryId = libraryId },
+        // Root削除でGroupへの最後のActive Membershipを失ったKeepは、Currentから消す前に履歴へ残す。
+        await SqliteLibraryKeepStateMaintenance.ArchiveAndDeleteUnrelatedCurrentStatesAsync(
+            connection,
             transaction,
-            cancellationToken: cancellationToken));
+            libraryId,
+            cancellationToken);
 
         transaction.Commit();
     }
@@ -209,14 +195,22 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
     public async Task DeleteAsync(long libraryId, CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        using var transaction = connection.BeginTransaction();
+        await EnsureLibraryExistsAsync(connection, transaction, libraryId, cancellationToken);
+
+        // Library固有KeepはLibrary FKのCASCADEで消えるため、その前に失効状態をHistoryへ退避する。
+        await SqliteLibraryKeepStateMaintenance.ArchiveLibraryCurrentStatesAsync(
+            connection,
+            transaction,
+            libraryId,
+            cancellationToken);
+
+        await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM Libraries WHERE Id = @LibraryId;",
             new { LibraryId = libraryId },
+            transaction,
             cancellationToken: cancellationToken));
-        if (affected == 0)
-        {
-            throw new InvalidOperationException("指定したライブラリは存在しません。");
-        }
+        transaction.Commit();
     }
 
     private static void EnsureNoOverlapWithin((string DisplayPath, string Key)[] roots)
