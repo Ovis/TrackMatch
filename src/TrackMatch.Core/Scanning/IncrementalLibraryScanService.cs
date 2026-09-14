@@ -123,22 +123,21 @@ public sealed class IncrementalLibraryScanService(
                 progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
             }
 
-            // Root列挙が正常完了した場合は、そのScanで見つからなかった既存Membership TrackをMissingへ遷移させる。
-            // File.Existsの個別確認を追加するとScannerの正常完了結果と別の観測結果が競合し、仕様上のMissing確定条件が曖昧になる。
-            foreach (var storedEntry in storedEntries)
-            {
-                if (storedEntry.Track.IsMissing
-                    || seenPaths.Contains(Path.GetFullPath(storedEntry.Track.Metadata.Path)))
-                {
-                    continue;
-                }
-
-                await trackRepository.MarkMissingAsync(storedEntry.Track.Id, cancellationToken);
-                removed++;
-            }
+            // Missing確定へ入る直前をCancellationの最終受付点とする。
+            // ここを通過した後に部分的なMissingだけを残すと同じRoot内で観測時点が分裂するため、
+            // 対象集合はRepositoryの1 Transactionでキャンセル不可として確定する。
+            cancellationToken.ThrowIfCancellationRequested();
+            var missingTrackIds = storedEntries
+                .Where(entry => !entry.Track.IsMissing
+                    && !seenPaths.Contains(Path.GetFullPath(entry.Track.Metadata.Path)))
+                .Select(entry => entry.Track.Id)
+                .Distinct()
+                .ToArray();
+            await trackRepository.MarkMissingBatchAsync(missingTrackIds, CancellationToken.None);
+            removed = missingTrackIds.Length;
 
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
-            await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, cancellationToken);
+            await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
             return new IncrementalScanResult(sessionId, summary, errors);
         }
         catch
