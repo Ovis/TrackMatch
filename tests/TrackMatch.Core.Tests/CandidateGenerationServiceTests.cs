@@ -25,7 +25,7 @@ public sealed class CandidateGenerationServiceTests
             catalog,
             sketches,
             pairs,
-            new EmptyReviewRepository(),
+            new MutableReviewRepository(),
             sketcher,
             new CandidatePairGenerator(sketcher));
         var options = new CandidateGenerationOptions();
@@ -57,6 +57,40 @@ public sealed class CandidateGenerationServiceTests
         Assert.Equal(2, updated.Pairs.Count);
         Assert.Equal(3, pairs.Pairs.Count);
         Assert.Contains(pairs.Pairs, pair => pair.TrackIdA == 2 && pair.TrackIdB == 3);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ReviewedPairRemainsMachineCandidateButIsNotReturnedAsReviewable()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+        ]);
+        var sketches = new FakeSketchRepository();
+        var pairs = new FakePairRepository();
+        var reviews = new MutableReviewRepository();
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            sketches,
+            pairs,
+            reviews,
+            sketcher,
+            new CandidatePairGenerator(sketcher));
+        var options = new CandidateGenerationOptions();
+
+        var initial = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+        var pair = Assert.Single(initial.Pairs);
+        reviews.ExcludedPairs.Add(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
+
+        var second = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.Empty(second.Pairs);
+        var persisted = Assert.Single(pairs.Pairs);
+        Assert.Equal(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB), CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
     }
 
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values, DateTime extractedAt)
@@ -106,8 +140,10 @@ public sealed class CandidateGenerationServiceTests
             => Task.FromResult(Pairs);
     }
 
-    private sealed class EmptyReviewRepository : ICandidateReviewRepository
+    private sealed class MutableReviewRepository : ICandidateReviewRepository
     {
+        public HashSet<CandidatePairKey> ExcludedPairs { get; } = [];
+
         public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -115,6 +151,6 @@ public sealed class CandidateGenerationServiceTests
             => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
 
         public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(new HashSet<CandidatePairKey>());
+            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(ExcludedPairs);
     }
 }
