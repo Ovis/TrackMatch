@@ -40,7 +40,7 @@ public sealed class CandidateReviewTests
     }
 
     [Fact]
-    public async Task GenerateAsync_ExcludesReviewedPair()
+    public async Task GenerateAsync_ExcludesReviewedPairFromReviewableResultButKeepsMachinePair()
     {
         var values = Enumerable.Repeat(0u, 300).ToArray();
         var fingerprints = new FakeFingerprintCatalogRepository(
@@ -63,7 +63,8 @@ public sealed class CandidateReviewTests
         var result = await service.GenerateAsync(2, new CandidateGenerationOptions(), TestContext.Current.CancellationToken);
 
         Assert.Empty(result.Pairs);
-        Assert.Empty(pairRepository.Pairs);
+        var persisted = Assert.Single(pairRepository.Pairs);
+        Assert.Equal(CandidatePairKey.Create(1, 2), CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
     }
 
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values)
