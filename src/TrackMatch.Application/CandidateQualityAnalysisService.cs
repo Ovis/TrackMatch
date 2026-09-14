@@ -62,7 +62,7 @@ public sealed class CandidateQualityAnalysisService
             return null;
         }
 
-        var analyzingStartedAtUtc = DateTime.UtcNow;
+        var analyzingStartedAtUtc = QualityAnalysisGeneration.CreateTimestamp();
         await _candidateRepository.UpsertAsync(
             CreateState(
                 candidate.TrackIdA,
