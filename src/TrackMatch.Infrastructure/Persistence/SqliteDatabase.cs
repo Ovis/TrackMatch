@@ -175,6 +175,7 @@ public sealed class SqliteDatabase
                 CoverageA REAL NOT NULL,
                 CoverageB REAL NOT NULL,
                 DurationRatio REAL NOT NULL,
+                ComparisonVersion INTEGER NOT NULL,
                 ComparedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
                 FOREIGN KEY (TrackIdA, TrackIdB)
