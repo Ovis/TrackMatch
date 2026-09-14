@@ -25,6 +25,8 @@ public sealed class SqliteCandidatePairRepository(
         const string selectSql = """
             SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
             FROM CandidatePairs p
+            INNER JOIN Tracks ta ON ta.Id = p.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = p.TrackIdB AND tb.IsMissing = 0
             WHERE @LibraryId IS NULL
                OR (
                     EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = p.TrackIdA)
@@ -45,6 +47,7 @@ public sealed class SqliteCandidatePairRepository(
 
         // Candidate GeneratorはHuman Verdictより低信頼の探索レイヤーである。
         // 新しい生成ロジックで候補から外れても、レビュー済みPairを削除してComparisonをCASCADE消去してはいけない。
+        // Missingを含むPairも現在の候補探索では評価していないため、同Content復帰時のMachine Cache再利用に備えて保持する。
         var obsolete = existingRows
             .Where(row =>
             {
@@ -115,6 +118,12 @@ public sealed class SqliteCandidatePairRepository(
                 WHERE (
                         EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
                      OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks ta
+                        WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks tb
+                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0)
                   AND NOT EXISTS (
                         SELECT 1 FROM CandidateReviews r
                         WHERE r.TrackIdA = CandidatePairs.TrackIdA
@@ -126,7 +135,8 @@ public sealed class SqliteCandidatePairRepository(
         else
         {
             // PairはGlobalなので、現在Libraryで評価可能なPairだけを置換する。
-            // Shared Trackの別Library専用PairやHuman Verdict済みPairを現在Libraryの増分生成で消してはいけない。
+            // Shared Trackの別Library専用Pair、Missingを含む未評価Pair、Human Verdict済みPairを
+            // 現在Libraryの増分生成で消してはいけない。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
@@ -139,6 +149,12 @@ public sealed class SqliteCandidatePairRepository(
                   AND EXISTS (
                         SELECT 1 FROM LibraryTracks lb
                         WHERE lb.LibraryId = @LibraryId AND lb.TrackId = CandidatePairs.TrackIdB)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks ta
+                        WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks tb
+                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0)
                   AND NOT EXISTS (
                         SELECT 1 FROM CandidateReviews r
                         WHERE r.TrackIdA = CandidatePairs.TrackIdA
