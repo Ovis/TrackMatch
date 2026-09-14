@@ -40,7 +40,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.SampleRateHz AS SampleRateHzA, b.SampleRateHz AS SampleRateHzB,
                    a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
                    a.Channels AS ChannelsA, b.Channels AS ChannelsB,
-                   r.Decision AS ReviewDecision, s.KeepTrackId
+                   r.Decision AS ReviewDecision, s.KeepTrackId,
+                   r.SourceLibraryId AS ReviewSourceLibraryId,
+                   rl.Name AS ReviewSourceLibraryName
             FROM CandidateComparisons x
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
@@ -48,6 +50,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 ON r.TrackIdA = x.TrackIdA AND r.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateReviewSelections s
                 ON s.TrackIdA = x.TrackIdA AND s.TrackIdB = x.TrackIdB
+            LEFT JOIN Libraries rl ON rl.Id = r.SourceLibraryId
             INNER JOIN Tracks a ON a.Id = x.TrackIdA
             INNER JOIN Tracks b ON b.Id = x.TrackIdB
             WHERE a.IsMissing = 0
@@ -111,8 +114,25 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             ToInt(row.BitrateKbpsA), ToInt(row.BitrateKbpsB), ToInt(row.SampleRateHzA), ToInt(row.SampleRateHzB),
             ToInt(row.BitDepthA), ToInt(row.BitDepthB), ToInt(row.ChannelsA), ToInt(row.ChannelsB),
             reviewDecision, row.KeepTrackId,
-            ToUInt(row.YearA), ToUInt(row.YearB));
+            ToUInt(row.YearA), ToUInt(row.YearB),
+            row.ReviewSourceLibraryId, row.ReviewSourceLibraryName,
+            IsReReviewRecommended(reviewDecision, kind));
     }
+
+    /// <summary>
+    /// Human Verdictと現在のMachine Classificationが明確に逆方向の場合だけ再確認対象にする。
+    /// NeedsReviewは機械側が断定していないため、単独では再確認対象にしない。
+    /// </summary>
+    private static bool IsReReviewRecommended(
+        CandidateReviewDecision? reviewDecision,
+        AudioRelationshipKind? kind)
+        => reviewDecision switch
+        {
+            CandidateReviewDecision.NotDuplicate => kind == AudioRelationshipKind.DuplicateCandidate,
+            CandidateReviewDecision.ConfirmedDuplicate => kind is AudioRelationshipKind.ShortVersionCandidate
+                or AudioRelationshipKind.AlternateVersionCandidate,
+            _ => false,
+        };
 
     private static int? ToInt(long? value) => value is null ? null : checked((int)value.Value);
     private static uint? ToUInt(long? value) => value is null ? null : checked((uint)value.Value);
@@ -133,5 +153,6 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
-        string? ReviewDecision, long? KeepTrackId);
+        string? ReviewDecision, long? KeepTrackId,
+        long? ReviewSourceLibraryId, string? ReviewSourceLibraryName);
 }
