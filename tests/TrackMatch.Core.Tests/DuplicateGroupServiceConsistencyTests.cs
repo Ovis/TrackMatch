@@ -7,7 +7,7 @@ using Xunit;
 namespace TrackMatch.Core.Tests;
 
 /// <summary>
-/// Human Verdict Commit後の派生Global Group整合処理が途中Cancelで分断されないことを検証する。
+/// Human Verdict Commit後の派生Global Group整合処理と、Global Verdict / Library Keep分離を検証する。
 /// </summary>
 public sealed class DuplicateGroupServiceConsistencyTests
 {
@@ -35,6 +35,29 @@ public sealed class DuplicateGroupServiceConsistencyTests
         Assert.Equal(1, groups.SelectedKeepTrackId);
     }
 
+    [Fact]
+    public async Task SaveReviewAsync_SameGlobalVerdictChangesOnlyLibraryKeep()
+    {
+        var initial = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            null);
+        var reviews = new RecordingReviewRepository(initial);
+        var tracks = new FakeTrackLookupRepository();
+        var groups = new RecordingGroupRepository(new GlobalDuplicateGroup(1, [1, 2]));
+        var service = new DuplicateGroupService(reviews, tracks, groups);
+
+        await service.SaveReviewAsync(
+            10,
+            new CandidateReview(initial.Pair, CandidateReviewDecision.ConfirmedDuplicate, null),
+            keepTrackId: 2,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, reviews.SaveCount);
+        Assert.Empty(groups.ReplaceCancellationStates);
+        Assert.Equal(2, groups.SelectedKeepTrackId);
+    }
+
     private sealed class CancellingReviewRepository(CancellationTokenSource cancellation)
         : ICandidateReviewMutationRepository
     {
@@ -45,6 +68,32 @@ public sealed class DuplicateGroupServiceConsistencyTests
             _reviews.RemoveAll(item => item.Pair == review.Pair);
             _reviews.Add(review);
             cancellation.Cancel();
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+        {
+            _reviews.RemoveAll(item => item.Pair == pair);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidateReview>>(_reviews.ToArray());
+
+        public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(_reviews.Select(item => item.Pair).ToHashSet());
+    }
+
+    private sealed class RecordingReviewRepository(CandidateReview initial) : ICandidateReviewMutationRepository
+    {
+        private readonly List<CandidateReview> _reviews = [initial];
+        public int SaveCount { get; private set; }
+
+        public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
+        {
+            SaveCount++;
+            _reviews.RemoveAll(item => item.Pair == review.Pair);
+            _reviews.Add(review);
             return Task.CompletedTask;
         }
 
@@ -92,6 +141,11 @@ public sealed class DuplicateGroupServiceConsistencyTests
     private sealed class RecordingGroupRepository : IDuplicateGroupRepository
     {
         private GlobalDuplicateGroup? _group;
+
+        public RecordingGroupRepository(GlobalDuplicateGroup? initialGroup = null)
+        {
+            _group = initialGroup;
+        }
 
         public List<bool> ReplaceCancellationStates { get; } = [];
         public List<bool> SetKeepCancellationStates { get; } = [];
