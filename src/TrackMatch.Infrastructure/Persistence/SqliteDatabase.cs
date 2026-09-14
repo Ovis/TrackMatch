@@ -47,6 +47,35 @@ public sealed class SqliteDatabase
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA journal_mode = WAL;", cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA synchronous = NORMAL;", cancellationToken: cancellationToken));
 
+        // Schema作成前にVersion管理状態を確認する。
+        // 既存の旧DBへSchemaInfoだけを後付けすると、旧構造をVersion 2と誤認して以後の障害原因になるため、
+        // Version管理前のTrackMatchテーブルが存在するDBはMigrationせず明示的に拒否する。
+        var hasSchemaInfo = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SchemaInfo';",
+            cancellationToken: cancellationToken)) != 0;
+        if (hasSchemaInfo)
+        {
+            var existingVersion = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                "SELECT Version FROM SchemaInfo WHERE Id = 1;",
+                cancellationToken: cancellationToken));
+            if (existingVersion != CurrentSchemaVersion)
+            {
+                throw new InvalidOperationException(
+                    $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {existingVersion}");
+            }
+        }
+        else
+        {
+            var existingUserTableCount = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';",
+                cancellationToken: cancellationToken));
+            if (existingUserTableCount != 0)
+            {
+                throw new InvalidOperationException(
+                    "Version管理前のTrackMatch DB Schemaが検出されました。旧DBのMigrationは提供していないため、DBを削除して再作成してください。");
+            }
+        }
+
         const string schema = """
             CREATE TABLE IF NOT EXISTS SchemaInfo (
                 Id INTEGER PRIMARY KEY CHECK (Id = 1),
