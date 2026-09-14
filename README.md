@@ -77,6 +77,8 @@ Trash processing is explicit. Tracks selected for removal from the current Libra
 
 Shared Global Tracks are handled conservatively: the application shows the affected Libraries before moving a file. Once a physical file is moved away, that Global Track becomes Missing for every Library that referenced it. If the database update fails after the physical move, TrackMatch attempts to move the file back before reporting the failure.
 
+If a Trash/Missing file is later restored to its original path, TrackMatch reuses the same Global Track ID and retains the historical verdict/disposition records, but the current Library Keep is returned to an unselected state. The restored file must therefore be reviewed again before Trash can be executed from the old disposition.
+
 ## Project structure
 
 - `TrackMatch.Core` — domain models, candidate generation, fingerprint comparison, duplicate-group rules, and analysis services.
