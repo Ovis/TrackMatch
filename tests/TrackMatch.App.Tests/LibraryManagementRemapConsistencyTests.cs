@@ -56,7 +56,8 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
         var duplicateGroups = CreateDuplicateGroupService();
         await duplicateGroups.SaveReviewAsync(
             library.Id,
-            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null, a),
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
+            a,
             TestContext.Current.CancellationToken);
         Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetAllGlobalAsync(TestContext.Current.CancellationToken));
@@ -110,7 +111,8 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
         var duplicateGroups = CreateDuplicateGroupService();
         await duplicateGroups.SaveReviewAsync(
             childLibrary.Id,
-            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null, a),
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
+            a,
             TestContext.Current.CancellationToken);
         var groupRepository = new SqliteDuplicateGroupRepository(_database);
         var parentProjection = Assert.Single(await groupRepository.GetByLibraryIdAsync(parentLibrary.Id, TestContext.Current.CancellationToken));
