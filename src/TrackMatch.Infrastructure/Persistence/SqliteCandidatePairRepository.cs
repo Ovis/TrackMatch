@@ -36,9 +36,21 @@ public sealed class SqliteCandidatePairRepository(
             transaction,
             cancellationToken: cancellationToken))).ToArray();
         var incomingByKey = pairs.ToDictionary(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
+        var reviewedKeys = (await connection.QueryAsync<ReviewPairRow>(new CommandDefinition(
+            "SELECT TrackIdA, TrackIdB FROM CandidateReviews;",
+            transaction: transaction,
+            cancellationToken: cancellationToken)))
+            .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
+            .ToHashSet();
 
+        // Candidate GeneratorはHuman Verdictより低信頼の探索レイヤーである。
+        // 新しい生成ロジックで候補から外れても、レビュー済みPairを削除してComparisonをCASCADE消去してはいけない。
         var obsolete = existingRows
-            .Where(row => !incomingByKey.ContainsKey(CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)))
+            .Where(row =>
+            {
+                var key = CandidatePairKey.Create(row.TrackIdA, row.TrackIdB);
+                return !incomingByKey.ContainsKey(key) && !reviewedKeys.Contains(key);
+            })
             .ToArray();
         if (obsolete.Length != 0)
         {
@@ -100,8 +112,13 @@ public sealed class SqliteCandidatePairRepository(
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
-                WHERE EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
-                   OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB);
+                WHERE (
+                        EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
+                     OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
+                  AND NOT EXISTS (
+                        SELECT 1 FROM CandidateReviews r
+                        WHERE r.TrackIdA = CandidatePairs.TrackIdA
+                          AND r.TrackIdB = CandidatePairs.TrackIdB);
                 """,
                 transaction: transaction,
                 cancellationToken: cancellationToken));
@@ -109,7 +126,7 @@ public sealed class SqliteCandidatePairRepository(
         else
         {
             // PairはGlobalなので、現在Libraryで評価可能なPairだけを置換する。
-            // Shared Trackの別Library専用Pairを現在Libraryの増分生成で消してはいけない。
+            // Shared Trackの別Library専用PairやHuman Verdict済みPairを現在Libraryの増分生成で消してはいけない。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
@@ -121,7 +138,11 @@ public sealed class SqliteCandidatePairRepository(
                         WHERE la.LibraryId = @LibraryId AND la.TrackId = CandidatePairs.TrackIdA)
                   AND EXISTS (
                         SELECT 1 FROM LibraryTracks lb
-                        WHERE lb.LibraryId = @LibraryId AND lb.TrackId = CandidatePairs.TrackIdB);
+                        WHERE lb.LibraryId = @LibraryId AND lb.TrackId = CandidatePairs.TrackIdB)
+                  AND NOT EXISTS (
+                        SELECT 1 FROM CandidateReviews r
+                        WHERE r.TrackIdA = CandidatePairs.TrackIdA
+                          AND r.TrackIdB = CandidatePairs.TrackIdB);
                 """,
                 new { LibraryId = libraryId },
                 transaction,
@@ -245,4 +266,6 @@ public sealed class SqliteCandidatePairRepository(
         long TrackIdA,
         long TrackIdB,
         long MinimumSegmentHashDistance);
+
+    private sealed record ReviewPairRow(long TrackIdA, long TrackIdB);
 }
