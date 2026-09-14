@@ -78,7 +78,7 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
         var removedMembershipCount = 0;
 
         // 新Pathが別Library Root配下へ入ってもRemapだけではMembershipを新設しない。
-        // 一方、旧上位Root由来のMembershipが移動後Pathを包含しなくなる場合は範囲外状態を残さないため削除する。
+        // 既存Membershipが移動後もRoot配下に残る場合は、新しい物理Pathに合わせてRelativePathも同じTransactionで更新する。
         var memberships = await connection.QueryAsync<MembershipRow>(new CommandDefinition(
             """
             SELECT lt.LibraryId, lt.TrackId, lt.RootId, r.Path AS RootPath
@@ -100,6 +100,24 @@ public sealed class SqliteLibraryRootRemapService(SqliteDatabase database)
             var trackKey = LibraryValueNormalizer.NormalizeTrackPath(newTrack.NewPath).Key;
             if (IsUnderRoot(trackKey, rootKey))
             {
+                var relativePath = Path.GetRelativePath(effectiveRootPath, newTrack.NewPath);
+                await connection.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE LibraryTracks
+                    SET RelativePath = @RelativePath
+                    WHERE LibraryId = @LibraryId
+                      AND TrackId = @TrackId
+                      AND RootId = @RootId;
+                    """,
+                    new
+                    {
+                        membership.LibraryId,
+                        membership.TrackId,
+                        membership.RootId,
+                        RelativePath = relativePath,
+                    },
+                    transaction,
+                    cancellationToken: cancellationToken));
                 continue;
             }
 
