@@ -5,7 +5,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// Library名とWindows Pathを永続化前に正規化する。
 /// </summary>
-public static partial class LibraryValueNormalizer
+internal static partial class LibraryValueNormalizer
 {
     /// <summary>
     /// 表示用Library名から比較用キーを生成する。
@@ -26,7 +26,7 @@ public static partial class LibraryValueNormalizer
     /// <summary>
     /// Windowsの絶対Root Pathを、比較と保存に使用できる字句上の正規形へ変換する。
     /// </summary>
-    public static (string DisplayPath, string Key) NormalizeRootPath(string path)
+    internal static (string DisplayPath, string Key) NormalizeRootPath(string path)
         => NormalizeWindowsAbsolutePath(path, "対象フォルダ");
 
     /// <summary>
