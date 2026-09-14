@@ -90,6 +90,7 @@ public sealed class SqliteCandidateClassificationRepository(
             FROM CandidateClassifications c
             INNER JOIN CandidateComparisons x
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
+               AND x.ComparisonVersion = @ComparisonVersion
             INNER JOIN Tracks a ON a.Id = c.TrackIdA
             INNER JOIN Tracks b ON b.Id = c.TrackIdB
             WHERE (
@@ -113,7 +114,11 @@ public sealed class SqliteCandidateClassificationRepository(
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
     }
