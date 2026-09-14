@@ -189,6 +189,42 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestoreAfterTopologyChangeWhileMissing_StillRequiresReview()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "topology-a.flac");
+        var b = await CreateTrackAsync(tracks, "topology-b.flac");
+        var c = await CreateTrackAsync(tracks, "topology-c.flac");
+        var d = await CreateTrackAsync(tracks, "topology-d.flac");
+        var service = CreateService();
+        var groups = new SqliteDuplicateGroupRepository(_database);
+
+        await SaveConfirmedAsync(service, a, b, a);
+        await SaveConfirmedAsync(service, b, c, b);
+        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+
+        await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        // CがMissingの間にDを同じGroupへ追加し、現在TopologyをA-B-Dへ変える。
+        // Restore判定を旧Group IDやMissing直前Graph全体の完全一致へ依存させると、Cの復帰を見失う。
+        await SaveConfirmedAsync(service, b, d, b);
+        var changedWhileMissing = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(b, changedWhileMissing.KeepTrackId);
+        Assert.Equal(new[] { a, b, d }.Order().ToArray(), changedWhileMissing.GlobalTrackIds.Order().ToArray());
+
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("topology-c.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(c, restoredId);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { a, b, c, d }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
+        Assert.Null(restored.KeepTrackId);
+    }
+
+    [Fact]
     public async Task RestoreAfterMissingSplitWithKeepOnNewGroupId_StillRequiresReview()
     {
         var tracks = new SqliteTrackRepository(_database);
