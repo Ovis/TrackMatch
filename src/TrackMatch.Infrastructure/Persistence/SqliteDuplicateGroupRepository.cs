@@ -96,11 +96,40 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             transaction: transaction,
             cancellationToken: cancellationToken))).ToArray();
 
-        // Keep Current StateをTopology変更前にHistoryへ退避する。
-        // Missing/Merge/Split/Restoreは後から判断理由を追えるよう、単なる再構築ではなく遷移理由も記録する。
-        foreach (var state in oldKeepStates)
+        var oldById = oldGroups.ToDictionary(group => group.Id);
+        var requestedExistingIds = groups
+            .Where(group => group.ExistingGroupId is not null)
+            .Select(group => group.ExistingGroupId!.Value)
+            .ToHashSet();
+        if (requestedExistingIds.Any(id => !oldById.ContainsKey(id)))
         {
-            var oldGroup = oldGroups.SingleOrDefault(group => group.Id == state.DuplicateGroupId);
+            throw new InvalidOperationException("再利用対象のGlobal Duplicate Group IDが現行構成に存在しません。");
+        }
+
+        // Track集合まで完全一致するGroupはCurrent Stateそのものに変化がない。
+        // 他GroupのSplit/Mergeへ巻き込んでKeep HistoryやUpdatedAtを更新しないよう、そのまま保持する。
+        var unchangedGroupIds = groups
+            .Where(plan => plan.ExistingGroupId is { } id
+                && oldById.TryGetValue(id, out var oldGroup)
+                && SameTrackSet(oldGroup.TrackIds, plan.TrackIds))
+            .Select(plan => plan.ExistingGroupId!.Value)
+            .ToHashSet();
+        var changedOldGroupIds = oldGroups
+            .Select(group => group.Id)
+            .Where(id => !unchangedGroupIds.Contains(id))
+            .ToHashSet();
+        var changedPlans = groups
+            .Where(plan => plan.ExistingGroupId is not { } id || !unchangedGroupIds.Contains(id))
+            .ToArray();
+        var changedOldKeepStates = oldKeepStates
+            .Where(state => changedOldGroupIds.Contains(state.DuplicateGroupId))
+            .ToArray();
+
+        // 実際にTopologyが変わるGroupだけを履歴化する。
+        // 無関係なGroupをGroupRebuildとして記録すると、監査履歴とUpdatedAtの意味が失われるため触らない。
+        foreach (var state in changedOldKeepStates)
+        {
+            var oldGroup = oldById.GetValueOrDefault(state.DuplicateGroupId);
             if (oldGroup is null)
             {
                 continue;
@@ -127,23 +156,23 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 cancellationToken);
         }
 
-        // TrackIdのGlobal UNIQUE制約との一時衝突を避けるため、構成行を先に全削除してからGroup本体を更新する。
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM DuplicateGroupTracks; DELETE FROM LibraryDuplicateGroupKeepStates;",
-            transaction: transaction,
-            cancellationToken: cancellationToken));
-
-        var requestedExistingIds = groups
-            .Where(group => group.ExistingGroupId is not null)
-            .Select(group => group.ExistingGroupId!.Value)
-            .ToHashSet();
-        var existingIds = oldGroups.Select(group => group.Id).ToHashSet();
-        if (requestedExistingIds.Any(id => !existingIds.Contains(id)))
+        if (changedOldGroupIds.Count != 0)
         {
-            throw new InvalidOperationException("再利用対象のGlobal Duplicate Group IDが現行構成に存在しません。");
+            // 変更対象だけ構成行とKeep Current Stateを外す。TrackIdのGlobal UNIQUE制約との一時衝突も、
+            // Split/Mergeへ関与する旧Groupをまとめて外すことで回避する。
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM DuplicateGroupTracks WHERE DuplicateGroupId IN @GroupIds;",
+                new { GroupIds = changedOldGroupIds.ToArray() },
+                transaction,
+                cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM LibraryDuplicateGroupKeepStates WHERE DuplicateGroupId IN @GroupIds;",
+                new { GroupIds = changedOldGroupIds.ToArray() },
+                transaction,
+                cancellationToken: cancellationToken));
         }
 
-        foreach (var obsoleteId in existingIds.Where(id => !requestedExistingIds.Contains(id)))
+        foreach (var obsoleteId in changedOldGroupIds.Where(id => !requestedExistingIds.Contains(id)))
         {
             await connection.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM DuplicateGroups WHERE Id = @Id;",
@@ -152,8 +181,8 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 cancellationToken: cancellationToken));
         }
 
-        var persisted = new List<(long Id, DuplicateGroupRebuildItem Plan)>(groups.Count);
-        foreach (var plan in groups)
+        var persistedChangedGroups = new List<(long Id, DuplicateGroupRebuildItem Plan)>(changedPlans.Length);
+        foreach (var plan in changedPlans)
         {
             var graphKey = BuildGraphKey(plan.TrackIds);
             long groupId;
@@ -183,10 +212,16 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 plan.TrackIds.Select(trackId => new { DuplicateGroupId = groupId, TrackId = trackId }),
                 transaction,
                 cancellationToken: cancellationToken));
-            persisted.Add((groupId, plan));
+            persistedChangedGroups.Add((groupId, plan));
         }
 
-        await RestoreKeepStatesAsync(connection, transaction, oldGroups, oldKeepStates, persisted, cancellationToken);
+        await RestoreKeepStatesAsync(
+            connection,
+            transaction,
+            oldGroups,
+            changedOldKeepStates,
+            persistedChangedGroups,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -543,6 +578,51 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             }
         }
 
+        var overlappingNewTrackIds = overlappingNewGroups
+            .SelectMany(group => group.TrackIds)
+            .ToHashSet();
+        var removedTrackIds = oldGroup.TrackIds
+            .Where(trackId => !overlappingNewTrackIds.Contains(trackId))
+            .ToArray();
+        if (removedTrackIds.Length != 0)
+        {
+            var missingCount = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                "SELECT COUNT(*) FROM Tracks WHERE Id IN @TrackIds AND IsMissing = 1;",
+                new { TrackIds = removedTrackIds },
+                transaction,
+                cancellationToken: cancellationToken));
+            if (missingCount != 0)
+            {
+                return "TrackMissing";
+            }
+        }
+
+        if (overlappingNewGroups.Length == 1)
+        {
+            var newTrackIds = overlappingNewGroups[0].TrackIds.ToHashSet();
+            var addedTrackIds = newTrackIds.Where(trackId => !oldGroup.TrackIds.Contains(trackId)).ToArray();
+            if (addedTrackIds.Length != 0)
+            {
+                // TrackMissing時のHistoryにはMissing直前のGraph Keyが残る。
+                // 同じLibraryでそのGraph構成が再成立した場合だけ、一般的なGroup拡張ではなく復帰として扱う。
+                var priorMissingHistory = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                    """
+                    SELECT COUNT(*)
+                    FROM LibraryDuplicateGroupKeepHistory
+                    WHERE LibraryId = @LibraryId
+                      AND ChangeKind = 'TrackMissing'
+                      AND GraphKeySnapshot = @GraphKey;
+                    """,
+                    new { LibraryId = state.LibraryId, GraphKey = BuildGraphKey(newTrackIds) },
+                    transaction,
+                    cancellationToken: cancellationToken));
+                if (priorMissingHistory != 0)
+                {
+                    return "TrackRestored";
+                }
+            }
+        }
+
         if (overlappingNewGroups.Length > 1)
         {
             return "GroupSplit";
@@ -602,6 +682,9 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             transaction,
             cancellationToken: cancellationToken));
     }
+
+    private static bool SameTrackSet(IReadOnlyList<long> left, IReadOnlyList<long> right)
+        => left.Count == right.Count && left.Order().SequenceEqual(right.Order());
 
     private static string BuildGraphKey(IEnumerable<long> trackIds)
         => string.Join(',', trackIds.Order());
