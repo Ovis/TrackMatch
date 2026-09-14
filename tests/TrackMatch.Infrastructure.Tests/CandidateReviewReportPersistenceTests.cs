@@ -127,6 +127,38 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         Assert.Equal("Source Library", archivedSourceName);
     }
 
+    [Fact]
+    public async Task ContentChangePreservesDeletedSourceLibraryNameInReviewHistory()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "content-a.flac");
+        var trackB = await AddTrackAsync(tracks, "content-b.flac");
+        var pair = CandidatePairKey.Create(trackA, trackB);
+        await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken);
+
+        await new SqliteLibraryRepository(_database).DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        // Content Version更新はCurrent Verdictを無効化するが、判定時点のLibrary名Snapshotまで現在状態から再解決してはならない。
+        await tracks.UpsertMetadataAsync(
+            CreateMetadata("content-a.flac", fileSize: 2048),
+            TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var history = await connection.QuerySingleAsync<(string? SourceLibraryNameSnapshot, string ChangeKind)>(
+            """
+            SELECT SourceLibraryNameSnapshot, ChangeKind
+            FROM CandidateReviewHistory
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB
+            ORDER BY Id DESC
+            LIMIT 1;
+            """,
+            new { pair.TrackIdA, pair.TrackIdB });
+        Assert.Equal("Source Library", history.SourceLibraryNameSnapshot);
+        Assert.Equal("ContentChanged", history.ChangeKind);
+    }
+
     private async Task AddComparisonAsync(long trackA, long trackB)
     {
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
@@ -150,24 +182,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     private async Task<long> AddTrackAsync(SqliteTrackRepository tracks, string fileName)
     {
         var id = await tracks.UpsertMetadataAsync(
-            new AudioTrackMetadata(
-                Path.Combine(_directory, fileName),
-                1024,
-                new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc),
-                TimeSpan.FromMinutes(3),
-                ["Artist"],
-                fileName,
-                "Album",
-                1,
-                1,
-                ["J-POPS"],
-                "FLAC",
-                "FLAC",
-                900,
-                44100,
-                16,
-                2,
-                2026),
+            CreateMetadata(fileName),
             TestContext.Current.CancellationToken);
         await tracks.EnsureMembershipAsync(
             _libraryId,
@@ -177,4 +192,24 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
         return id;
     }
+
+    private AudioTrackMetadata CreateMetadata(string fileName, long fileSize = 1024)
+        => new(
+            Path.Combine(_directory, fileName),
+            fileSize,
+            new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc),
+            TimeSpan.FromMinutes(3),
+            ["Artist"],
+            fileName,
+            "Album",
+            1,
+            1,
+            ["J-POPS"],
+            "FLAC",
+            "FLAC",
+            900,
+            44100,
+            16,
+            2,
+            2026);
 }
