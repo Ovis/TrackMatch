@@ -53,7 +53,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         var groups = await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken);
-        var unrelatedGroup = Assert.Single(groups.Where(group => group.GlobalTrackIds.Contains(c)));
+        var unrelatedGroup = Assert.Single(groups, group => group.GlobalTrackIds.Contains(c));
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var beforeUpdatedAt = await connection.ExecuteScalarAsync<long>(
