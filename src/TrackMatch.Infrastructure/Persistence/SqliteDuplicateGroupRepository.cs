@@ -619,33 +619,38 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             var addedTrackIds = newTrackIds.Where(trackId => !oldGroup.TrackIds.Contains(trackId)).ToArray();
             if (addedTrackIds.Length != 0)
             {
-                var targetGraphKey = BuildGraphKey(newTrackIds);
-
-                // MissingでGroupがSplitすると、Keepを持つComponentが新しいGroup IDへ移る場合がある。
-                // Restore判定をGroup IDへ結び付けるとその復帰を見失うため、Missing直前の完全Graphを表す
-                // GraphKeySnapshotをLibrary内のTopology履歴から検索する。後続Topology変更が同じGraphを離れる際には
-                // 新しい履歴が同じGraphKeyで残るため、古いTrackMissingを通常のGroup拡張へ再利用しない。
-                var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
-                    """
-                    SELECT ChangeKind, GraphKeySnapshot
-                    FROM LibraryDuplicateGroupKeepHistory
-                    WHERE LibraryId = @LibraryId
-                      AND GraphKeySnapshot = @TargetGraphKey
-                      AND ChangeKind IN (
-                          'TrackMissing', 'TrackRestored',
-                          'KeepMissing', 'KeepRestored',
-                          'GroupSplit', 'GroupMerge', 'GroupRebuild',
-                          'ScopeRemoved', 'LibraryDeleted')
-                    ORDER BY Id DESC
-                    LIMIT 1;
-                    """,
-                    new { LibraryId = state.LibraryId, TargetGraphKey = targetGraphKey },
-                    transaction,
-                    cancellationToken: cancellationToken));
-                if (latestTransition is not null
-                    && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal))
+                // Group IDや現在のGraph形状はMissing中のSplit/Merge/Verdict変更で変化し得る。
+                // そのため復帰判定は、今回追加された各Trackについて「そのTrackを含む直近Topology履歴」を見る。
+                // TrackRestored後に再度そのTrackがGroupから外れれば、その時のGroupSplit/GroupRebuildが
+                // TrackMissingより新しい履歴になるため、古いMissingを通常の再追加へ誤利用しない。
+                foreach (var addedTrackId in addedTrackIds)
                 {
-                    return "TrackRestored";
+                    var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
+                        """
+                        SELECT ChangeKind, GraphKeySnapshot
+                        FROM LibraryDuplicateGroupKeepHistory
+                        WHERE LibraryId = @LibraryId
+                          AND ChangeKind IN (
+                              'TrackMissing', 'TrackRestored',
+                              'KeepMissing', 'KeepRestored',
+                              'GroupSplit', 'GroupMerge', 'GroupRebuild',
+                              'ScopeRemoved', 'LibraryDeleted')
+                          AND (',' || GraphKeySnapshot || ',') LIKE @TrackToken
+                        ORDER BY Id DESC
+                        LIMIT 1;
+                        """,
+                        new
+                        {
+                            LibraryId = state.LibraryId,
+                            TrackToken = $"%,{addedTrackId},%",
+                        },
+                        transaction,
+                        cancellationToken: cancellationToken));
+                    if (latestTransition is not null
+                        && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal))
+                    {
+                        return "TrackRestored";
+                    }
                 }
             }
         }
