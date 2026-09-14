@@ -53,16 +53,9 @@ public interface ITrackRepository
     /// 正常完了したRoot ScanのMissing確定対象を一括でGlobal Missingへ遷移させる。
     /// 永続化実装では、この集合を部分適用しないTransaction境界として扱う。
     /// </summary>
-    async Task MarkMissingBatchAsync(
+    Task MarkMissingBatchAsync(
         IReadOnlyCollection<long> trackIds,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(trackIds);
-        foreach (var trackId in trackIds)
-        {
-            await MarkMissingAsync(trackId, cancellationToken);
-        }
-    }
+        CancellationToken cancellationToken = default);
 
     Task SaveFingerprintAsync(
         long trackId,
