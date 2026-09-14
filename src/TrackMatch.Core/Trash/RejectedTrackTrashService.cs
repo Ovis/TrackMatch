@@ -104,13 +104,14 @@ public sealed class RejectedTrackTrashService(
     }
 
     /// <summary>
-    /// ユーザーが明示的に選択したGlobal Track 1件だけをPreviewまたはTrashへ移動する。
+    /// 現在Library外にあるTrack 1件を、ユーザーの明示操作としてPreviewまたはTrashへ移動する。
     /// </summary>
     /// <remarks>
-    /// Library単位の一括Trashとは別の明示操作用APIであり、現在LibraryへのMembershipを要求しない。
-    /// これによりLibrary外Trackを処置できる一方、一括TrashがLibrary外Trackまで暗黙に巻き込むことはない。
+    /// Library単位の一括Trashとは別の明示操作用APIである。
+    /// 現在Library所属TrackはLibrary固有Keepを考慮する一括Trash経路で扱う必要があるため、このAPIでは拒否する。
+    /// これによりUIのボタン制御に依存せず、Library外Trackだけを明示的なGlobal物理操作の対象にする。
     /// </remarks>
-    /// <param name="currentLibraryId">操作元画面のLibrary。影響する他Libraryの判定基準に使用する</param>
+    /// <param name="currentLibraryId">操作元画面のLibrary。対象がLibrary外であることと他Libraryへの影響判定に使用する</param>
     /// <param name="trackId">明示的にTrash対象として選択されたGlobal Track</param>
     /// <param name="trashRoot">App-wide Trashのルート</param>
     /// <param name="execute">falseはPreview、trueは実移動</param>
@@ -140,6 +141,14 @@ public sealed class RejectedTrackTrashService(
         if (track is null)
         {
             return new RejectedTrackTrashResult([], execute, []);
+        }
+
+        // 現在Library所属Trackをこの経路で処理すると、そのLibrary自身のKeep影響を見落としたまま
+        // 物理ファイルを移動できてしまう。Library内TrackはKeepを考慮する一括Trash経路へ限定する。
+        if (await trackLookupRepository.IsInLibraryAsync(trackId, currentLibraryId, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "現在のライブラリに所属するファイルは、ライブラリ外ファイル用の明示的なごみ箱操作では移動できません。");
         }
 
         var sourcePath = Path.GetFullPath(track.Metadata.Path);
