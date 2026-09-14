@@ -21,21 +21,35 @@ public sealed class SqliteCandidateComparisonRepository(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         if (libraryId is null)
         {
+            // Missing Trackを含むComparisonは今回の比較対象ではないため、Active Pairだけを置換する。
+            // 同Content復帰時に再利用できるMachine Cacheを、全件置換APIが誤って削除しないようにする。
             await connection.ExecuteAsync(new CommandDefinition(
-                "DELETE FROM CandidateComparisons;",
+                """
+                DELETE FROM CandidateComparisons
+                WHERE EXISTS (
+                        SELECT 1 FROM Tracks a
+                        WHERE a.Id = CandidateComparisons.TrackIdA AND a.IsMissing = 0)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks b
+                        WHERE b.Id = CandidateComparisons.TrackIdB AND b.IsMissing = 0);
+                """,
                 transaction: transaction,
                 cancellationToken: cancellationToken));
         }
         else
         {
+            // Library MembershipはMissing後も残るため、Membership条件だけで削除するとMissing Cacheまで失われる。
+            // 現在利用可能なPairだけを今回の置換対象とする。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidateComparisons
                 WHERE EXISTS (
                         SELECT 1 FROM LibraryTracks a
+                        INNER JOIN Tracks ta ON ta.Id = a.TrackId AND ta.IsMissing = 0
                         WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateComparisons.TrackIdA)
                   AND EXISTS (
                         SELECT 1 FROM LibraryTracks b
+                        INNER JOIN Tracks tb ON tb.Id = b.TrackId AND tb.IsMissing = 0
                         WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateComparisons.TrackIdB);
                 """,
                 new { LibraryId = libraryId },
