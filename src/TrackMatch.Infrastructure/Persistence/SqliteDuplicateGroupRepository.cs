@@ -265,6 +265,15 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             new { LibraryId = libraryId, GroupId = groupId },
             transaction,
             cancellationToken: cancellationToken));
+        if (current is not null
+            && current.KeepTrackId == keepTrackId
+            && string.Equals(current.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal))
+        {
+            // 同じSelected Keepへの再設定は状態遷移ではないため、HistoryもUpdatedAtも変更しない。
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
         if (current is not null)
         {
             await InsertKeepHistoryAsync(
