@@ -60,6 +60,47 @@ public sealed class CandidateGenerationServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_InactiveTrackDoesNotInvalidateStoredMachinePairs()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+            Stored(3, values, extractedAt),
+        ]);
+        var pairs = new FakePairRepository();
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            new FakeSketchRepository(),
+            pairs,
+            new MutableReviewRepository(),
+            sketcher,
+            new CandidatePairGenerator(sketcher));
+        var options = new CandidateGenerationOptions();
+
+        await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+        Assert.Equal(3, pairs.Pairs.Count);
+
+        // Missing TrackはActive Fingerprint集合から一時的に外れるが、同Contentで復帰したときに
+        // Comparison等を再利用できるよう、Candidate Pair自体は失効させない。
+        catalog.Items =
+        [
+            Stored(1, values, extractedAt),
+            Stored(3, values, extractedAt),
+        ];
+
+        var result = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsFullRebuild);
+        Assert.Empty(result.Pairs);
+        Assert.Empty(pairs.LastAffectedTrackIds);
+        Assert.Equal(3, pairs.Pairs.Count);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ReviewedPairRemainsMachineCandidateButIsNotReturnedAsReviewable()
     {
         var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
@@ -158,10 +199,26 @@ public sealed class CandidateGenerationServiceTests
     private sealed class FakePairRepository : ICandidatePairRepository
     {
         public IReadOnlyList<CandidatePair> Pairs { get; private set; } = [];
+        public IReadOnlyList<long> LastAffectedTrackIds { get; private set; } = [];
 
         public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> pairs, CancellationToken cancellationToken = default)
         {
             Pairs = pairs.ToArray();
+            LastAffectedTrackIds = [];
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceForTracksAsync(
+            IReadOnlyCollection<long> trackIds,
+            IReadOnlyCollection<CandidatePair> pairs,
+            CancellationToken cancellationToken = default)
+        {
+            LastAffectedTrackIds = trackIds.Distinct().OrderBy(trackId => trackId).ToArray();
+            var affected = LastAffectedTrackIds.ToHashSet();
+            Pairs = Pairs
+                .Where(pair => !affected.Contains(pair.TrackIdA) && !affected.Contains(pair.TrackIdB))
+                .Concat(pairs)
+                .ToArray();
             return Task.CompletedTask;
         }
 
