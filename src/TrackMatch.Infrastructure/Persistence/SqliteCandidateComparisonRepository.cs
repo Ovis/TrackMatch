@@ -81,17 +81,23 @@ public sealed class SqliteCandidateComparisonRepository(
             SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
                    c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
             FROM CandidateComparisons c
-            WHERE @LibraryId IS NULL
-               OR (
-                    EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
-                AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB))
+            WHERE c.ComparisonVersion = @ComparisonVersion
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB)))
             ORDER BY c.Similarity DESC, c.TrackIdA, c.TrackIdB;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.Select(ToDomain).ToArray();
     }
