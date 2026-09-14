@@ -43,22 +43,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await AddTrackAsync(tracks, "a.flac");
         var trackB = await AddTrackAsync(tracks, "b.flac");
-        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
-            [new CandidatePair(trackA, trackB, 0)],
-            TestContext.Current.CancellationToken);
-        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
-            [new CandidateComparison(
-                trackA,
-                trackB,
-                0.99,
-                0,
-                TimeSpan.Zero,
-                100,
-                TimeSpan.FromMinutes(3),
-                0.99,
-                0.99,
-                1.0)],
-            TestContext.Current.CancellationToken);
+        await AddComparisonAsync(trackA, trackB);
 
         await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
         {
@@ -99,6 +84,67 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         var changed = Assert.Single(await report.GetAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.True(changed.ReReviewRecommended);
+    }
+
+    [Fact]
+    public async Task ReviewSourceNameSurvivesSourceLibraryDeletionAndLaterHistoryArchive()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "shared-a.flac");
+        var trackB = await AddTrackAsync(tracks, "shared-b.flac");
+        await AddComparisonAsync(trackA, trackB);
+
+        var libraries = new SqliteLibraryRepository(_database);
+        var viewer = await libraries.CreateAsync(
+            "Viewer Library",
+            [_directory],
+            TestContext.Current.CancellationToken);
+        var viewerRootId = Assert.Single(viewer.Roots).Id;
+        await tracks.EnsureMembershipAsync(viewer.Id, viewerRootId, trackA, "shared-a.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(viewer.Id, viewerRootId, trackB, "shared-b.flac", TestContext.Current.CancellationToken);
+
+        var pair = CandidatePairKey.Create(trackA, trackB);
+        await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            TestContext.Current.CancellationToken);
+
+        await libraries.DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        var current = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
+            .GetAsync(viewer.Id, TestContext.Current.CancellationToken));
+        Assert.Null(current.ReviewSourceLibraryId);
+        Assert.Equal("Source Library", current.ReviewSourceLibraryName);
+
+        // Source Library削除後に別LibraryからVerdictを変更しても、旧判定の出所名SnapshotをHistoryへそのまま退避する。
+        await new SqliteCandidateReviewRepository(_database, viewer.Id).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, trackA),
+            TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var archivedSourceName = await connection.QuerySingleAsync<string>(
+            "SELECT SourceLibraryNameSnapshot FROM CandidateReviewHistory WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB ORDER BY Id DESC LIMIT 1;",
+            new { pair.TrackIdA, pair.TrackIdB });
+        Assert.Equal("Source Library", archivedSourceName);
+    }
+
+    private async Task AddComparisonAsync(long trackA, long trackB)
+    {
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [new CandidatePair(Math.Min(trackA, trackB), Math.Max(trackA, trackB), 0)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [new CandidateComparison(
+                Math.Min(trackA, trackB),
+                Math.Max(trackA, trackB),
+                0.99,
+                0,
+                TimeSpan.Zero,
+                100,
+                TimeSpan.FromMinutes(3),
+                0.99,
+                0.99,
+                1.0)],
+            TestContext.Current.CancellationToken);
     }
 
     private async Task<long> AddTrackAsync(SqliteTrackRepository tracks, string fileName)
