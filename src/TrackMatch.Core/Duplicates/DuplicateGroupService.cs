@@ -173,6 +173,12 @@ public sealed class DuplicateGroupService(
                 ?? throw new InvalidOperationException("保存済みの重複判定からGlobal Duplicate Groupを解決できませんでした。");
         }
 
+        // 同じKeepを再選択しただけならCurrent Stateに変化がないため、Keep Historyを増やさない。
+        if (group.KeepStatus == DuplicateGroupKeepStatus.Selected && group.KeepTrackId == keepTrackId)
+        {
+            return;
+        }
+
         // 既存Group同士の結合でKeepが競合した場合は、Pair操作だけで勝手に競合を解消しない。
         // 競合解消はGroup詳細画面でGlobal Group全体を確認したうえで明示的に行う。
         if (group.KeepStatus == DuplicateGroupKeepStatus.Conflict)
