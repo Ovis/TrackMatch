@@ -91,8 +91,8 @@ public sealed class SqliteCandidateClassificationRepository(
             INNER JOIN CandidateComparisons x
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
                AND x.ComparisonVersion = @ComparisonVersion
-            INNER JOIN Tracks a ON a.Id = c.TrackIdA
-            INNER JOIN Tracks b ON b.Id = c.TrackIdB
+            INNER JOIN Tracks a ON a.Id = c.TrackIdA AND a.IsMissing = 0
+            INNER JOIN Tracks b ON b.Id = c.TrackIdB AND b.IsMissing = 0
             WHERE (
                     @LibraryId IS NULL
                  OR (
