@@ -89,6 +89,33 @@ public sealed class RejectedTrackTrashServiceTests
     }
 
     [Fact]
+    public async Task ProcessAsync_CancellationAfterPhysicalMoveStillCommitsMissingState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
+        var keep = Path.Combine(root, "keep.flac");
+        var source = Path.Combine(root, "track.flac");
+        var tracks = new FakeTrackRepository([Entry(1, keep, 1), Entry(2, source, 1)]);
+        var groups = new FakeGroupRepository([Group(1, 1, [1, 2])]);
+        using var cancellation = new CancellationTokenSource();
+        var files = new FakeFileOperations([keep, source])
+        {
+            AfterMove = cancellation.Cancel,
+        };
+        var service = new RejectedTrackTrashService(groups, tracks, tracks, files);
+
+        var result = await service.ProcessAsync(
+            1,
+            trash,
+            execute: true,
+            cancellationToken: cancellation.Token);
+
+        Assert.Equal(RejectedTrackMoveStatus.Moved, Assert.Single(result.Items).Status);
+        Assert.Equal([2L], tracks.MarkedMissing);
+        Assert.Equal([false], tracks.MarkMissingCancellationStates);
+    }
+
+    [Fact]
     public async Task ProcessAsync_SkipCollisionNeverOverwrites()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -180,6 +207,7 @@ public sealed class RejectedTrackTrashServiceTests
     private sealed class FakeTrackRepository(IReadOnlyList<(StoredTrack Track, long LibraryId)> entries) : ITrackRepository, ITrackLookupRepository
     {
         public List<long> MarkedMissing { get; } = [];
+        public List<bool> MarkMissingCancellationStates { get; } = [];
 
         public Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult(entries.Select(entry => entry.Track).FirstOrDefault(track => track.Id == trackId));
@@ -216,6 +244,7 @@ public sealed class RejectedTrackTrashServiceTests
         public Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
         {
             MarkedMissing.Add(trackId);
+            MarkMissingCancellationStates.Add(cancellationToken.IsCancellationRequested);
             return Task.CompletedTask;
         }
 
@@ -233,6 +262,7 @@ public sealed class RejectedTrackTrashServiceTests
     {
         private readonly HashSet<string> _paths = new(existingPaths, StringComparer.OrdinalIgnoreCase);
         public List<(string Source, string Destination)> Moves { get; } = [];
+        public Action? AfterMove { get; init; }
         public bool FileExists(string path) => _paths.Contains(path);
 
         public void Move(string sourcePath, string destinationPath)
@@ -240,6 +270,7 @@ public sealed class RejectedTrackTrashServiceTests
             Moves.Add((sourcePath, destinationPath));
             _paths.Remove(sourcePath);
             _paths.Add(destinationPath);
+            AfterMove?.Invoke();
         }
     }
 }
