@@ -123,11 +123,14 @@ public sealed class IncrementalLibraryScanService(
                 progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
             }
 
-            // foreachを最後まで抜けた場合だけMissingを確定する。列挙例外・Cancel時はcatchへ進むためここへ到達しない。
+            // Membership上このRootに属していて今回の列挙で見えなかった場合でも、Global Trackの物理Pathが存在するなら
+            // 他Library/Rootから同じ物理ファイルを共有している可能性がある。Root差分だけを根拠にGlobal Missingへ遷移させない。
             foreach (var storedEntry in storedEntries)
             {
+                var storedPath = Path.GetFullPath(storedEntry.Track.Metadata.Path);
                 if (storedEntry.Track.IsMissing
-                    || seenPaths.Contains(Path.GetFullPath(storedEntry.Track.Metadata.Path)))
+                    || seenPaths.Contains(storedPath)
+                    || File.Exists(storedPath))
                 {
                     continue;
                 }
