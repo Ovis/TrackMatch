@@ -12,7 +12,7 @@ public sealed class DuplicateGroupPlannerTests
     [Fact]
     public void Build_CreatesGlobalGroupFromConfirmedPair()
     {
-        var reviews = new[] { Confirmed(1, 2, 1) };
+        var reviews = new[] { Confirmed(1, 2) };
 
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, []));
 
@@ -26,8 +26,8 @@ public sealed class DuplicateGroupPlannerTests
         var existing = new GlobalDuplicateGroup(12, [1, 2]);
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(2, 3, 2),
+            Confirmed(1, 2),
+            Confirmed(2, 3),
         };
 
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
@@ -37,14 +37,14 @@ public sealed class DuplicateGroupPlannerTests
     }
 
     [Fact]
-    public void Build_HumanKeepSelectionDoesNotAffectGlobalTopology()
+    public void Build_GlobalVerdictTopologyIsIndependentFromLibraryKeepState()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(2, 3, 2),
-            Confirmed(1, 3, 3),
+            Confirmed(1, 2),
+            Confirmed(2, 3),
+            Confirmed(1, 3),
         };
 
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
@@ -63,9 +63,9 @@ public sealed class DuplicateGroupPlannerTests
         };
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(3, 4, 3),
-            Confirmed(2, 3, 2),
+            Confirmed(1, 2),
+            Confirmed(3, 4),
+            Confirmed(2, 3),
         };
 
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, existing));
@@ -80,8 +80,8 @@ public sealed class DuplicateGroupPlannerTests
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(4, 5, 4),
+            Confirmed(1, 2),
+            Confirmed(4, 5),
         };
 
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
@@ -101,9 +101,9 @@ public sealed class DuplicateGroupPlannerTests
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4, 5]);
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(3, 4, 3),
-            Confirmed(4, 5, 4),
+            Confirmed(1, 2),
+            Confirmed(3, 4),
+            Confirmed(4, 5),
         };
 
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
@@ -121,8 +121,8 @@ public sealed class DuplicateGroupPlannerTests
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4]);
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(3, 4, 3),
+            Confirmed(1, 2),
+            Confirmed(3, 4),
         };
 
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
@@ -137,8 +137,8 @@ public sealed class DuplicateGroupPlannerTests
     {
         var reviews = new[]
         {
-            Confirmed(1, 2, 1),
-            Confirmed(2, 3, 2),
+            Confirmed(1, 2),
+            Confirmed(2, 3),
             new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null),
         };
 
@@ -147,6 +147,6 @@ public sealed class DuplicateGroupPlannerTests
         Assert.Contains("矛盾", exception.Message);
     }
 
-    private static CandidateReview Confirmed(long left, long right, long keep)
-        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null, keep);
+    private static CandidateReview Confirmed(long left, long right)
+        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null);
 }
