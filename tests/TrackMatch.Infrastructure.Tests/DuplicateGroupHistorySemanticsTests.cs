@@ -144,6 +144,40 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         Assert.Contains("TrackRestored", changeKinds);
     }
 
+    [Fact]
+    public async Task ReAddingVerdictAfterOtherTopologyChange_DoesNotReuseOldTrackMissingAsRestoreReason()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "a.flac");
+        var b = await CreateTrackAsync(tracks, "b.flac");
+        var c = await CreateTrackAsync(tracks, "c.flac");
+        var service = CreateService();
+        var groups = new SqliteDuplicateGroupRepository(_database);
+
+        await SaveConfirmedAsync(service, a, b, a);
+        await SaveConfirmedAsync(service, b, c, b);
+        var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(_libraryId, originalGroup.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+
+        await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+        await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        // 一度Missing→Restoreが完了した後、Human Verdict変更でCをGroupから外してから再度追加する。
+        // 過去のTrackMissing履歴が残っていても、この再追加は物理Track復帰ではないためTrackRestoredを増やしてはいけない。
+        await service.DeleteReviewAsync(
+            _libraryId,
+            CandidatePairKey.Create(b, c),
+            TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, b, c, b);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var restoredCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE ChangeKind = 'TrackRestored';");
+        Assert.Equal(1, restoredCount);
+    }
+
     private DuplicateGroupService CreateService()
         => new(
             new SqliteCandidateReviewRepository(_database),
