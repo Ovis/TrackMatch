@@ -158,11 +158,27 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM LibraryDuplicateGroupKeepHistory WHERE KeepTrackId IN @TrackIds;",
-            new { TrackIds = ids },
-            transaction,
-            cancellationToken: cancellationToken));
+
+        // Keep HistoryはFKを持たず、KeepTrackIdだけでなくGraphKeySnapshotにもTrack IDを保持する。
+        // 明示的な「完全削除」でIdentityを履歴側へ残さないよう、Graph Keyを構造として解析して該当履歴を削除する。
+        var deleteIdSet = ids.ToHashSet();
+        var keepHistoryRows = (await connection.QueryAsync<KeepHistoryRow>(new CommandDefinition(
+            "SELECT Id, GraphKeySnapshot, KeepTrackId FROM LibraryDuplicateGroupKeepHistory;",
+            transaction: transaction,
+            cancellationToken: cancellationToken))).ToArray();
+        var keepHistoryIds = keepHistoryRows
+            .Where(row => row.KeepTrackId is { } keepTrackId && deleteIdSet.Contains(keepTrackId)
+                || ParseGraphKey(row.GraphKeySnapshot).Any(deleteIdSet.Contains))
+            .Select(row => row.Id)
+            .ToArray();
+        if (keepHistoryIds.Length > 0)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM LibraryDuplicateGroupKeepHistory WHERE Id IN @HistoryIds;",
+                new { HistoryIds = keepHistoryIds },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
 
         // Track配下のCurrent StateはFK CASCADEを正本とし、依存順序を個別コードへ複製しない。
         var deleted = await connection.ExecuteAsync(new CommandDefinition(
@@ -280,6 +296,21 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
         await transaction.CommitAsync(cancellationToken);
         return new ForceReanalysisResult(scope, ids.Length, archivedReviewCount);
     }
+
+    private static IEnumerable<long> ParseGraphKey(string graphKey)
+    {
+        foreach (var token in graphKey.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!long.TryParse(token, out var trackId) || trackId <= 0)
+            {
+                throw new InvalidDataException($"Duplicate Group履歴のGraph Keyが不正です: {graphKey}");
+            }
+
+            yield return trackId;
+        }
+    }
+
+    private sealed record KeepHistoryRow(long Id, string GraphKeySnapshot, long? KeepTrackId);
 
     private sealed record ManagedTrackRow(
         long Id,
