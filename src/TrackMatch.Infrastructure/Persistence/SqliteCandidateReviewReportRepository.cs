@@ -44,7 +44,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    r.Decision AS ReviewDecision, s.KeepTrackId,
                    r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
-                   COALESCE(rl.Name, r.SourceLibraryNameSnapshot) AS ReviewSourceLibraryName
+                   CAST(COALESCE(rl.Name, r.SourceLibraryNameSnapshot) AS TEXT) AS ReviewSourceLibraryName
             FROM CandidateComparisons x
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
