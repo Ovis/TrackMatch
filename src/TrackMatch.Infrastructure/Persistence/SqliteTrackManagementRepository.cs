@@ -180,6 +180,15 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
                 cancellationToken: cancellationToken));
         }
 
+        // KeepTrackIdのFKはON DELETE SET NULLだが、Status='Selected'のままNULL化すると不正なCurrent Stateになる。
+        // 完全削除では対象TrackのIdentity自体を破棄するため、そのTrackをKeepとしていたCurrent Stateも先に除去する。
+        // Groupが残る場合は後続のGlobal同期・ProjectionでUnselectedとして扱い、古いKeepを自動復元しない。
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM LibraryDuplicateGroupKeepStates WHERE KeepTrackId IN @TrackIds;",
+            new { TrackIds = ids },
+            transaction,
+            cancellationToken: cancellationToken));
+
         // Track配下のCurrent StateはFK CASCADEを正本とし、依存順序を個別コードへ複製しない。
         var deleted = await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM Tracks WHERE Id IN @TrackIds;",
