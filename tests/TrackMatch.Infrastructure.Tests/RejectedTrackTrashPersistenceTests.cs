@@ -80,8 +80,8 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
                 new CandidateReview(
                     CandidatePairKey.Create(keepId, rejectId),
                     CandidateReviewDecision.ConfirmedDuplicate,
-                    null,
-                    keepId),
+                    null),
+                keepId,
                 TestContext.Current.CancellationToken);
 
             var service = new RejectedTrackTrashService(
