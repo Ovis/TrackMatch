@@ -28,7 +28,7 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
     {
         CandidateReviewDecision.NotDuplicate => AppendReReview("重複ではない"),
         // Human VerdictはGlobalだが、どのTrackを残すかはLibrary固有DispositionなのでGlobal Verdict表示には含めない。
-        CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複として確認済み"),
+        CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複として確認済"),
         _ => "未レビュー",
     };
 
