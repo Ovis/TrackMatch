@@ -180,6 +180,23 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         Assert.Contains("KeepRestored", changeKinds);
     }
 
+    [Fact]
+    public async Task SynchronizeGlobalAsync_UnchangedTopologyDoesNotAppendKeepHistory()
+    {
+        var (a, b, _) = await CreateTracksAsync();
+        var service = CreateService();
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var before = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;");
+
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var after = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;");
+        Assert.Equal(before, after);
+    }
+
     private DuplicateGroupService CreateService()
     {
         var reviews = new SqliteCandidateReviewRepository(_database);
