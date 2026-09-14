@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Trash;
 
@@ -284,7 +285,7 @@ public partial class MainWindow : Window
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
-        => await ExecuteReviewActionAsync(_viewModel.MarkNotDuplicateAsync);
+        => await ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync);
 
     private async void KeepA_Click(object sender, RoutedEventArgs e)
     {
@@ -322,7 +323,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            await ExecuteReviewActionAsync(action);
+            await ExecuteReviewActionAsync(CandidateReviewDecision.ConfirmedDuplicate, action);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
@@ -330,11 +331,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ExecuteReviewActionAsync(Func<Task> action)
+    private async Task ExecuteReviewActionAsync(CandidateReviewDecision? targetDecision, Func<Task> action)
     {
         try
         {
-            if (!ConfirmGlobalVerdictOverwrite())
+            if (!ConfirmGlobalVerdictOverwrite(targetDecision))
             {
                 return;
             }
@@ -348,13 +349,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 他Libraryで確定したGlobal Human Verdictを現在Libraryから変更する場合だけ、影響範囲を明示して確認する。
+    /// 他Libraryで確定したGlobal Human Verdictを現在Libraryから実際に変更する場合だけ、影響範囲を明示して確認する。
     /// </summary>
-    private bool ConfirmGlobalVerdictOverwrite()
+    /// <param name="targetDecision">操作後のGlobal Verdict。nullは未確定へ戻す操作</param>
+    private bool ConfirmGlobalVerdictOverwrite(CandidateReviewDecision? targetDecision)
     {
         var selected = _viewModel.SelectedCandidate;
         var library = _viewModel.SelectedLibrary;
         if (selected is null || library is null || selected.Row.ReviewDecision is null)
+        {
+            return true;
+        }
+
+        // 同じVerdictでKeepだけを変更する操作はLibrary固有Dispositionだけが変わるため、Global変更警告は不要。
+        if (selected.Row.ReviewDecision == targetDecision)
         {
             return true;
         }
@@ -451,6 +459,6 @@ public partial class MainWindow : Window
         confirmation.ShowDialog();
 
         if (confirmation.SelectedResult == AppDialogResult.Primary)
-            await ExecuteReviewActionAsync(_viewModel.ClearReviewAsync);
+            await ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync);
     }
 }
