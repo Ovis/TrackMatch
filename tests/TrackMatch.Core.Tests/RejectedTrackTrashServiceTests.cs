@@ -248,6 +248,9 @@ public sealed class RejectedTrackTrashServiceTests
             return Task.CompletedTask;
         }
 
+        public Task MarkMissingBatchAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+            => Task.WhenAll(trackIds.Select(trackId => MarkMissingAsync(trackId, cancellationToken)));
+
         public Task SaveFingerprintAsync(long trackId, AudioFingerprint fingerprint, int algorithm, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
