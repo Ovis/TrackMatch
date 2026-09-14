@@ -166,6 +166,11 @@ public sealed class TrackQualityAnalysisCoordinator
             }
             catch (OperationCanceledException)
             {
+                // Analyzingは実行中だけ成立するCurrent Stateであり、キャンセル後まで永続化すると
+                // 次回起動時に実行中でない解析が「解析中」に見える。DB整合を優先してCancel不可で待機状態へ戻す。
+                await _repository.UpsertAsync(
+                    CreateState(request.TrackId, QualityAnalysisStatus.NotAnalyzed),
+                    CancellationToken.None);
                 throw;
             }
             catch (Exception ex)
@@ -293,6 +298,6 @@ public sealed class TrackQualityAnalysisCoordinator
             => new(
                 Volatile.Read(ref _completed),
                 total,
-                Volatile.Read(ref _failed));
+                Volatile.Read(ref(_failed));
     }
 }
