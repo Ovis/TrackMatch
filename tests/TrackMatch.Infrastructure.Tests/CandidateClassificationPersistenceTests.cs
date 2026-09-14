@@ -74,6 +74,43 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ClassificationRepository_DoesNotExposeClassificationBackedByOlderComparisonVersion()
+    {
+        var trackRepository = new SqliteTrackRepository(_database);
+        var idA = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "old-A.flac"), "Artist", "A", "Album", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var idB = await trackRepository.UpsertMetadataAsync(
+            Metadata(Path.Combine(_directory, "old-B.flac"), "Artist", "B", "Album", "J-POPS"),
+            TestContext.Current.CancellationToken);
+        var pair = CandidatePairKey.Create(idA, idB);
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [new CandidateComparison(
+                pair.TrackIdA, pair.TrackIdB, 0.98, 0, TimeSpan.Zero, 100,
+                TimeSpan.FromSeconds(12), 0.97, 0.96, 0.99)],
+            TestContext.Current.CancellationToken);
+        var repository = new SqliteCandidateClassificationRepository(_database);
+        await repository.ReplaceAllAsync(
+            [new CandidateClassification(
+                pair.TrackIdA, pair.TrackIdB, AudioRelationshipKind.DuplicateCandidate,
+                "stale classification", "{}")],
+            TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE CandidateComparisons SET ComparisonVersion = $version;";
+            command.Parameters.AddWithValue("$version", CandidateComparisonAlgorithmVersion.Current - 1);
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Empty(await repository.GetReportAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task ReviewReportRepository_ReturnsLibraryScopedComparisonAndAudioDetail()
     {
         var trackRepository = new SqliteTrackRepository(_database);
