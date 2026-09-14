@@ -298,6 +298,6 @@ public sealed class TrackQualityAnalysisCoordinator
             => new(
                 Volatile.Read(ref _completed),
                 total,
-                Volatile.Read(ref(_failed));
+                Volatile.Read(ref _failed));
     }
 }
