@@ -153,7 +153,7 @@ public sealed class TrackQualityAnalysisCoordinator
         while (TryTake(out var request))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var analyzingStartedAtUtc = DateTime.UtcNow;
+            var analyzingStartedAtUtc = QualityAnalysisGeneration.CreateTimestamp();
 
             // 開始時刻を所有権トークンとしてAnalyzing行へ保存する。旧セッションの完了/Cancelが
             // 新セッションやForce Reanalysis後の状態を上書きしないよう、最終更新はこのトークンで条件付きCommitする。
