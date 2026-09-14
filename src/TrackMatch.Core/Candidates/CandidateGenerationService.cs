@@ -124,21 +124,21 @@ public sealed class CandidateGenerationService(
                 pairProgress);
         }
 
-        var excluded = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
-        var pairs = generatedPairs
-            .Where(pair => !excluded.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
+        var reviewedPairs = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
+        var reviewablePairs = generatedPairs
+            .Where(pair => !reviewedPairs.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
             .ToArray();
 
+        // Human Verdictが付いたPairもMachine Current StateとしてCandidatePairsへ残す。
+        // ここで削除するとFK CASCADEでComparisonまで失われ、Comparison Algorithm更新後の再計算や
+        // Human Verdictとの矛盾を検出する「再確認推奨」に到達できなくなる。
         if (fullRebuild)
         {
-            await candidatePairRepository.ReplaceAllAsync(pairs, cancellationToken);
+            await candidatePairRepository.ReplaceAllAsync(generatedPairs, cancellationToken);
         }
         else
         {
-            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), pairs, cancellationToken);
-
-            // レビューはFingerprint更新と独立して発生するため、無変更実行でも新規レビュー済みペアを候補集合から除外する。
-            await candidatePairRepository.DeleteAsync(excluded.ToArray(), cancellationToken);
+            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), generatedPairs, cancellationToken);
         }
 
         if (workRepository is not null && pendingTrackIds.Count != 0)
@@ -151,7 +151,7 @@ public sealed class CandidateGenerationService(
         return new CandidateGenerationResult(
             fingerprintStates.Count,
             allSketches.Count,
-            pairs,
+            reviewablePairs,
             changedTrackIds.Count,
             fullRebuild);
     }
