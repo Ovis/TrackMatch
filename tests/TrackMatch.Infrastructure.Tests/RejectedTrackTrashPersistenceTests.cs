@@ -184,7 +184,8 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             await groupService.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
             // ユーザーがTrashから元Pathへ手動復元した状況を再現する。
-            File.Move(movedItem.DestinationPath, rejectPath);
+            var trashPath = Assert.IsType<string>(movedItem.DestinationPath);
+            File.Move(trashPath, rejectPath);
             var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata(rejectPath), TestContext.Current.CancellationToken);
             Assert.Equal(rejectId, restoredId);
             await groupService.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
