@@ -181,6 +181,27 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
         }
 
+        // Root削除で現在Libraryから到達できなくなったGlobal GroupのKeepだけを除去する。
+        // 他Rootに同じGroupのActive Trackが残る場合はLibrary固有Dispositionとして維持する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM LibraryDuplicateGroupKeepStates
+            WHERE LibraryId = @LibraryId
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM DuplicateGroupTracks gt
+                    INNER JOIN LibraryTracks lt
+                        ON lt.TrackId = gt.TrackId
+                       AND lt.LibraryId = @LibraryId
+                    INNER JOIN Tracks t
+                        ON t.Id = lt.TrackId
+                       AND t.IsMissing = 0
+                    WHERE gt.DuplicateGroupId = LibraryDuplicateGroupKeepStates.DuplicateGroupId);
+            """,
+            new { LibraryId = libraryId },
+            transaction,
+            cancellationToken: cancellationToken));
+
         transaction.Commit();
     }
 
