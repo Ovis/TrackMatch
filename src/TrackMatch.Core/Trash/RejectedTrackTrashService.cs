@@ -242,14 +242,15 @@ public sealed class RejectedTrackTrashService(
             fileOperations.Move(sourcePath, destinationPath);
             try
             {
-                // Trashは同じContentを別場所へ退避する操作なのでFingerprint等の解析キャッシュは保持する。
-                // Global Trackは元Pathに存在しない状態としてMissingだけを更新する。
-                await trackRepository.MarkMissingAsync(track.Id, cancellationToken);
+                // 物理Moveが成功した時点からはDBとの整合性確定を優先する。
+                // ユーザーCancelをここへ伝播すると「ファイルだけ移動済み」の状態を作るため、Missing更新はキャンセル不可で完了させる。
+                await trackRepository.MarkMissingAsync(track.Id, CancellationToken.None);
                 return new RejectedTrackMoveItem(track.Id, sourcePath, destinationPath, RejectedTrackMoveStatus.Moved);
             }
-            catch (Exception databaseException) when (databaseException is IOException or InvalidDataException or InvalidOperationException)
+            catch (Exception databaseException)
             {
-                // FilesystemとSQLiteを同一Transactionにはできない。DB更新失敗時は元Pathへの補償Moveを試す。
+                // FilesystemとSQLiteを同一Transactionにはできないため、DB確定に失敗した場合は例外種別を問わず補償Moveを試す。
+                // 補償中もCancelを理由に中断せず、元PathとDB状態の一致を最優先する。
                 try
                 {
                     fileOperations.Move(destinationPath, sourcePath);
@@ -260,7 +261,7 @@ public sealed class RejectedTrackTrashService(
                         RejectedTrackMoveStatus.Failed,
                         $"DB更新に失敗したためファイルを元の場所へ戻しました: {databaseException.Message}");
                 }
-                catch (Exception compensationException) when (compensationException is IOException or UnauthorizedAccessException or InvalidOperationException)
+                catch (Exception compensationException)
                 {
                     return new RejectedTrackMoveItem(
                         track.Id,
