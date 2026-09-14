@@ -11,7 +11,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase database)
 {
     /// <summary>
-    /// 指定LibraryのMembershipに両Trackが属する詳細比較結果を取得する。
+    /// 指定LibraryのMembershipに両Trackが属するCurrent詳細比較結果を取得する。
     /// </summary>
     public async Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
@@ -41,7 +41,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.SampleRateHz AS SampleRateHzA, b.SampleRateHz AS SampleRateHzB,
                    a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
                    a.Channels AS ChannelsA, b.Channels AS ChannelsB,
-                   r.Decision AS ReviewDecision, s.KeepTrackId,
+                   r.Decision AS ReviewDecision,
                    r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
                    rl.Name AS CurrentReviewSourceLibraryName,
@@ -51,12 +51,11 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateReviews r
                 ON r.TrackIdA = x.TrackIdA AND r.TrackIdB = x.TrackIdB
-            LEFT JOIN CandidateReviewSelections s
-                ON s.TrackIdA = x.TrackIdA AND s.TrackIdB = x.TrackIdB
             LEFT JOIN Libraries rl ON rl.Id = r.SourceLibraryId
             INNER JOIN Tracks a ON a.Id = x.TrackIdA
             INNER JOIN Tracks b ON b.Id = x.TrackIdB
-            WHERE a.IsMissing = 0
+            WHERE x.ComparisonVersion = @ComparisonVersion
+              AND a.IsMissing = 0
               AND b.IsMissing = 0
               AND EXISTS (
                     SELECT 1 FROM LibraryTracks la
@@ -76,7 +75,11 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
     }
@@ -117,7 +120,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             row.FileSizeA, row.FileSizeB, row.FormatA, row.FormatB, row.CodecA, row.CodecB,
             ToInt(row.BitrateKbpsA), ToInt(row.BitrateKbpsB), ToInt(row.SampleRateHzA), ToInt(row.SampleRateHzB),
             ToInt(row.BitDepthA), ToInt(row.BitDepthB), ToInt(row.ChannelsA), ToInt(row.ChannelsB),
-            reviewDecision, row.KeepTrackId,
+            reviewDecision,
             ToUInt(row.YearA), ToUInt(row.YearB),
             row.ReviewSourceLibraryId, reviewSourceLibraryName,
             IsReReviewRecommended(
@@ -172,6 +175,6 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
-        string? ReviewDecision, long? KeepTrackId, long? ReviewedAtUtcTicks,
+        string? ReviewDecision, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }
