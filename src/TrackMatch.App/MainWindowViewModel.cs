@@ -117,6 +117,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     // タブ件数はDB全体ではなく、現在レビュー対象としている一致度下限を反映する。
     public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed);
     public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed);
+    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
@@ -255,6 +256,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var tracks = new SqliteTrackRepository(database);
             var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
             var result = await service.ProcessAsync(library.Id, TrashRoot, execute, collisionBehavior);
+
+            if (execute && result.MovedCount > 0)
+            {
+                // Trash後はTrackがMissingへ変わるため、Current VerdictからGlobal Groupを再構成し、
+                // 移動済みTrackを候補一覧やKeep表示へ残さない。
+                await groupService.SynchronizeGlobalAsync();
+                await LoadCandidatesCoreAsync();
+            }
+
             TrashStatusText = execute ? $"移動完了 {result.MovedCount}件 / 移動不可 {result.BlockedCount}件" : $"確認: 移動可能 {result.ReadyCount}件 / 移動不可 {result.BlockedCount}件";
             return result;
         }
@@ -293,6 +303,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         {
             CandidateReviewListMode.Unreviewed => !item.IsReviewed,
             CandidateReviewListMode.Reviewed => item.IsReviewed,
+            CandidateReviewListMode.ReReviewRecommended => item.IsReReviewRecommended,
             _ => true,
         }).ToArray();
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous))) StopPlayback();
@@ -336,7 +347,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void NotifyCandidateCountsChanged()
     {
-        OnPropertyChanged(nameof(UnreviewedCount)); OnPropertyChanged(nameof(ReviewedCount)); OnPropertyChanged(nameof(TotalCandidateCount));
+        OnPropertyChanged(nameof(UnreviewedCount));
+        OnPropertyChanged(nameof(ReviewedCount));
+        OnPropertyChanged(nameof(ReReviewRecommendedCount));
+        OnPropertyChanged(nameof(TotalCandidateCount));
     }
 
     private async Task SaveSettingsSafeAsync()
@@ -391,5 +405,6 @@ public enum CandidateReviewListMode
 {
     Unreviewed,
     Reviewed,
+    ReReviewRecommended,
     All,
 }
