@@ -38,7 +38,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetAsync_ReturnsReviewSourceAndReReviewRecommendationForStrongContradiction()
+    public async Task GetAsync_ReturnsReviewSourceAndReReviewOnlyAfterMachineResultChanges()
     {
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await AddTrackAsync(tracks, "a.flac");
@@ -78,12 +78,27 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
                 null),
             TestContext.Current.CancellationToken);
 
-        var row = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
-            .GetAsync(_libraryId, TestContext.Current.CancellationToken));
+        var report = new SqliteCandidateReviewReportRepository(_database);
+        var initial = Assert.Single(await report.GetAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(_libraryId, initial.ReviewSourceLibraryId);
+        Assert.Equal("Source Library", initial.ReviewSourceLibraryName);
+        Assert.False(initial.ReReviewRecommended);
 
-        Assert.Equal(_libraryId, row.ReviewSourceLibraryId);
-        Assert.Equal("Source Library", row.ReviewSourceLibraryName);
-        Assert.True(row.ReReviewRecommended);
+        // ユーザーがMachine判定を覆した直後ではなく、その後Machine Resultが更新された場合だけ再確認対象になる。
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                "UPDATE CandidateComparisons SET ComparedAtUtcTicks = @Ticks WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+                new
+                {
+                    TrackIdA = trackA,
+                    TrackIdB = trackB,
+                    Ticks = DateTime.UtcNow.AddSeconds(1).Ticks,
+                });
+        }
+
+        var changed = Assert.Single(await report.GetAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.True(changed.ReReviewRecommended);
     }
 
     private async Task<long> AddTrackAsync(SqliteTrackRepository tracks, string fileName)
