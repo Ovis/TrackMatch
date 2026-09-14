@@ -115,7 +115,7 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CandidateComparisonRepository_DoesNotReuseOlderAlgorithmVersion()
+    public async Task CandidateComparisonRepository_DoesNotExposeOlderAlgorithmVersionAsCurrent()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
         await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
@@ -127,9 +127,11 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
                 new { Version = CandidateComparisonAlgorithmVersion.Current - 1 });
         }
 
-        var values = await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken);
+        var comparedAt = await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken);
+        var currentComparisons = await repository.GetAllAsync(TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain(CandidatePairKey.Create(_trackIdA, _trackIdB), values.Keys);
+        Assert.DoesNotContain(CandidatePairKey.Create(_trackIdA, _trackIdB), comparedAt.Keys);
+        Assert.Empty(currentComparisons);
     }
 
     private CandidateComparison CreateComparison(double similarity)
