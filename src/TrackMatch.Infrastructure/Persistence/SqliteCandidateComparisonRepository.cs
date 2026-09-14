@@ -103,16 +103,22 @@ public sealed class SqliteCandidateComparisonRepository(
         const string sql = """
             SELECT c.TrackIdA, c.TrackIdB, c.ComparedAtUtcTicks
             FROM CandidateComparisons c
-            WHERE @LibraryId IS NULL
-               OR (
-                    EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
-                AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB));
+            WHERE c.ComparisonVersion = @ComparisonVersion
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB)));
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparedAtRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.ToDictionary(
             row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB),
@@ -160,11 +166,11 @@ public sealed class SqliteCandidateComparisonRepository(
             INSERT INTO CandidateComparisons (
                 TrackIdA, TrackIdB, Similarity, BestOffsetItems, BestOffsetTicks,
                 MatchedItems, MatchedDurationTicks, CoverageA, CoverageB, DurationRatio,
-                ComparedAtUtcTicks)
+                ComparisonVersion, ComparedAtUtcTicks)
             VALUES (
                 @TrackIdA, @TrackIdB, @Similarity, @BestOffsetItems, @BestOffsetTicks,
                 @MatchedItems, @MatchedDurationTicks, @CoverageA, @CoverageB, @DurationRatio,
-                @ComparedAtUtcTicks)
+                @ComparisonVersion, @ComparedAtUtcTicks)
             ON CONFLICT (TrackIdA, TrackIdB) DO UPDATE SET
                 Similarity = excluded.Similarity,
                 BestOffsetItems = excluded.BestOffsetItems,
@@ -174,6 +180,7 @@ public sealed class SqliteCandidateComparisonRepository(
                 CoverageA = excluded.CoverageA,
                 CoverageB = excluded.CoverageB,
                 DurationRatio = excluded.DurationRatio,
+                ComparisonVersion = excluded.ComparisonVersion,
                 ComparedAtUtcTicks = excluded.ComparedAtUtcTicks;
             """;
         var comparedAt = DateTime.UtcNow.Ticks;
@@ -189,6 +196,7 @@ public sealed class SqliteCandidateComparisonRepository(
             item.CoverageA,
             item.CoverageB,
             item.DurationRatio,
+            ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
             ComparedAtUtcTicks = comparedAt,
         });
         await connection.ExecuteAsync(new CommandDefinition(
