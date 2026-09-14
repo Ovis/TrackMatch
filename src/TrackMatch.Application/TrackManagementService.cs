@@ -44,7 +44,7 @@ public sealed class TrackManagementService
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisTracksAsync(trackIds, cancellationToken);
-        await SynchronizeGroupsAsync(database, cancellationToken);
+        await SynchronizeGroupsAfterCommitAsync(database);
         return result;
     }
 
@@ -58,7 +58,7 @@ public sealed class TrackManagementService
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisRootAsync(rootId, cancellationToken);
-        await SynchronizeGroupsAsync(database, cancellationToken);
+        await SynchronizeGroupsAfterCommitAsync(database);
         return result;
     }
 
@@ -72,7 +72,7 @@ public sealed class TrackManagementService
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisLibraryAsync(libraryId, cancellationToken);
-        await SynchronizeGroupsAsync(database, cancellationToken);
+        await SynchronizeGroupsAfterCommitAsync(database);
         return result;
     }
 
@@ -88,19 +88,20 @@ public sealed class TrackManagementService
         var database = await OpenDatabaseAsync(cancellationToken);
         var deleted = await new SqliteTrackManagementRepository(database)
             .DeleteTracksAsync(trackIds, cancellationToken);
-        await SynchronizeGroupsAsync(database, cancellationToken);
+        await SynchronizeGroupsAfterCommitAsync(database);
         return deleted;
     }
 
-    private static async Task SynchronizeGroupsAsync(
-        SqliteDatabase database,
-        CancellationToken cancellationToken)
+    private static async Task SynchronizeGroupsAfterCommitAsync(SqliteDatabase database)
     {
+        // Repository TransactionがCommitされた後はCurrent Verdict/Track状態が正本として確定している。
+        // 呼び出し元のCancelをここへ伝播するとMaterialized Duplicate Groupだけ旧状態で残るため、
+        // Scanキャンセル時と同様に整合同期だけはキャンセル不可で完了させる。
         var service = new DuplicateGroupService(
             new SqliteCandidateReviewRepository(database),
             new SqliteTrackLookupRepository(database),
             new SqliteDuplicateGroupRepository(database));
-        await service.SynchronizeGlobalAsync(cancellationToken);
+        await service.SynchronizeGlobalAsync(CancellationToken.None);
     }
 
     private async Task<SqliteDatabase> OpenDatabaseAsync(CancellationToken cancellationToken)
