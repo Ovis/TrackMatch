@@ -96,6 +96,26 @@ public sealed class DuplicateGroupPlannerTests
     }
 
     [Fact]
+    public void Build_SplitReusesExistingIdForLargestOverlapComponent()
+    {
+        var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4, 5]);
+        var reviews = new[]
+        {
+            Confirmed(1, 2, 1),
+            Confirmed(3, 4, 3),
+            Confirmed(4, 5, 4),
+        };
+
+        var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
+
+        var smaller = Assert.Single(groups, group => group.TrackIds.Contains(1));
+        Assert.Null(smaller.ExistingGroupId);
+        var larger = Assert.Single(groups, group => group.TrackIds.Contains(3));
+        Assert.Equal(12, larger.ExistingGroupId);
+        Assert.Equal(new long[] { 3, 4, 5 }, larger.TrackIds);
+    }
+
+    [Fact]
     public void Build_SplitComponentWithoutReusableOldIdGetsNewGroup()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4]);
