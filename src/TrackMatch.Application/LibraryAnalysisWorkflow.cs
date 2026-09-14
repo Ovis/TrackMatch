@@ -1,4 +1,3 @@
-using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Comparison;
@@ -13,7 +12,7 @@ using TrackMatch.Infrastructure.Scanning;
 namespace TrackMatch.Application;
 
 /// <summary>
-/// ライブラリ走査、候補生成、詳細比較、自動分類を同じ設定とDBで順番に実行するアプリケーションWorkflow。
+/// Library走査、候補生成、詳細比較、自動分類を同じ設定とDBで順番に実行するApplication Workflow。
 /// </summary>
 public sealed class LibraryAnalysisWorkflow
 {
@@ -23,9 +22,9 @@ public sealed class LibraryAnalysisWorkflow
     private readonly int _fingerprintAlgorithm;
 
     /// <summary>
-    /// ライブラリ分析Workflowを生成する。
+    /// Library分析Workflowを生成する。
     /// </summary>
-    /// <param name="databasePath">ScannerとGUIで共有するSQLiteデータベースのパス</param>
+    /// <param name="databasePath">WPFアプリが使用するSQLiteデータベースのPath</param>
     /// <param name="fpcalcPath">Chromaprint fpcalcの実行ファイル指定。既定値では同梱fpcalcを優先して解決する</param>
     /// <param name="fingerprintAlgorithm">ChromaprintのFingerprint Algorithm</param>
     public LibraryAnalysisWorkflow(
@@ -43,58 +42,6 @@ public sealed class LibraryAnalysisWorkflow
         _databasePath = databasePath;
         _fpcalcPath = fpcalcPath;
         _fingerprintAlgorithm = fingerprintAlgorithm;
-    }
-
-    /// <summary>
-    /// Pathで一意に特定できる登録済みRootを増分走査する。
-    /// </summary>
-    /// <remarks>
-    /// 異なるLibraryで同一Rootを登録できるため、同一Pathが複数Libraryに存在する場合は曖昧として拒否する。
-    /// GUIの通常処理ではLibrary ID指定APIを使用する。Scan Jobはプロセス全体で同時に1件へ制限する。
-    /// </remarks>
-    /// <param name="rootPath">走査対象として登録済みのRoot Path</param>
-    /// <param name="cancellationToken">走査のキャンセル要求</param>
-    public async Task<IncrementalScanResult> ScanAsync(
-        string rootPath,
-        CancellationToken cancellationToken = default)
-    {
-        await EnterScanGateAsync(cancellationToken);
-        try
-        {
-            var database = await OpenDatabaseAsync(cancellationToken);
-            try
-            {
-                var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
-                await using var connection = await database.OpenConnectionAsync(cancellationToken);
-                var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
-                    "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
-                    new { PathKey = normalizedRoot.Key },
-                    cancellationToken: cancellationToken))).ToArray();
-                if (roots.Length != 1)
-                {
-                    throw new InvalidOperationException(
-                        roots.Length == 0
-                            ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
-                            : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
-                }
-
-                var root = roots[0];
-                var result = await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
-                await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
-                return result;
-            }
-            catch (OperationCanceledException)
-            {
-                // Track単位で完了したContent Change無効化はキャンセル後も保持される。
-                // Cancel済みTokenを再利用すると派生Groupだけ古い状態で残るため、整合回復だけはキャンセル不可で完了させる。
-                await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
-                throw;
-            }
-        }
-        finally
-        {
-            ScanGate.Release();
-        }
     }
 
     /// <summary>
@@ -154,24 +101,7 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 保存済みFingerprintから候補ペアを増分生成する。
-    /// </summary>
-    /// <param name="options">候補生成設定。nullの場合は既定値を使用する</param>
-    /// <param name="cancellationToken">候補生成のキャンセル要求</param>
-    public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
-        CandidateGenerationOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        options ??= new CandidateGenerationOptions();
-        options.Validate();
-
-        var database = await OpenDatabaseAsync(cancellationToken);
-        return await CreateCandidateGenerationService(database, libraryId: null)
-            .GenerateAsync(_fingerprintAlgorithm, options, cancellationToken);
-    }
-
-    /// <summary>
-    /// 指定LibraryのMembershipに属するTrackだけを対象に候補ペアを増分生成する。
+    /// 指定LibraryのMembershipに属するTrackだけを対象に候補Pairを増分生成する。
     /// </summary>
     /// <param name="libraryId">候補生成対象LibraryのID</param>
     /// <param name="options">候補生成設定。nullの場合は既定値を使用する</param>
@@ -193,23 +123,11 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 候補ペアを詳細比較し、変更されていないGlobal ComparisonはDBから再利用する。
-    /// </summary>
-    /// <param name="cancellationToken">詳細比較のキャンセル要求</param>
-    public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var database = await OpenDatabaseAsync(cancellationToken);
-        return await CreateCandidateAnalysisService(database, libraryId: null)
-            .AnalyzeAsync(_fingerprintAlgorithm, cancellationToken);
-    }
-
-    /// <summary>
-    /// 指定Library内の候補ペアだけを詳細比較する。
+    /// 指定Library内の候補Pairだけを詳細比較する。
     /// </summary>
     /// <param name="libraryId">詳細比較対象LibraryのID</param>
     /// <param name="cancellationToken">詳細比較のキャンセル要求</param>
-    /// <param name="progress">候補ペア単位の比較進捗通知先</param>
+    /// <param name="progress">候補Pair単位の比較進捗通知先</param>
     public async Task<CandidateAnalysisResult> AnalyzeCandidatesAsync(
         long libraryId,
         CancellationToken cancellationToken = default,
@@ -222,47 +140,24 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// 指定Library内の詳細比較済み候補へ関係分類を適用する。
+    /// 指定Library内の詳細比較済み候補へApplication共通の自動分類Profileを適用する。
     /// </summary>
+    /// <remarks>
+    /// Candidate ClassificationはGlobal Pair単位のCurrent Stateなので、Libraryごとに異なるProfileを適用しない。
+    /// GUIから利用するProfileはApplication既定値へ固定し、同じGlobal PairがLibraryによって異なる分類へ上書きされることを防ぐ。
+    /// </remarks>
     /// <param name="libraryId">分類対象LibraryのID</param>
-    /// <param name="profile">分類に使用するしきい値プロファイル</param>
     /// <param name="cancellationToken">分類処理のキャンセル要求</param>
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesAsync(
         long libraryId,
-        RelationshipThresholdProfile profile,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(profile);
-
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
         var service = new CandidateClassificationService(
             new SqliteCandidateComparisonRepository(database, libraryId),
             new SqliteCandidateClassificationRepository(database, libraryId));
-        return await service.ClassifyAsync(profile, cancellationToken);
-    }
-
-    /// <summary>
-    /// Pathで一意に特定できるRootの走査から候補詳細比較までを一連の処理として実行する。
-    /// </summary>
-    /// <param name="rootPath">解析対象として登録済みのRoot Path</param>
-    /// <param name="progress">現在の処理段階を通知する進捗通知先</param>
-    /// <param name="cancellationToken">Workflow全体のキャンセル要求</param>
-    public async Task<LibraryAnalysisWorkflowResult> RunAsync(
-        string rootPath,
-        IProgress<LibraryAnalysisStage>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        progress?.Report(LibraryAnalysisStage.Scanning);
-        var scan = await ScanAsync(rootPath, cancellationToken);
-
-        progress?.Report(LibraryAnalysisStage.GeneratingCandidates);
-        var generation = await GenerateCandidatesAsync(cancellationToken: cancellationToken);
-
-        progress?.Report(LibraryAnalysisStage.AnalyzingCandidates);
-        var analysis = await AnalyzeCandidatesAsync(cancellationToken);
-
-        return new LibraryAnalysisWorkflowResult(scan, generation, analysis);
+        return await service.ClassifyAsync(AutomaticRelationshipClassificationProfile.Default, cancellationToken);
     }
 
     /// <summary>
@@ -307,10 +202,7 @@ public sealed class LibraryAnalysisWorkflow
         var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
 
         progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
-        await ClassifyCandidatesAsync(
-            libraryId,
-            AutomaticRelationshipClassificationProfile.Default,
-            cancellationToken);
+        await ClassifyCandidatesAsync(libraryId, cancellationToken);
 
         return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
     }
@@ -325,7 +217,7 @@ public sealed class LibraryAnalysisWorkflow
 
     private static CandidateGenerationService CreateCandidateGenerationService(
         SqliteDatabase database,
-        long? libraryId)
+        long libraryId)
     {
         var reviewRepository = new SqliteCandidateReviewRepository(database);
         var sketcher = new FingerprintSegmentSketcher();
@@ -336,12 +228,12 @@ public sealed class LibraryAnalysisWorkflow
             reviewRepository,
             sketcher,
             new CandidatePairGenerator(sketcher),
-            libraryId is { } id ? new SqliteCandidateGenerationWorkRepository(database, id) : null);
+            new SqliteCandidateGenerationWorkRepository(database, libraryId));
     }
 
     private static CandidateAnalysisService CreateCandidateAnalysisService(
         SqliteDatabase database,
-        long? libraryId)
+        long libraryId)
         => new(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteCandidatePairRepository(database, libraryId),
@@ -387,12 +279,10 @@ public sealed class LibraryAnalysisWorkflow
             throw new InvalidOperationException("別のスキャンが既に実行中です。完了またはキャンセルしてから再実行してください。");
         }
     }
-
-    private sealed record RootIdentityRow(long Id, long LibraryId, string Path);
 }
 
 /// <summary>
-/// GUI等へ通知するライブラリ分析Workflowの処理段階を表す。
+/// GUIへ通知するLibrary分析Workflowの処理段階を表す。
 /// </summary>
 public enum LibraryAnalysisStage
 {
@@ -403,7 +293,7 @@ public enum LibraryAnalysisStage
 }
 
 /// <summary>
-/// ライブラリ分析の実処理件数を含む進捗を表す。
+/// Library分析の実処理件数を含む進捗を表す。
 /// </summary>
 /// <param name="Stage">現在の処理段階</param>
 /// <param name="CompletedCount">現在の段階で処理を完了した件数</param>
@@ -429,14 +319,6 @@ public sealed record LibraryScanBatchProgress(
     int CompletedFiles,
     int? TotalFiles,
     string? CurrentPath);
-
-/// <summary>
-/// 単一Rootの走査、候補生成、詳細比較を一括実行した結果を保持する。
-/// </summary>
-public sealed record LibraryAnalysisWorkflowResult(
-    IncrementalScanResult Scan,
-    CandidateGenerationResult Generation,
-    CandidateAnalysisResult Analysis);
 
 /// <summary>
 /// Libraryに登録された全Rootの走査結果を保持する。
