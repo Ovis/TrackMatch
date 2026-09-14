@@ -4,23 +4,21 @@ using Xunit;
 namespace TrackMatch.App.Tests;
 
 /// <summary>
-/// Candidate一覧でGlobal Human VerdictとLibrary固有Keepを混同しない表示を検証する。
+/// Candidate一覧でGlobal Human VerdictをLibrary固有Keepと混同せず表示することを検証する。
 /// </summary>
 public sealed class CandidateReviewItemViewModelTests
 {
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public void ReviewResult_ConfirmedDuplicateDoesNotExposePairKeep(long keepTrackId)
+    [Fact]
+    public void ReviewResult_ConfirmedDuplicateShowsOnlyGlobalVerdict()
     {
-        var row = CreateRow(CandidateReviewDecision.ConfirmedDuplicate, keepTrackId);
+        var row = CreateRow(CandidateReviewDecision.ConfirmedDuplicate);
 
         var viewModel = new CandidateReviewItemViewModel(row);
 
         Assert.Equal("重複として確認済み", viewModel.ReviewResult);
     }
 
-    private static CandidateReviewReportRow CreateRow(CandidateReviewDecision decision, long? keepTrackId)
+    private static CandidateReviewReportRow CreateRow(CandidateReviewDecision decision)
         => new(
             1,
             2,
@@ -58,6 +56,5 @@ public sealed class CandidateReviewItemViewModelTests
             16,
             2,
             2,
-            decision,
-            keepTrackId);
+            decision);
 }
