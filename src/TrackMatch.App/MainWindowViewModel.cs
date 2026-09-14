@@ -329,7 +329,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var groupService = new DuplicateGroupService(reviews, tracks, groups);
             await groupService.SaveReviewAsync(
                 library.Id,
-                new CandidateReview(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null, keepTrackId));
+                new CandidateReview(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null),
+                keepTrackId);
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
