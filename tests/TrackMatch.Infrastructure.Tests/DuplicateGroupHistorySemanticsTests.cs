@@ -147,6 +147,48 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestoreAfterKeepChange_StillRequiresReviewBeforeOldTrashDispositionCanApply()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "a.flac");
+        var b = await CreateTrackAsync(tracks, "b.flac");
+        var c = await CreateTrackAsync(tracks, "c.flac");
+        var service = CreateService();
+        var groups = new SqliteDuplicateGroupRepository(_database);
+
+        await SaveConfirmedAsync(service, a, b, a);
+        await SaveConfirmedAsync(service, b, c, b);
+        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+
+        await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+        var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+
+        // Missing中の構成だけを見てKeepを変更しても、物理Track復帰というTopology遷移は消えない。
+        // 復帰Trackを旧Dispositionで即Trashしないため、復帰後は必ず要確認へ戻す。
+        await groups.SetKeepAsync(_libraryId, reduced.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        Assert.Equal(c, restoredId);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
+        Assert.Null(restored.KeepTrackId);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var latestTopology = await connection.QuerySingleAsync<string>(
+            """
+            SELECT ChangeKind
+            FROM LibraryDuplicateGroupKeepHistory
+            WHERE ChangeKind IN ('TrackMissing', 'TrackRestored', 'GroupSplit', 'GroupMerge', 'GroupRebuild')
+            ORDER BY Id DESC
+            LIMIT 1;
+            """);
+        Assert.Equal("TrackRestored", latestTopology);
+    }
+
+    [Fact]
     public async Task ReAddingVerdictAfterOtherTopologyChange_DoesNotReuseOldTrackMissingAsRestoreReason()
     {
         var tracks = new SqliteTrackRepository(_database);
