@@ -59,6 +59,7 @@ public sealed class LibraryAnalysisWorkflow
         try
         {
             var database = await OpenDatabaseAsync(cancellationToken);
+            var scanMayHaveCommittedChanges = false;
             try
             {
                 var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
@@ -78,6 +79,10 @@ public sealed class LibraryAnalysisWorkflow
                             value.CompletedFiles,
                             value.TotalFiles,
                             value.CurrentPath)));
+
+                    // Root ScanはTrack単位で完了済み更新を保持するため、呼び出し後に例外となっても
+                    // Global Groupの派生状態をCurrent Verdictへ追従させる必要がある。
+                    scanMayHaveCommittedChanges = true;
                     results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
                 }
 
@@ -86,11 +91,15 @@ public sealed class LibraryAnalysisWorkflow
                 await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
                 return new LibraryRootScanBatchResult(library.Id, results);
             }
-            catch (OperationCanceledException)
+            catch
             {
-                // Batch途中のキャンセルでも完了済みRoot/Trackの変更は保持されるため、
-                // Materialized Global Groupだけが古い状態に戻らないようCurrent Verdictから再同期する。
-                await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+                if (scanMayHaveCommittedChanges)
+                {
+                    // CancellationだけでなくI/O例外等でも、失敗前までにTrack更新やVerdict無効化がCommit済みになり得る。
+                    // 元のScan例外を失わないよう、派生Global Groupの修復はbest-effortで実行する。
+                    await TrySynchronizeDuplicateGroupsAsync(database);
+                }
+
                 throw;
             }
         }
@@ -263,6 +272,19 @@ public sealed class LibraryAnalysisWorkflow
             new SqliteTrackLookupRepository(database),
             new SqliteDuplicateGroupRepository(database));
         await service.SynchronizeGlobalAsync(cancellationToken);
+    }
+
+    private static async Task TrySynchronizeDuplicateGroupsAsync(SqliteDatabase database)
+    {
+        try
+        {
+            await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+        }
+        catch
+        {
+            // 元のScan失敗原因を呼び出し元へ返すことを優先する。
+            // DB障害が継続している場合、修復側の例外で最初の原因を上書きしない。
+        }
     }
 
     private async Task<SqliteDatabase> OpenDatabaseAsync(CancellationToken cancellationToken)
