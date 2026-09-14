@@ -32,9 +32,12 @@ public static class DuplicateGroupPlanner
             AddEdge(adjacency, review.Pair.TrackIdA, review.Pair.TrackIdB);
         }
 
-        var components = BuildComponents(adjacency);
+        var components = BuildComponents(adjacency)
+            .Where(component => component.Count >= 2)
+            .OrderBy(component => component.Min())
+            .ToArray();
         var componentByTrack = new Dictionary<long, int>();
-        for (var index = 0; index < components.Count; index++)
+        for (var index = 0; index < components.Length; index++)
         {
             foreach (var trackId in components[index])
             {
@@ -54,37 +57,39 @@ public static class DuplicateGroupPlanner
             }
         }
 
-        var reusableGroupIds = new HashSet<long>();
-        var result = new List<DuplicateGroupRebuildItem>(components.Count);
-
-        foreach (var component in components.OrderBy(component => component.Min()))
+        // Split/Merge時のGroup IDは、旧Groupと新ComponentのOverlapが最大になる組合せから優先して割り当てる。
+        // Componentの処理順だけで小さい側へ旧IDが渡るとHistory追跡が不安定になるため、割当を先に全体で決める。
+        var assignments = new Dictionary<int, long>();
+        var usedGroupIds = new HashSet<long>();
+        foreach (var candidate in existingGroups
+                     .SelectMany(group => components.Select((component, index) => new
+                     {
+                         GroupId = group.Id,
+                         ComponentIndex = index,
+                         Overlap = group.TrackIds.Count(component.Contains),
+                         ComponentMin = component.Min(),
+                     }))
+                     .Where(candidate => candidate.Overlap > 0)
+                     .OrderByDescending(candidate => candidate.Overlap)
+                     .ThenBy(candidate => candidate.GroupId)
+                     .ThenBy(candidate => candidate.ComponentMin))
         {
-            if (component.Count < 2)
+            if (usedGroupIds.Contains(candidate.GroupId)
+                || assignments.ContainsKey(candidate.ComponentIndex))
             {
                 continue;
             }
 
-            // 分割では同一IDを複数成分へ複製できないため、最大Overlapの成分だけが旧IDを引き継ぐ。
-            // 結合では複数旧Groupのうち最も大きく重なるGroupを代表IDとして再利用する。
-            var retained = existingGroups
-                .Where(group => !reusableGroupIds.Contains(group.Id))
-                .Select(group => new
-                {
-                    Group = group,
-                    Overlap = group.TrackIds.Count(component.Contains),
-                })
-                .Where(item => item.Overlap > 0)
-                .OrderByDescending(item => item.Overlap)
-                .ThenBy(item => item.Group.Id)
-                .FirstOrDefault();
+            usedGroupIds.Add(candidate.GroupId);
+            assignments[candidate.ComponentIndex] = candidate.GroupId;
+        }
 
-            if (retained is not null)
-            {
-                reusableGroupIds.Add(retained.Group.Id);
-            }
-
+        var result = new List<DuplicateGroupRebuildItem>(components.Length);
+        for (var index = 0; index < components.Length; index++)
+        {
+            var component = components[index];
             result.Add(new DuplicateGroupRebuildItem(
-                retained?.Group.Id,
+                assignments.GetValueOrDefault(index) is { } groupId && groupId > 0 ? groupId : null,
                 component.Order().ToArray()));
         }
 
