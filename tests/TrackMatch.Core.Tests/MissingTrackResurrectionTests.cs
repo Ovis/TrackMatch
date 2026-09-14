@@ -100,6 +100,9 @@ public sealed class MissingTrackResurrectionTests
         public Task MarkMissingAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task MarkMissingBatchAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task SaveFingerprintAsync(long trackId, AudioFingerprint fingerprint, int algorithm, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
