@@ -64,8 +64,11 @@
                                 <DataGridTextColumn Header="レビュー結果" Binding="{Binding ReviewResult}" Width="125"/>
                             </DataGrid.Columns>
                         </DataGrid>
-                        <!-- DataGrid内部では列ヘッダーと縦ScrollBarの交差部分が空セルになるため、候補一覧だけ同色で覆う。 -->
-                        <Border x:Name="CandidateGridHeaderCornerOverlay" Width="14" Height="30" Margin="0,1,1,0" HorizontalAlignment="Right" VerticalAlignment="Top" Background="#F3F6F9" SnapsToDevicePixels="True" IsHitTestVisible="False"/>
+                        <!-- DataGrid内部では列ヘッダーと縦ScrollBarの交差部分が空セルになるため、候補一覧だけ同色で覆う。ヘッダー下罫線も再現して右端だけ線が途切れないようにする。 -->
+                        <Border x:Name="CandidateGridHeaderCornerOverlay" Width="14" Height="30" Margin="0,1,1,0"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Background="#F3F6F9"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
+                                SnapsToDevicePixels="True" IsHitTestVisible="False"/>
                     </Grid>
                 </Grid>
             </Border>
