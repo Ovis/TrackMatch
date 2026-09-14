@@ -250,8 +250,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var groups = new SqliteDuplicateGroupRepository(database);
             var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
 
-            // 実ファイルを動かす直前にレビューからグループを再同期し、古い派生状態を削除根拠にしない。
-            await groupService.SynchronizeAsync(library.Id);
+            // 実ファイルを動かす直前にGlobal Verdictからグループを再同期し、古い派生状態を削除根拠にしない。
+            await groupService.SynchronizeGlobalAsync();
 
             var tracks = new SqliteTrackRepository(database);
             var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
