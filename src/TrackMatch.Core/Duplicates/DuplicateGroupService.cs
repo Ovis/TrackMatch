@@ -34,10 +34,14 @@ public sealed class DuplicateGroupService(
     /// <summary>
     /// Global Verdictを保存し、Global Groupを再構成したうえで現在LibraryのKeepを反映する。
     /// </summary>
+    /// <remarks>
+    /// 既存Global Verdictと同じ判定を再度選んだ場合、Verdictの出所やHistoryは更新しない。
+    /// ConfirmedDuplicateではその操作を現在LibraryのKeep変更として扱い、Global VerdictとLibrary固有Dispositionを分離する。
+    /// </remarks>
     /// <param name="libraryId">操作元Library ID</param>
     /// <param name="review">Global Track Pairへ保存するHuman Verdict</param>
     /// <param name="keepTrackId">ConfirmedDuplicate時に現在Libraryで残すTrack ID</param>
-    /// <param name="cancellationToken">Verdict Commit前までのキャンセル要求</param>
+    /// <param name="cancellationToken">Global Verdict Commit前までのキャンセル要求</param>
     public async Task SaveReviewAsync(
         long libraryId,
         CandidateReview review,
@@ -49,7 +53,25 @@ public sealed class DuplicateGroupService(
         ValidateKeepSelection(review, keepTrackId);
         await EnsurePairBelongsToLibraryAsync(libraryId, review.Pair, cancellationToken);
 
-        var currentReviews = await GetActiveGlobalReviewsAsync(cancellationToken);
+        var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
+        var existingReview = allReviews.SingleOrDefault(item => item.Pair == review.Pair);
+        if (existingReview?.Decision == review.Decision)
+        {
+            // Global Verdictの判定自体が変わらない操作でSource LibraryやHistoryを書き換えない。
+            // Candidate Review画面から同じConfirmedDuplicateを選ぶ操作は、現在LibraryのKeep変更だけを意味する。
+            if (review.Decision == CandidateReviewDecision.ConfirmedDuplicate && keepTrackId is { } selectedKeepTrackId)
+            {
+                await SetKeepForCurrentGroupAsync(
+                    libraryId,
+                    review.Pair,
+                    selectedKeepTrackId,
+                    cancellationToken);
+            }
+
+            return;
+        }
+
+        var currentReviews = await GetActiveGlobalReviewsAsync(allReviews, cancellationToken);
         var proposedReviews = currentReviews
             .Where(item => item.Pair != review.Pair)
             .Append(review)
@@ -67,23 +89,12 @@ public sealed class DuplicateGroupService(
                 await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
             }
 
-            if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || keepTrackId is null)
+            if (review.Decision == CandidateReviewDecision.ConfirmedDuplicate && keepTrackId is { } selectedKeepTrackId)
             {
-                return;
-            }
-
-            var group = await groupRepository.GetByTrackIdAsync(review.Pair.TrackIdA, libraryId, CancellationToken.None)
-                ?? throw new InvalidOperationException("保存した重複判定からGlobal Duplicate Groupを解決できませんでした。");
-
-            // 既存Group同士の結合でKeepが競合した場合は、今回のPair操作だけで勝手に競合を解消しない。
-            // 新規Groupまたは競合していないGroupでは、ユーザーが押したA/Bを現在Libraryの明示Keepとして反映する。
-            if (group.KeepStatus != DuplicateGroupKeepStatus.Conflict)
-            {
-                await groupRepository.SetKeepAsync(
+                await SetKeepForCurrentGroupAsync(
                     libraryId,
-                    group.Id,
-                    keepTrackId.Value,
-                    "UserReview",
+                    review.Pair,
+                    selectedKeepTrackId,
                     CancellationToken.None);
             }
         }
@@ -127,25 +138,12 @@ public sealed class DuplicateGroupService(
     }
 
     /// <summary>
-    /// Current Global Verdictを正としてGlobal Duplicate Groupを再同期する。
+    /// Library Contextを必要としない管理操作後に、Current Global VerdictからGlobal Groupを再同期する。
     /// </summary>
     /// <remarks>
     /// Missing Trackを含むVerdictは履歴価値を残したままCurrent Group形成から除外する。
     /// Trash直前にも呼び出すことで、物理状態が変わったTrackを削除判断に使わない。
     /// </remarks>
-    public Task SynchronizeAsync(long libraryId, CancellationToken cancellationToken = default)
-    {
-        if (libraryId <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(libraryId));
-        }
-
-        return SynchronizeGlobalAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Library Contextを必要としない管理操作後に、Current Global VerdictからGlobal Groupを再同期する。
-    /// </summary>
     public async Task SynchronizeGlobalAsync(CancellationToken cancellationToken = default)
     {
         var reviews = await GetActiveGlobalReviewsAsync(cancellationToken);
@@ -158,6 +156,36 @@ public sealed class DuplicateGroupService(
         {
             await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
         }
+    }
+
+    private async Task SetKeepForCurrentGroupAsync(
+        long libraryId,
+        CandidatePairKey pair,
+        long keepTrackId,
+        CancellationToken cancellationToken)
+    {
+        var group = await groupRepository.GetByTrackIdAsync(pair.TrackIdA, libraryId, cancellationToken);
+        if (group is null)
+        {
+            // 過去の派生更新失敗等でGroupだけ欠けている場合は、Current Verdictを正本として一度修復してから再解決する。
+            await SynchronizeGlobalAsync(cancellationToken);
+            group = await groupRepository.GetByTrackIdAsync(pair.TrackIdA, libraryId, cancellationToken)
+                ?? throw new InvalidOperationException("保存済みの重複判定からGlobal Duplicate Groupを解決できませんでした。");
+        }
+
+        // 既存Group同士の結合でKeepが競合した場合は、Pair操作だけで勝手に競合を解消しない。
+        // 競合解消はGroup詳細画面でGlobal Group全体を確認したうえで明示的に行う。
+        if (group.KeepStatus == DuplicateGroupKeepStatus.Conflict)
+        {
+            return;
+        }
+
+        await groupRepository.SetKeepAsync(
+            libraryId,
+            group.Id,
+            keepTrackId,
+            "UserReview",
+            cancellationToken);
     }
 
     private async Task TryRepairGlobalTopologyAsync()
@@ -175,8 +203,14 @@ public sealed class DuplicateGroupService(
 
     private async Task<IReadOnlyList<CandidateReview>> GetActiveGlobalReviewsAsync(
         CancellationToken cancellationToken)
+        => await GetActiveGlobalReviewsAsync(
+            await reviewRepository.GetAllAsync(cancellationToken),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<CandidateReview>> GetActiveGlobalReviewsAsync(
+        IReadOnlyList<CandidateReview> allReviews,
+        CancellationToken cancellationToken)
     {
-        var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
         var result = new List<CandidateReview>(allReviews.Count);
         var cache = new Dictionary<long, StoredTrack?>();
 
