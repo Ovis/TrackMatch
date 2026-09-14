@@ -107,7 +107,8 @@ public partial class MainWindow : Window
         _viewModel.CandidateListMode = CandidateTabs.SelectedIndex switch
         {
             1 => CandidateReviewListMode.Reviewed,
-            2 => CandidateReviewListMode.All,
+            2 => CandidateReviewListMode.ReReviewRecommended,
+            3 => CandidateReviewListMode.All,
             _ => CandidateReviewListMode.Unreviewed,
         };
     }
@@ -333,12 +334,46 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (!ConfirmGlobalVerdictOverwrite())
+            {
+                return;
+            }
+
             await action();
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
             ShowReviewError(exception);
         }
+    }
+
+    /// <summary>
+    /// 他Libraryで確定したGlobal Human Verdictを現在Libraryから変更する場合だけ、影響範囲を明示して確認する。
+    /// </summary>
+    private bool ConfirmGlobalVerdictOverwrite()
+    {
+        var selected = _viewModel.SelectedCandidate;
+        var library = _viewModel.SelectedLibrary;
+        if (selected?.Row.ReviewSourceLibraryId is not { } sourceLibraryId
+            || library is null
+            || sourceLibraryId == library.Id)
+        {
+            return true;
+        }
+
+        var sourceName = string.IsNullOrWhiteSpace(selected.Row.ReviewSourceLibraryName)
+            ? $"Library #{sourceLibraryId}"
+            : selected.Row.ReviewSourceLibraryName;
+        var confirmation = new ConfirmationDialog(
+            "他のLibraryで確定した判定を変更します",
+            $"この判定は「{sourceName}」で確定されています。",
+            "Human VerdictはGlobal Pair単位で共有されるため、ここで変更すると他のLibraryから見える判定も同時に変わります。",
+            "Global判定を変更",
+            "キャンセル",
+            kind: AppDialogKind.Warning)
+        { Owner = this };
+        confirmation.ShowDialog();
+        return confirmation.SelectedResult == AppDialogResult.Primary;
     }
 
     private void ShowReviewError(Exception exception)
