@@ -278,6 +278,18 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             throw new InvalidOperationException("Keep Trackは指定Global Duplicate Groupの構成Trackである必要があります。");
         }
 
+        var keepTrackIsActive = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM Tracks WHERE Id = @KeepTrackId AND IsMissing = 0;",
+            new { KeepTrackId = keepTrackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (keepTrackIsActive == 0)
+        {
+            // Selectedは「現在利用可能なKeep」を意味するため、Missingを直接Selectedへ保存しない。
+            // Missing化による既存Keepの状態遷移はGlobal Group同期側でMissingとして履歴化・再構築する。
+            throw new InvalidOperationException("Missing状態のTrackを現在のKeepとして選択できません。");
+        }
+
         var libraryExists = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             "SELECT COUNT(*) FROM Libraries WHERE Id = @LibraryId;",
             new { LibraryId = libraryId },
