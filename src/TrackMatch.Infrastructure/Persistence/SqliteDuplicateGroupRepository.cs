@@ -619,14 +619,19 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             var addedTrackIds = newTrackIds.Where(trackId => !oldGroup.TrackIds.Contains(trackId)).ToArray();
             if (addedTrackIds.Length != 0)
             {
-                // TrackMissing直後のTopology復帰だけをTrackRestoredとして記録する。
-                // 古いMissing履歴が残っているだけの通常Group拡張をRestoreと誤認しないよう、同じGroup IDの直近履歴を確認する。
+                // Keep変更などDispositionだけの履歴はTopology復帰判定を中断しない。
+                // 直近のTopology遷移がTrackMissingである場合だけ復帰とみなし、古いMissing履歴の誤再利用も防ぐ。
                 var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
                     """
                     SELECT ChangeKind, GraphKeySnapshot
                     FROM LibraryDuplicateGroupKeepHistory
                     WHERE LibraryId = @LibraryId
                       AND DuplicateGroupId = @DuplicateGroupId
+                      AND ChangeKind IN (
+                          'TrackMissing', 'TrackRestored',
+                          'KeepMissing', 'KeepRestored',
+                          'GroupSplit', 'GroupMerge', 'GroupRebuild',
+                          'ScopeRemoved', 'LibraryDeleted')
                     ORDER BY Id DESC
                     LIMIT 1;
                     """,
