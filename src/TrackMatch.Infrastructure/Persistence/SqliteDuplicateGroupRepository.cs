@@ -329,12 +329,30 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                     continue;
                 }
 
-                // Missing状態でもKeep ID自体はCurrent Stateへ保持する。
-                // これにより同じTrackが復帰したとき、ユーザーが以前選んだKeepを自動的に復元できる。
-                var priorKeepIds = relevantStates
+                // Split後にこのLibraryのActive Membershipを1件も含まないComponentへCurrent Keepを持ち越さない。
+                // 過去判断はHistoryへ残るため、後からMembershipが追加されても古いKeepが突然復活することはない。
+                var libraryHasMembership = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                    """
+                    SELECT COUNT(*)
+                    FROM LibraryTracks lt
+                    INNER JOIN Tracks t ON t.Id = lt.TrackId AND t.IsMissing = 0
+                    WHERE lt.LibraryId = @LibraryId
+                      AND lt.TrackId IN @TrackIds;
+                    """,
+                    new { LibraryId = libraryId, TrackIds = newTrackSet.ToArray() },
+                    transaction,
+                    cancellationToken: cancellationToken));
+                if (libraryHasMembership == 0)
+                {
+                    continue;
+                }
+
+                var priorKeepStates = relevantStates
                     .Where(state => state.KeepTrackId is not null
                         && (string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal)
                             || string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Missing), StringComparison.Ordinal)))
+                    .ToArray();
+                var priorKeepIds = priorKeepStates
                     .Select(state => state.KeepTrackId!.Value)
                     .Distinct()
                     .ToArray();
@@ -344,7 +362,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 if (relevantStates.Any(state => string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Conflict), StringComparison.Ordinal))
                     || priorKeepIds.Length > 1)
                 {
-                    // Mergeで異なるKeepが集まった場合は、Missingを含めて自動選択せず再確認を要求する。
+                    // Mergeで異なるKeepが集まった場合は自動選択せず再確認を要求する。
                     status = DuplicateGroupKeepStatus.Conflict;
                 }
                 else if (priorKeepIds.Length == 1)
@@ -361,12 +379,19 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                         keepTrackId = priorKeepId;
                         status = DuplicateGroupKeepStatus.Missing;
                     }
-                    else if (trackState is not null && newTrackSet.Contains(priorKeepId))
+                    else if (trackState is not null
+                        && newTrackSet.Contains(priorKeepId)
+                        && priorKeepStates.All(state => !string.Equals(
+                            state.Status,
+                            nameof(DuplicateGroupKeepStatus.Missing),
+                            StringComparison.Ordinal)))
                     {
+                        // 通常のMerge/Splitでは有効なKeepを引き継ぐ。一方、Missingから復帰したTrackは
+                        // 以前のDispositionを自動復元せず、Current Groupを要確認へ戻す。
                         keepTrackId = priorKeepId;
                         status = DuplicateGroupKeepStatus.Selected;
                     }
-                    // Split後にKeepが別成分へ移った場合、この成分へはKeepを引き継がない。
+                    // Missing復帰時またはSplit後にKeepが別成分へ移った場合はUnselectedのままにする。
                 }
 
                 await connection.ExecuteAsync(new CommandDefinition(
