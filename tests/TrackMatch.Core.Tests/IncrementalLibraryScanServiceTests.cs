@@ -70,7 +70,7 @@ public sealed class IncrementalLibraryScanServiceTests
 
             var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
 
-            Assert.Equal(0, result.Summary.RemovedCount);
+            Assert.Equal(0, result.Summary.RemovedFiles);
             Assert.Empty(repository.MissingTrackIds);
         }
         finally
