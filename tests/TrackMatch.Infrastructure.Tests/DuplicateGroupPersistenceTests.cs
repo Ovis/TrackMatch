@@ -145,6 +145,31 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SetKeepAsync_RejectsLibraryThatHasNoMembershipInGroup()
+    {
+        var (a, b, _) = await CreateTracksAsync();
+        var service = CreateService();
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+
+        var libraries = new SqliteLibraryRepository(_database);
+        var unrelatedRoot = Path.Combine(_directory, "unrelated");
+        Directory.CreateDirectory(unrelatedRoot);
+        var unrelatedLibrary = await libraries.CreateAsync(
+            "Unrelated Library",
+            [unrelatedRoot],
+            TestContext.Current.CancellationToken);
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+            unrelatedLibrary.Id,
+            group.Id,
+            a,
+            "UserSelected",
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreAndRestoresKeep()
     {
         var (a, b, c) = await CreateTracksAsync();
