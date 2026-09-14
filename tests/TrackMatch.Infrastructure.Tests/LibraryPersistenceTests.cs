@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
@@ -132,6 +133,37 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM Tracks WHERE Id = $value;", trackId));
         Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryTracks WHERE TrackId = $value;", trackId));
+    }
+
+    [Fact]
+    public async Task RemoveRootAsync_RemovesKeepWhenGroupIsNoLongerReachableFromLibrary()
+    {
+        var library = await _repository.CreateAsync(
+            "Music",
+            [@"D:\Music", @"E:\Music"],
+            TestContext.Current.CancellationToken);
+        var removedRoot = library.Roots.Single(root => root.Path.StartsWith("D:", StringComparison.OrdinalIgnoreCase));
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\a.flac"), TestContext.Current.CancellationToken);
+        var trackB = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\b.flac"), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, removedRoot.Id, trackA, "a.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, removedRoot.Id, trackB, "b.flac", TestContext.Current.CancellationToken);
+
+        var groups = new SqliteDuplicateGroupRepository(_database);
+        await groups.ReplaceGlobalAsync(
+            [new DuplicateGroupRebuildItem(null, [trackA, trackB])],
+            TestContext.Current.CancellationToken);
+        var group = Assert.Single(await groups.GetByLibraryIdAsync(library.Id, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(library.Id, group.Id, trackA, "UserSelected", TestContext.Current.CancellationToken);
+
+        await _repository.RemoveRootAsync(library.Id, removedRoot.Id, TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0L, await ScalarAsync(
+            connection,
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepStates WHERE LibraryId = $value;",
+            library.Id));
+        Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM DuplicateGroups WHERE Id = $value;", group.Id));
     }
 
     [Fact]
