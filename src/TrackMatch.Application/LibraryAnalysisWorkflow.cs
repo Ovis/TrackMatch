@@ -60,24 +60,34 @@ public sealed class LibraryAnalysisWorkflow
         try
         {
             var database = await OpenDatabaseAsync(cancellationToken);
-            var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
-            await using var connection = await database.OpenConnectionAsync(cancellationToken);
-            var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
-                "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
-                new { PathKey = normalizedRoot.Key },
-                cancellationToken: cancellationToken))).ToArray();
-            if (roots.Length != 1)
+            try
             {
-                throw new InvalidOperationException(
-                    roots.Length == 0
-                        ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
-                        : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
-            }
+                var normalizedRoot = LibraryValueNormalizer.NormalizeRootPath(rootPath);
+                await using var connection = await database.OpenConnectionAsync(cancellationToken);
+                var roots = (await connection.QueryAsync<RootIdentityRow>(new CommandDefinition(
+                    "SELECT Id, LibraryId, Path FROM LibraryRoots WHERE PathKey = @PathKey;",
+                    new { PathKey = normalizedRoot.Key },
+                    cancellationToken: cancellationToken))).ToArray();
+                if (roots.Length != 1)
+                {
+                    throw new InvalidOperationException(
+                        roots.Length == 0
+                            ? $"登録済み対象フォルダが見つかりません: {normalizedRoot.DisplayPath}"
+                            : $"同じ対象フォルダが複数Libraryに登録されています。Libraryを指定して実行してください: {normalizedRoot.DisplayPath}");
+                }
 
-            var root = roots[0];
-            var result = await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
-            await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
-            return result;
+                var root = roots[0];
+                var result = await CreateScanService(database).ScanAsync(root.LibraryId, root.Id, root.Path, cancellationToken);
+                await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                // Track単位で完了したContent Change無効化はキャンセル後も保持される。
+                // Cancel済みTokenを再利用すると派生Groupだけ古い状態で残るため、整合回復だけはキャンセル不可で完了させる。
+                await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+                throw;
+            }
         }
         finally
         {
@@ -97,30 +107,40 @@ public sealed class LibraryAnalysisWorkflow
         try
         {
             var database = await OpenDatabaseAsync(cancellationToken);
-            var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
-            var service = CreateScanService(database);
-            var results = new List<IncrementalScanResult>(library.Roots.Count);
-
-            // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
-            // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
-            for (var index = 0; index < library.Roots.Count; index++)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var root = library.Roots[index];
-                var rootProgress = new Progress<IncrementalScanProgress>(value =>
-                    progress?.Report(new LibraryScanBatchProgress(
-                        index + 1,
-                        library.Roots.Count,
-                        value.CompletedFiles,
-                        value.TotalFiles,
-                        value.CurrentPath)));
-                results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
-            }
+                var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
+                var service = CreateScanService(database);
+                var results = new List<IncrementalScanResult>(library.Roots.Count);
 
-            // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
-            // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
-            await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
-            return new LibraryRootScanBatchResult(library.Id, results);
+                // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
+                // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
+                for (var index = 0; index < library.Roots.Count; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var root = library.Roots[index];
+                    var rootProgress = new Progress<IncrementalScanProgress>(value =>
+                        progress?.Report(new LibraryScanBatchProgress(
+                            index + 1,
+                            library.Roots.Count,
+                            value.CompletedFiles,
+                            value.TotalFiles,
+                            value.CurrentPath)));
+                    results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
+                }
+
+                // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
+                // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
+                await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
+                return new LibraryRootScanBatchResult(library.Id, results);
+            }
+            catch (OperationCanceledException)
+            {
+                // Batch途中のキャンセルでも完了済みRoot/Trackの変更は保持されるため、
+                // Materialized Global Groupだけが古い状態に戻らないようCurrent Verdictから再同期する。
+                await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+                throw;
+            }
         }
         finally
         {
