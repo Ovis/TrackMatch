@@ -124,6 +124,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
         var changedOldKeepStates = oldKeepStates
             .Where(state => changedOldGroupIds.Contains(state.DuplicateGroupId))
             .ToArray();
+        var selectedStatesAffectedByTrackRestore = new HashSet<(long LibraryId, long DuplicateGroupId)>();
 
         // 実際にTopologyが変わるGroupだけを履歴化する。
         // 無関係なGroupをGroupRebuildとして記録すると、監査履歴とUpdatedAtの意味が失われるため触らない。
@@ -143,6 +144,14 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 oldGroups,
                 groups,
                 cancellationToken);
+            if (string.Equals(changeKind, "TrackRestored", StringComparison.Ordinal)
+                && string.Equals(state.Status, nameof(DuplicateGroupKeepStatus.Selected), StringComparison.Ordinal))
+            {
+                // Trash/Missingから構成Trackが戻ったGroupでは旧Dispositionをそのまま再適用しない。
+                // Historyには実際のSelected状態をTrackRestoredとして残し、Current再構築時だけ要確認扱いへ落とす。
+                selectedStatesAffectedByTrackRestore.Add((state.LibraryId, state.DuplicateGroupId));
+            }
+
             await InsertKeepHistoryAsync(
                 connection,
                 transaction,
@@ -215,11 +224,18 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             persistedChangedGroups.Add((groupId, plan));
         }
 
+        // TrackRestoredになったSelected Stateは、既存のMissing復帰ルールをCurrent再構築にも適用する。
+        // Keep IDそのものがMissingだった場合だけでなく、Reject側Trackの復帰でも旧Trash判断を自動再適用しないためである。
+        var restoreSourceStates = changedOldKeepStates
+            .Select(state => selectedStatesAffectedByTrackRestore.Contains((state.LibraryId, state.DuplicateGroupId))
+                ? state with { Status = nameof(DuplicateGroupKeepStatus.Missing) }
+                : state)
+            .ToArray();
         await RestoreKeepStatesAsync(
             connection,
             transaction,
             oldGroups,
-            changedOldKeepStates,
+            restoreSourceStates,
             persistedChangedGroups,
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
