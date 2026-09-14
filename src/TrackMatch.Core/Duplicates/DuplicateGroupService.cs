@@ -31,32 +31,42 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
 
-        // 矛盾検証を終えてからCurrent Verdictと派生Groupを更新する。
-        // Verdict自体はGlobalだが、HistoryでどのLibrary Contextから操作したか追えるよう現在Libraryも渡す。
+        // 矛盾検証を終えてからCurrent Verdictを先にCommitする。
+        // 以降はCurrent Verdictが正本になっているため、呼び出し元Cancelで派生Group更新だけを中断しない。
         await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
-        if (HasTopologyChanged(rebuild, existingGroups))
+        try
         {
-            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+            if (HasTopologyChanged(rebuild, existingGroups))
+            {
+                await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+            }
+
+            if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || review.KeepTrackId is null)
+            {
+                return;
+            }
+
+            var group = await groupRepository.GetByTrackIdAsync(review.Pair.TrackIdA, libraryId, CancellationToken.None)
+                ?? throw new InvalidOperationException("保存した重複判定からGlobal Duplicate Groupを解決できませんでした。");
+
+            // 既存Group同士の結合でKeepが競合した場合は、今回のペア上のKeepで勝手に競合を解消しない。
+            // 新規Groupまたは競合していないGroupでは、ユーザーが押したA/Bを現在Libraryの明示Keepとして反映する。
+            if (group.KeepStatus != DuplicateGroupKeepStatus.Conflict)
+            {
+                await groupRepository.SetKeepAsync(
+                    libraryId,
+                    group.Id,
+                    review.KeepTrackId.Value,
+                    "UserReview",
+                    CancellationToken.None);
+            }
         }
-
-        if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || review.KeepTrackId is null)
+        catch
         {
-            return;
-        }
-
-        var group = await groupRepository.GetByTrackIdAsync(review.Pair.TrackIdA, libraryId, cancellationToken)
-            ?? throw new InvalidOperationException("保存した重複判定からGlobal Duplicate Groupを解決できませんでした。");
-
-        // 既存Group同士の結合でKeepが競合した場合は、今回のペア上のKeepで勝手に競合を解消しない。
-        // 新規Groupまたは競合していないGroupでは、ユーザーが押したA/Bを現在Libraryの明示Keepとして反映する。
-        if (group.KeepStatus != DuplicateGroupKeepStatus.Conflict)
-        {
-            await groupRepository.SetKeepAsync(
-                libraryId,
-                group.Id,
-                review.KeepTrackId.Value,
-                "UserReview",
-                cancellationToken);
+            // Verdict Commit後に派生更新だけ失敗した場合は、Current Verdictを正本として最低限Topologyを再同期する。
+            // Keep設定まで失敗したケースは安全側で未選択/既存状態として残し、呼び出し元へ例外を返して再操作を促す。
+            await TryRepairGlobalTopologyAsync();
+            throw;
         }
     }
 
@@ -76,9 +86,17 @@ public sealed class DuplicateGroupService(
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
 
         await reviewRepository.DeleteAsync(pair, libraryId, cancellationToken);
-        if (HasTopologyChanged(rebuild, existingGroups))
+        try
         {
-            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+            if (HasTopologyChanged(rebuild, existingGroups))
+            {
+                await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+            }
+        }
+        catch
+        {
+            await TryRepairGlobalTopologyAsync();
+            throw;
         }
     }
 
@@ -113,6 +131,19 @@ public sealed class DuplicateGroupService(
         if (HasTopologyChanged(rebuild, existingGroups))
         {
             await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        }
+    }
+
+    private async Task TryRepairGlobalTopologyAsync()
+    {
+        try
+        {
+            await SynchronizeGlobalAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // 元の派生更新失敗を呼び出し元へ返すことを優先する。
+            // DB障害が継続している場合、ここで別例外へ置き換えると最初の失敗原因を失うため握りつぶす。
         }
     }
 
