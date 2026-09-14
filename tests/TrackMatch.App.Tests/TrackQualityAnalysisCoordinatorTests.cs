@@ -89,6 +89,25 @@ public sealed class TrackQualityAnalysisCoordinatorTests
         Assert.Equal(QualityAnalysisStatus.Failed, repository.Values[2].Status);
     }
 
+    [Fact]
+    public async Task RunAsync_CancelledTrackDoesNotLeaveAnalyzingState()
+    {
+        var repository = new InMemoryRepository();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var analyzer = new BlockingAnalyzer(started);
+        var coordinator = new TrackQualityAnalysisCoordinator(analyzer, repository, workerCount: 1);
+        using var cancellation = new CancellationTokenSource();
+        var run = coordinator.RunAsync(CreateRequests(1), cancellationToken: cancellation.Token);
+
+        await started.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(QualityAnalysisStatus.Analyzing, repository.Values[1].Status);
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal(QualityAnalysisStatus.NotAnalyzed, repository.Values[1].Status);
+    }
+
     private static IReadOnlyCollection<TrackQualityAnalysisRequest> CreateRequests(params long[] trackIds)
         => trackIds
             .Select(trackId => new TrackQualityAnalysisRequest(
@@ -136,6 +155,19 @@ public sealed class TrackQualityAnalysisCoordinatorTests
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            return CreateResult(trackId, QualityAnalysisStatus.Analyzed);
+        }
+    }
+
+    private sealed class BlockingAnalyzer(TaskCompletionSource<bool> started) : ITrackQualityAnalyzer
+    {
+        public async Task<TrackQualityAnalysis> AnalyzeAsync(
+            long trackId,
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            started.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return CreateResult(trackId, QualityAnalysisStatus.Analyzed);
         }
     }
