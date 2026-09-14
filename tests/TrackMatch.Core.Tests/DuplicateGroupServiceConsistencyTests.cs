@@ -25,8 +25,8 @@ public sealed class DuplicateGroupServiceConsistencyTests
             new CandidateReview(
                 CandidatePairKey.Create(1, 2),
                 CandidateReviewDecision.ConfirmedDuplicate,
-                null,
-                1),
+                null),
+            keepTrackId: 1,
             cancellation.Token);
 
         Assert.True(cancellation.IsCancellationRequested);
