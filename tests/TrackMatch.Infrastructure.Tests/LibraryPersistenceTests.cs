@@ -142,7 +142,7 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
             "Music",
             [@"D:\Music", @"E:\Music"],
             TestContext.Current.CancellationToken);
-        var removedRoot = library.Roots.Single(root => root.Path.StartsWith("D:", StringComparison.OrdinalIgnoreCase));
+        var removedRoot = library.Roots.Single(root => root.Path.StartsWith(@"D:\", StringComparison.OrdinalIgnoreCase));
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\a.flac"), TestContext.Current.CancellationToken);
         var trackB = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\b.flac"), TestContext.Current.CancellationToken);
