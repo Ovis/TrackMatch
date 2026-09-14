@@ -93,6 +93,35 @@ public sealed class CandidateGenerationServiceTests
         Assert.Equal(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB), CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
     }
 
+    [Fact]
+    public async Task GenerateAsync_DoesNotCompletePendingWhenCandidatePersistenceFails()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+        ]);
+        var work = new FakeGenerationWorkRepository([1, 2]);
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            new FakeSketchRepository(),
+            new FailingPairRepository(),
+            new MutableReviewRepository(),
+            sketcher,
+            new CandidatePairGenerator(sketcher),
+            work);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAsync(
+            2,
+            new CandidateGenerationOptions(),
+            TestContext.Current.CancellationToken));
+
+        Assert.Empty(work.CompletedTrackIds);
+    }
+
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values, DateTime extractedAt)
         => new(id, 2, new AudioFingerprint($"{id}.flac", TimeSpan.FromMinutes(4), values), extractedAt);
 
@@ -138,6 +167,29 @@ public sealed class CandidateGenerationServiceTests
 
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Pairs);
+    }
+
+    private sealed class FailingPairRepository : ICandidatePairRepository
+    {
+        public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> pairs, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("candidate persistence failed");
+
+        public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidatePair>>([]);
+    }
+
+    private sealed class FakeGenerationWorkRepository(IReadOnlyCollection<long> pendingTrackIds) : ICandidateGenerationWorkRepository
+    {
+        public List<long> CompletedTrackIds { get; } = [];
+
+        public Task<IReadOnlySet<long>> GetPendingTrackIdsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<long>>(pendingTrackIds.ToHashSet());
+
+        public Task MarkCompletedAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+        {
+            CompletedTrackIds.AddRange(trackIds);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class MutableReviewRepository : ICandidateReviewRepository
