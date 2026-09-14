@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using TrackMatch.App.Playback;
+using TrackMatch.App.Settings;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Trash;
@@ -21,7 +22,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
     private readonly string _databasePath;
     private readonly long _libraryId;
     private readonly long _groupId;
-    private readonly string _trashRoot;
+    private string _trashRoot;
     private readonly SingleTrackPreviewPlayer _previewPlayer = new();
     private Button? _playingButton;
     private string _groupTitle = "重複グループ";
@@ -32,10 +33,18 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
     /// <summary>
     /// 指定Libraryから見たGlobal Duplicate Group詳細画面を生成する。
     /// </summary>
+    public DuplicateGroupDetailsWindow(string databasePath, long libraryId, long groupId)
+        : this(databasePath, libraryId, groupId, string.Empty)
+    {
+    }
+
+    /// <summary>
+    /// 指定Libraryから見たGlobal Duplicate Group詳細画面を生成する。
+    /// </summary>
     /// <param name="databasePath">TrackMatchのSQLiteデータベースパス</param>
     /// <param name="libraryId">現在画面で選択しているLibrary</param>
     /// <param name="groupId">表示対象のGlobal Duplicate Group</param>
-    /// <param name="trashRoot">App-wide Trashのルート。未設定の場合は物理Trash操作を案内だけに留める</param>
+    /// <param name="trashRoot">App-wide Trashのルート。未指定時は保存済みApp設定から読み込む</param>
     public DuplicateGroupDetailsWindow(string databasePath, long libraryId, long groupId, string trashRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
@@ -107,6 +116,13 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         Loaded -= DuplicateGroupDetailsWindow_Loaded;
         try
         {
+            if (string.IsNullOrWhiteSpace(_trashRoot))
+            {
+                // Main Windowと同じ永続設定を読むことで、既存の3引数呼び出しを維持したままTrash設定を共有する。
+                var settings = await new JsonAppSettingsStore().LoadAsync();
+                _trashRoot = settings.TrashRoot ?? string.Empty;
+            }
+
             await LoadGroupAsync();
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
