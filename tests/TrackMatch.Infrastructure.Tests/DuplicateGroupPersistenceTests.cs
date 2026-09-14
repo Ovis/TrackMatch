@@ -42,8 +42,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
 
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, _libraryId, b, c, b);
 
         var group = Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
@@ -58,8 +58,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, _libraryId, b, c, b);
 
         await service.DeleteReviewAsync(
             _libraryId,
@@ -81,8 +81,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, _libraryId, b, c, b);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveReviewAsync(
             _libraryId,
@@ -124,8 +124,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(secondLibrary.Id, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, secondLibrary.Id, b, c, b);
         var repository = new SqliteDuplicateGroupRepository(_database);
         var firstProjection = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.DoesNotContain(c, firstProjection.TrackIds);
@@ -149,7 +149,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
 
         var libraries = new SqliteLibraryRepository(_database);
         var unrelatedRoot = Path.Combine(_directory, "unrelated");
@@ -174,7 +174,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
         var repository = new SqliteDuplicateGroupRepository(_database);
         var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         var tracks = new SqliteTrackRepository(_database);
@@ -199,8 +199,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var service = CreateService();
         var repository = new SqliteDuplicateGroupRepository(_database);
         var tracks = new SqliteTrackRepository(_database);
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         await repository.SetKeepAsync(_libraryId, group.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
@@ -234,8 +234,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
         var repository = new SqliteDuplicateGroupRepository(_database);
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
-        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
+        await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var oldGroup = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         await repository.SetKeepAsync(_libraryId, oldGroup.Id, b, "UserSelected", TestContext.Current.CancellationToken);
 
@@ -268,7 +268,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
-        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await SaveConfirmedAsync(service, _libraryId, a, b, a);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var before = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;");
@@ -285,6 +285,20 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var reviews = new SqliteCandidateReviewRepository(_database);
         var tracks = new SqliteTrackLookupRepository(_database);
         return new DuplicateGroupService(reviews, tracks, new SqliteDuplicateGroupRepository(_database));
+    }
+
+    private async Task SaveConfirmedAsync(
+        DuplicateGroupService service,
+        long libraryId,
+        long left,
+        long right,
+        long keepTrackId)
+    {
+        await service.SaveReviewAsync(
+            libraryId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
+            keepTrackId,
+            TestContext.Current.CancellationToken);
     }
 
     private async Task<(long A, long B, long C)> CreateTracksAsync()
@@ -327,7 +341,4 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             16,
             2,
             2026);
-
-    private static CandidateReview Confirmed(long left, long right, long keep)
-        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null, keep);
 }
