@@ -1,5 +1,4 @@
 using TrackMatch.Core.Classification;
-using TrackMatch.Core.Probe;
 using Xunit;
 
 namespace TrackMatch.Core.Tests;
@@ -20,7 +19,10 @@ public sealed class RelationshipClassifierTests
     public void Classify_HighSimilarityAndBothCoverages_ReturnsDuplicateCandidate()
     {
         var result = new RelationshipClassifier(Profile).Classify(
-            new ProbeMeasurement("duplicate", 0.95, 0.98, 0.97, 0.98));
+            similarity: 0.95,
+            coverageA: 0.98,
+            coverageB: 0.97,
+            durationRatio: 0.98);
 
         Assert.Equal(AudioRelationshipKind.DuplicateCandidate, result.Kind);
     }
@@ -29,7 +31,10 @@ public sealed class RelationshipClassifierTests
     public void Classify_HighSimilarityAndOneSidedCoverage_ReturnsShortVersionCandidate()
     {
         var result = new RelationshipClassifier(Profile).Classify(
-            new ProbeMeasurement("tv-size", 0.92, 0.36, 0.99, 0.37));
+            similarity: 0.92,
+            coverageA: 0.36,
+            coverageB: 0.99,
+            durationRatio: 0.37);
 
         Assert.Equal(AudioRelationshipKind.ShortVersionCandidate, result.Kind);
     }
@@ -38,7 +43,10 @@ public sealed class RelationshipClassifierTests
     public void Classify_ModerateSimilarity_ReturnsAlternateVersionCandidate()
     {
         var result = new RelationshipClassifier(Profile).Classify(
-            new ProbeMeasurement("remix", 0.72, 0.80, 0.82, 0.97));
+            similarity: 0.72,
+            coverageA: 0.80,
+            coverageB: 0.82,
+            durationRatio: 0.97);
 
         Assert.Equal(AudioRelationshipKind.AlternateVersionCandidate, result.Kind);
     }
@@ -47,7 +55,10 @@ public sealed class RelationshipClassifierTests
     public void Classify_LowSimilarity_ReturnsNeedsReview()
     {
         var result = new RelationshipClassifier(Profile).Classify(
-            new ProbeMeasurement("unrelated", 0.42, 0.90, 0.91, 0.99));
+            similarity: 0.42,
+            coverageA: 0.90,
+            coverageB: 0.91,
+            durationRatio: 0.99);
 
         Assert.Equal(AudioRelationshipKind.NeedsReview, result.Kind);
     }
