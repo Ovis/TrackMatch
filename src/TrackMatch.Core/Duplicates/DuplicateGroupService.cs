@@ -34,7 +34,10 @@ public sealed class DuplicateGroupService(
         // 矛盾検証を終えてからCurrent Verdictと派生Groupを更新する。
         // Verdict自体はGlobalだが、HistoryでどのLibrary Contextから操作したか追えるよう現在Libraryも渡す。
         await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
-        await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        if (HasTopologyChanged(rebuild, existingGroups))
+        {
+            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        }
 
         if (review.Decision != CandidateReviewDecision.ConfirmedDuplicate || review.KeepTrackId is null)
         {
@@ -73,7 +76,10 @@ public sealed class DuplicateGroupService(
         var rebuild = DuplicateGroupPlanner.Build(proposedReviews, existingGroups);
 
         await reviewRepository.DeleteAsync(pair, libraryId, cancellationToken);
-        await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        if (HasTopologyChanged(rebuild, existingGroups))
+        {
+            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -101,7 +107,13 @@ public sealed class DuplicateGroupService(
         var reviews = await GetActiveGlobalReviewsAsync(cancellationToken);
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
-        await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+
+        // Scan完了ごとに同一構成をDELETE/INSERTするとKeep Historyへ意味のないGroupRebuildが蓄積する。
+        // Track集合と継承Group IDが完全一致する場合は、派生状態が既にCurrent Verdictと整合しているため書き換えない。
+        if (HasTopologyChanged(rebuild, existingGroups))
+        {
+            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        }
     }
 
     private async Task<IReadOnlyList<CandidateReview>> GetActiveGlobalReviewsAsync(
@@ -161,5 +173,28 @@ public sealed class DuplicateGroupService(
         var track = await trackLookupRepository.GetByIdAsync(trackId, cancellationToken);
         cache[trackId] = track;
         return track;
+    }
+
+    private static bool HasTopologyChanged(
+        IReadOnlyCollection<DuplicateGroupRebuildItem> rebuild,
+        IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
+    {
+        if (rebuild.Count != existingGroups.Count)
+        {
+            return true;
+        }
+
+        var existingById = existingGroups.ToDictionary(group => group.Id);
+        foreach (var plan in rebuild)
+        {
+            if (plan.ExistingGroupId is not { } groupId
+                || !existingById.TryGetValue(groupId, out var existing)
+                || !plan.TrackIds.Order().SequenceEqual(existing.TrackIds.Order()))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
