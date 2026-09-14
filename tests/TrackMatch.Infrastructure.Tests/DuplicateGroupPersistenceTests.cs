@@ -1,3 +1,4 @@
+using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
@@ -92,6 +93,91 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             .GetAllAsync(TestContext.Current.CancellationToken);
         Assert.Equal(2, reviews.Count);
         Assert.DoesNotContain(reviews, review => review.Pair == CandidatePairKey.Create(a, c));
+    }
+
+    [Fact]
+    public async Task SetKeepAsync_AllowsGlobalGroupTrackOutsideCurrentLibrary()
+    {
+        var libraries = new SqliteLibraryRepository(_database);
+        var secondRoot = Path.Combine(_directory, "second");
+        Directory.CreateDirectory(secondRoot);
+        var secondLibrary = await libraries.CreateAsync(
+            "Second Library",
+            [secondRoot],
+            TestContext.Current.CancellationToken);
+        var secondRootId = Assert.Single(secondLibrary.Roots).Id;
+        var tracks = new SqliteTrackRepository(_database);
+        var a = await CreateTrackAsync(tracks, "a.flac");
+        var b = await CreateTrackAsync(tracks, "b.flac");
+        var c = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            secondLibrary.Id,
+            secondRootId,
+            b,
+            "b.flac",
+            TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            secondLibrary.Id,
+            secondRootId,
+            c,
+            "c.flac",
+            TestContext.Current.CancellationToken);
+
+        var service = CreateService();
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(secondLibrary.Id, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        var firstProjection = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(c, firstProjection.TrackIds);
+        Assert.Contains(c, firstProjection.GlobalTrackIds);
+
+        await repository.SetKeepAsync(
+            _libraryId,
+            firstProjection.Id,
+            c,
+            "UserSelected",
+            TestContext.Current.CancellationToken);
+
+        var updated = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, updated.KeepStatus);
+        Assert.Equal(c, updated.KeepTrackId);
+        Assert.DoesNotContain(c, updated.TrackIds);
+    }
+
+    [Fact]
+    public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreAndRestoresKeep()
+    {
+        var (a, b, c) = await CreateTracksAsync();
+        var service = CreateService();
+        var repository = new SqliteDuplicateGroupRepository(_database);
+        var tracks = new SqliteTrackRepository(_database);
+        await service.SaveReviewAsync(_libraryId, Confirmed(a, b, a), TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(_libraryId, Confirmed(b, c, b), TestContext.Current.CancellationToken);
+        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        await repository.SetKeepAsync(_libraryId, group.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+
+        await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var missingProjection = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { b, c }.Order().ToArray(), missingProjection.GlobalTrackIds);
+        Assert.Equal(DuplicateGroupKeepStatus.Missing, missingProjection.KeepStatus);
+        Assert.Null(missingProjection.KeepTrackId);
+
+        await tracks.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var changeKinds = (await connection.QueryAsync<string>(
+            "SELECT ChangeKind FROM LibraryDuplicateGroupKeepHistory ORDER BY Id;"))
+            .ToArray();
+        Assert.Contains("KeepMissing", changeKinds);
+        Assert.Contains("KeepRestored", changeKinds);
     }
 
     private DuplicateGroupService CreateService()
