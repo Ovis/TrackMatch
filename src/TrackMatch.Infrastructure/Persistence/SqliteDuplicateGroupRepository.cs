@@ -619,14 +619,18 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             var addedTrackIds = newTrackIds.Where(trackId => !oldGroup.TrackIds.Contains(trackId)).ToArray();
             if (addedTrackIds.Length != 0)
             {
-                // Keep変更などDispositionだけの履歴はTopology復帰判定を中断しない。
-                // 直近のTopology遷移がTrackMissingである場合だけ復帰とみなし、古いMissing履歴の誤再利用も防ぐ。
+                var targetGraphKey = BuildGraphKey(newTrackIds);
+
+                // MissingでGroupがSplitすると、Keepを持つComponentが新しいGroup IDへ移る場合がある。
+                // Restore判定をGroup IDへ結び付けるとその復帰を見失うため、Missing直前の完全Graphを表す
+                // GraphKeySnapshotをLibrary内のTopology履歴から検索する。後続Topology変更が同じGraphを離れる際には
+                // 新しい履歴が同じGraphKeyで残るため、古いTrackMissingを通常のGroup拡張へ再利用しない。
                 var latestTransition = await connection.QuerySingleOrDefaultAsync<KeepHistoryTransitionRow>(new CommandDefinition(
                     """
                     SELECT ChangeKind, GraphKeySnapshot
                     FROM LibraryDuplicateGroupKeepHistory
                     WHERE LibraryId = @LibraryId
-                      AND DuplicateGroupId = @DuplicateGroupId
+                      AND GraphKeySnapshot = @TargetGraphKey
                       AND ChangeKind IN (
                           'TrackMissing', 'TrackRestored',
                           'KeepMissing', 'KeepRestored',
@@ -635,12 +639,11 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                     ORDER BY Id DESC
                     LIMIT 1;
                     """,
-                    new { LibraryId = state.LibraryId, DuplicateGroupId = state.DuplicateGroupId },
+                    new { LibraryId = state.LibraryId, TargetGraphKey = targetGraphKey },
                     transaction,
                     cancellationToken: cancellationToken));
                 if (latestTransition is not null
-                    && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal)
-                    && string.Equals(latestTransition.GraphKeySnapshot, BuildGraphKey(newTrackIds), StringComparison.Ordinal))
+                    && string.Equals(latestTransition.ChangeKind, "TrackMissing", StringComparison.Ordinal))
                 {
                     return "TrackRestored";
                 }
