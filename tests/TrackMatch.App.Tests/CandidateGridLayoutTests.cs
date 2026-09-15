@@ -38,6 +38,7 @@ public sealed class CandidateGridLayoutTests
                 var verticalScrollBar = FindVisualChildren<ScrollBar>(candidateGrid)
                     .Single(item => item.Orientation == Orientation.Vertical && item.Visibility == Visibility.Visible);
                 var headerCornerOverlay = (Border)window.FindName("CandidateGridHeaderCornerOverlay");
+                var headerCornerBottomBorder = (Border)window.FindName("CandidateGridHeaderCornerBottomBorder");
                 var verticalScrollBarPosition = verticalScrollBar.TranslatePoint(new Point(), window);
                 var headerCornerOverlayPosition = headerCornerOverlay.TranslatePoint(new Point(), window);
                 var verticalScrollBarWidth = verticalScrollBar.ActualWidth;
@@ -60,6 +61,11 @@ public sealed class CandidateGridLayoutTests
                 var noScrollOverlayPosition = headerCornerOverlay.TranslatePoint(new Point(), window);
                 var noScrollGridRight = noScrollGridPosition.X + candidateGrid.ActualWidth;
                 var noScrollOverlayRight = noScrollOverlayPosition.X + headerCornerOverlay.ActualWidth;
+                var noScrollHeaderFiller = FindVisualChildren<DataGridColumnHeader>(candidateGrid)
+                    .Single(item => item.Column is null);
+                var noScrollHeaderFillerPosition = noScrollHeaderFiller.TranslatePoint(new Point(), window);
+                var noScrollHeaderFillerBottom = noScrollHeaderFillerPosition.Y + noScrollHeaderFiller.ActualHeight;
+                var noScrollHeaderCornerBottomBorderPosition = headerCornerBottomBorder.TranslatePoint(new Point(), window);
 
                 window.Close();
                 VerifyQualityPanelScroll();
@@ -79,6 +85,9 @@ public sealed class CandidateGridLayoutTests
                 Assert.NotEqual(Visibility.Visible, noScrollVerticalScrollBar.Visibility);
                 Assert.Equal(noScrollGridRight, noScrollOverlayRight, precision: 5);
                 Assert.Equal(1, headerCornerOverlay.BorderThickness.Right, precision: 5);
+                // Fillerヘッダーの下辺より下に線を置くと、DPI丸めで右端だけ1px欠ける。
+                // 1pxまで重ねて、ヘッダー下端に未描画の隙間を作らないことを保証する。
+                Assert.InRange(noScrollHeaderCornerBottomBorderPosition.Y - noScrollHeaderFillerBottom, -1, 0);
 
             }
             catch (Exception caught)
