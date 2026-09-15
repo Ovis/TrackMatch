@@ -50,10 +50,12 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
         const string sql = """
             SELECT s.TrackId, s.SegmentIndex, s.Hash
             FROM CandidateSegmentSketches s
+            INNER JOIN Tracks t ON t.Id = s.TrackId
             WHERE s.Algorithm = @Algorithm
               AND s.SegmentLengthItems = @SegmentLengthItems
               AND s.SegmentStrideItems = @SegmentStrideItems
               AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
+              AND t.IsMissing = 0
               AND (
                     @LibraryId IS NULL
                  OR EXISTS (
