@@ -97,6 +97,34 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SegmentSketchRepository_MissingTrackCacheIsKeptButExcludedFromCandidateInput()
+    {
+        var options = new CandidateGenerationOptions();
+        var fingerprints = await new SqliteFingerprintCatalogRepository(_database, _libraryAId)
+            .GetActiveAsync(2, TestContext.Current.CancellationToken);
+        var repository = new SqliteFingerprintSegmentSketchRepository(_database, _libraryAId);
+        foreach (var fingerprint in fingerprints)
+        {
+            await repository.ReplaceTrackAsync(
+                fingerprint,
+                options,
+                [new FingerprintSegmentSketch(fingerprint.TrackId, 0, unchecked((uint)fingerprint.TrackId))],
+                TestContext.Current.CancellationToken);
+        }
+
+        await new SqliteTrackRepository(_database).MarkMissingAsync(_a2, TestContext.Current.CancellationToken);
+
+        // Missing中もFingerprint未変更判定に使うSketch状態は保持するが、
+        // Candidate探索入力にはActive TrackのSketchだけを渡して古い音声とのPair生成を防ぐ。
+        var states = await repository.GetTrackStatesAsync(2, options, TestContext.Current.CancellationToken);
+        var activeSketches = await repository.GetAllAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.Contains(_a2, states.Keys);
+        var active = Assert.Single(activeSketches);
+        Assert.Equal(_a1, active.TrackId);
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_ReplaceAllPreservesOtherLibraries()
     {
         var all = new SqliteCandidatePairRepository(_database);
