@@ -155,7 +155,7 @@ public sealed class SqliteCandidateComparisonRepository(
         IReadOnlyCollection<CandidateComparison> comparisons,
         CancellationToken cancellationToken)
     {
-        if (libraryId is null || comparisons.Count == 0)
+        if (comparisons.Count == 0)
         {
             return;
         }
@@ -165,13 +165,25 @@ public sealed class SqliteCandidateComparisonRepository(
             .Distinct()
             .ToArray();
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
+            """
+            SELECT COUNT(*)
+            FROM Tracks t
+            WHERE t.Id IN @TrackIds
+              AND t.IsMissing = 0
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id));
+            """,
             new { LibraryId = libraryId, TrackIds = trackIds },
             transaction,
             cancellationToken: cancellationToken));
         if (count != trackIds.Length)
         {
-            throw new InvalidOperationException("現在LibraryのMembership外TrackをCandidate Comparisonとして保存できません。");
+            // Missing中の既存Comparison Cacheは保持するが、新しいCurrent結果を書き込むことは許可しない。
+            // Scan/Trash等と解析処理が競合しても、古い音源に対する結果が復帰後のCurrentへ混入しないための境界である。
+            throw new InvalidOperationException("Missingまたは現在LibraryのMembership外TrackをCandidate Comparisonとして保存できません。");
         }
     }
 
