@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TrackMatch icon">
+  <rect x="20" y="20" width="216" height="216" rx="48" fill="#222222"/>
+  <path d="M48 145
+           C56 145, 59 137, 66 127
+           C73 116, 82 116, 89 137
+           L101 176
+           L121 82
+           C124 68, 132 68, 135 82
+           L154 182
+           L169 130
+           C173 116, 182 116, 188 130
+           C194 144, 198 151, 208 151"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <path d="M161 79 L178 96 L211 61"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
