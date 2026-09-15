@@ -14,4 +14,8 @@
     <ProjectReference Include="..\..\src\TrackMatch.App\TrackMatch.App.csproj" />
     <ProjectReference Include="..\..\src\TrackMatch.Application\TrackMatch.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- 品質解析世代トークンはApplication内部の並行制御実装なので、公開APIへ露出させずテストAssemblyだけから検証する -->
+    <InternalsVisibleTo Include="TrackMatch.App.Tests" />
+  </ItemGroup>
 </Project>
