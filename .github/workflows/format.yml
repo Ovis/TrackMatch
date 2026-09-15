@@ -1,0 +1,48 @@
+name: Format
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore solution
+        run: dotnet restore TrackMatch.slnx
+
+      - name: Format C#
+        run: dotnet format TrackMatch.slnx --no-restore
+
+      - name: Format XAML
+        run: dotnet xstyler -c Settings.XamlStyler -r -d ./src
+
+      - name: Commit formatted files
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain)) {
+            Write-Host "No formatting changes were necessary."
+            exit 0
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Format codebase"
+          git push origin "HEAD:${{ github.ref_name }}"
