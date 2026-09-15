@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
 using TrackMatch.App;
 using TrackMatch.App.Quality;
@@ -9,7 +10,7 @@ using Xunit;
 namespace TrackMatch.App.Tests;
 
 /// <summary>
-/// 候補一覧のヘッダー右端と縦スクロールバーのレイアウトが連続していることを検証する。
+/// Main Windowの候補一覧レイアウトと、処理中に状態不整合を起こさない主要UI Bindingを検証する。
 /// </summary>
 public sealed class CandidateGridLayoutTests
 {
@@ -27,6 +28,8 @@ public sealed class CandidateGridLayoutTests
                 window.Show();
                 window.UpdateLayout();
 
+                var libraryComboBox = (ComboBox)window.FindName("LibraryComboBox");
+                var isEnabledBinding = BindingOperations.GetBinding(libraryComboBox, UIElement.IsEnabledProperty);
                 var candidateGrid = (DataGrid)window.FindName("CandidateGrid");
                 candidateGrid.ItemsSource = Enumerable.Range(0, 100).Select(index => new CandidateRow(index));
                 candidateGrid.SelectedIndex = 0;
@@ -50,6 +53,10 @@ public sealed class CandidateGridLayoutTests
                 VerifyQualityPanelScroll();
                 application.Shutdown();
 
+                // Library切替は候補読込・分析と同時に行うとSelectedLibraryと表示内容がずれるため、
+                // 設定ボタンと同じbusy-state Bindingで操作自体を禁止する。
+                Assert.NotNull(isEnabledBinding);
+                Assert.Equal(nameof(MainWindowViewModel.CanManageLibraries), isEnabledBinding.Path.Path);
                 Assert.Equal(verticalScrollBar.ActualWidth, headerCornerOverlay.ActualWidth, precision: 5);
                 // DataGridの外枠1px分だけScrollBar本体とOverlayのX座標がずれるため、
                 // 完全一致ではなく同じ右端予約領域を覆っていることを1px許容で検証する。
