@@ -15,8 +15,8 @@ Release archives include the required `fpcalc` files and native audio dependenci
 ## Build
 
 ```powershell
-dotnet restore TrackMatch.sln
-dotnet build TrackMatch.sln --configuration Release
+dotnet restore TrackMatch.slnx
+dotnet build TrackMatch.slnx --configuration Release
 ```
 
 ## Run
