@@ -45,6 +45,13 @@ public sealed class CandidateGridLayoutTests
                 var headerCornerOverlayPosition = headerCornerOverlay.TranslatePoint(new Point(), window);
                 var verticalScrollBarWidth = verticalScrollBar.ActualWidth;
                 var headerCornerOverlayWidth = headerCornerOverlay.ActualWidth;
+                var scrollUnselectedRow = FindVisualChildren<DataGridRow>(candidateGrid)
+                    .First(item => !item.IsSelected);
+                var scrollUnselectedRowPosition = scrollUnselectedRow.TranslatePoint(new Point(), window);
+                var scrollBarTrackPixel = ReadPixel(
+                    RenderWindow(window),
+                    (int)Math.Floor(verticalScrollBarPosition.X) + 2,
+                    (int)Math.Floor(scrollUnselectedRowPosition.Y) + 2);
                 var headerTexts = FindVisualChildren<DataGridColumnHeader>(candidateGrid)
                     .Where(item => item.Column is not null)
                     .Select(item => item.Column!.Header)
@@ -87,6 +94,7 @@ public sealed class CandidateGridLayoutTests
                 Assert.NotNull(isEnabledBinding);
                 Assert.Equal(nameof(MainWindowViewModel.CanManageLibraries), isEnabledBinding.Path.Path);
                 Assert.Equal(verticalScrollBarWidth, headerCornerOverlayWidth, precision: 5);
+                Assert.Equal(Colors.White, scrollBarTrackPixel);
                 // DataGridの外枠1px分だけScrollBar本体とOverlayのX座標がずれるため、
                 // 完全一致ではなく同じ右端予約領域を覆っていることを1px許容で検証する。
                 Assert.InRange(Math.Abs(verticalScrollBarPosition.X - headerCornerOverlayPosition.X), 0, 1.1);

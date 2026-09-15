@@ -146,7 +146,7 @@
         </Grid>
     </ControlTemplate>
 
-    <Style TargetType="ScrollBar">
+    <Style x:Key="AppScrollBarStyle" TargetType="ScrollBar">
         <Setter Property="Background" Value="#F3F6F9"/>
         <Setter Property="Width" Value="14"/>
         <Setter Property="MinWidth" Value="14"/>
@@ -161,4 +161,6 @@
             </Trigger>
         </Style.Triggers>
     </Style>
+
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource AppScrollBarStyle}"/>
 </ResourceDictionary>
