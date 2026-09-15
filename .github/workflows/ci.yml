@@ -25,10 +25,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore TrackMatch.sln
+        run: dotnet restore TrackMatch.slnx
 
       - name: Build
-        run: dotnet build TrackMatch.sln --configuration Release --no-restore
+        run: dotnet build TrackMatch.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test --solution TrackMatch.sln --configuration Release --no-build
+        run: dotnet test --solution TrackMatch.slnx --configuration Release --no-build
