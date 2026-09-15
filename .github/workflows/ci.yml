@@ -24,8 +24,17 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Restore tools
+        run: dotnet tool restore
+
       - name: Restore
         run: dotnet restore TrackMatch.slnx
+
+      - name: Verify C# formatting
+        run: dotnet format TrackMatch.slnx --no-restore --verify-no-changes
+
+      - name: Verify XAML formatting
+        run: dotnet xstyler -c Settings.XamlStyler -r -d ./src --passive
 
       - name: Build
         run: dotnet build TrackMatch.slnx --configuration Release --no-restore
