@@ -30,10 +30,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore TrackMatch.sln
+        run: dotnet restore TrackMatch.slnx
 
       - name: Test
-        run: dotnet test --solution TrackMatch.sln --configuration Release
+        run: dotnet test --solution TrackMatch.slnx --configuration Release
 
       - name: Publish Windows x64
         shell: pwsh
