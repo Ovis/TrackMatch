@@ -1,4 +1,4 @@
-using TrackMatch.Core.Trash;
+﻿using TrackMatch.Core.Trash;
 
 namespace TrackMatch.Infrastructure.Trash;
 

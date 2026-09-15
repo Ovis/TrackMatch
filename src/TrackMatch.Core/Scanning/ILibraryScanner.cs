@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Scanning;
+﻿namespace TrackMatch.Core.Scanning;
 
 /// <summary>
 /// 音源ライブラリを走査する。

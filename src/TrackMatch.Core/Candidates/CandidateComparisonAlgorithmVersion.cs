@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// Candidate Comparisonの互換性判定に使用するAlgorithm Versionを定義する。

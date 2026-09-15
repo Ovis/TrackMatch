@@ -1,4 +1,4 @@
-using TrackMatch.Core.Quality;
+﻿using TrackMatch.Core.Quality;
 using TrackMatch.Infrastructure.Audio;
 using Xunit;
 

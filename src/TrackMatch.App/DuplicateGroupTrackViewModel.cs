@@ -1,6 +1,4 @@
-using TrackMatch.Core.Persistence;
-
-namespace TrackMatch.App;
+﻿namespace TrackMatch.App;
 
 /// <summary>
 /// 重複グループ詳細画面で1ファイル分のメタデータとライブラリ所属を表示するモデル。
@@ -47,18 +45,53 @@ public sealed record DuplicateGroupTrackViewModel(
 
         // 一覧ではファイル同士を識別できれば十分なので、比較に使いやすい主要な形式情報だけに絞る。
         var listDetails = new List<string>();
-        if (!string.IsNullOrWhiteSpace(metadata.Format)) listDetails.Add(metadata.Format);
-        if (metadata.SampleRateHz is { } listSampleRate) listDetails.Add(FormatSampleRate(listSampleRate));
-        if (metadata.BitDepth is { } listBitDepth) listDetails.Add($"{listBitDepth} bit");
+        if (!string.IsNullOrWhiteSpace(metadata.Format))
+        {
+            listDetails.Add(metadata.Format);
+        }
+
+        if (metadata.SampleRateHz is { } listSampleRate)
+        {
+            listDetails.Add(FormatSampleRate(listSampleRate));
+        }
+
+        if (metadata.BitDepth is { } listBitDepth)
+        {
+            listDetails.Add($"{listBitDepth} bit");
+        }
 
         // 詳細側では従来の情報量を維持し、一覧を簡潔にした分の情報を失わないようにする。
         var detailItems = new List<string>();
-        if (metadata.Year is { } year) detailItems.Add(year.ToString());
-        if (!string.IsNullOrWhiteSpace(metadata.Format)) detailItems.Add(metadata.Format);
-        if (metadata.SampleRateHz is { } sampleRate) detailItems.Add(FormatSampleRate(sampleRate));
-        if (metadata.BitDepth is { } bitDepth) detailItems.Add($"{bitDepth} bit");
-        if (metadata.BitrateKbps is { } bitrate) detailItems.Add($"{bitrate} kbps");
-        if (metadata.Channels is { } channels) detailItems.Add($"{channels} ch");
+        if (metadata.Year is { } year)
+        {
+            detailItems.Add(year.ToString());
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Format))
+        {
+            detailItems.Add(metadata.Format);
+        }
+
+        if (metadata.SampleRateHz is { } sampleRate)
+        {
+            detailItems.Add(FormatSampleRate(sampleRate));
+        }
+
+        if (metadata.BitDepth is { } bitDepth)
+        {
+            detailItems.Add($"{bitDepth} bit");
+        }
+
+        if (metadata.BitrateKbps is { } bitrate)
+        {
+            detailItems.Add($"{bitrate} kbps");
+        }
+
+        if (metadata.Channels is { } channels)
+        {
+            detailItems.Add($"{channels} ch");
+        }
+
         detailItems.Add(FormatFileSize(metadata.FileSize));
 
         return new DuplicateGroupTrackViewModel(

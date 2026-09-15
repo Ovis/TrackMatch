@@ -1,60 +1,97 @@
-<Window x:Class="TrackMatch.App.RootRemapPreviewDialog"
+﻿<Window x:Class="TrackMatch.App.RootRemapPreviewDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="対象フォルダの保存場所を変更" Width="820" Height="720" MinWidth="680" MinHeight="560"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        Title="対象フォルダの保存場所を変更"
+        Width="820"
+        Height="720"
+        MinWidth="680"
+        MinHeight="560"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
     <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="16" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-                <RowDefinition/><RowDefinition/><RowDefinition/>
-                <RowDefinition/><RowDefinition/><RowDefinition/>
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
             </Grid.RowDefinitions>
-            <TextBlock Text="現在のフォルダ"/>
-            <TextBlock Grid.Column="2" Text="{Binding OldRootPath}" TextWrapping="Wrap"/>
-            <TextBlock Grid.Row="1" Text="新しいフォルダ"/>
-            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding NewRootPath}" TextWrapping="Wrap"/>
-            <TextBlock Grid.Row="2" Text="対象音源"/>
-            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding TargetTrackCount}"/>
-            <TextBlock Grid.Row="3" Text="一致"/>
-            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding MatchedTrackCount}"/>
-            <TextBlock Grid.Row="4" Text="見つからない音源"/>
-            <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding MissingTrackCount}"/>
-            <TextBlock Grid.Row="5" Text="未登録の音源ファイル"/>
-            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding UnknownAudioFileCount}"/>
+            <TextBlock Text="現在のフォルダ" />
+            <TextBlock Grid.Column="2"
+                       Text="{Binding OldRootPath}"
+                       TextWrapping="Wrap" />
+            <TextBlock Grid.Row="1"
+                       Text="新しいフォルダ" />
+            <TextBlock Grid.Row="1"
+                       Grid.Column="2"
+                       Text="{Binding NewRootPath}"
+                       TextWrapping="Wrap" />
+            <TextBlock Grid.Row="2"
+                       Text="対象音源" />
+            <TextBlock Grid.Row="2"
+                       Grid.Column="2"
+                       Text="{Binding TargetTrackCount}" />
+            <TextBlock Grid.Row="3"
+                       Text="一致" />
+            <TextBlock Grid.Row="3"
+                       Grid.Column="2"
+                       Text="{Binding MatchedTrackCount}" />
+            <TextBlock Grid.Row="4"
+                       Text="見つからない音源" />
+            <TextBlock Grid.Row="4"
+                       Grid.Column="2"
+                       Text="{Binding MissingTrackCount}" />
+            <TextBlock Grid.Row="5"
+                       Text="未登録の音源ファイル" />
+            <TextBlock Grid.Row="5"
+                       Grid.Column="2"
+                       Text="{Binding UnknownAudioFileCount}" />
         </Grid>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <GroupBox Header="影響する対象フォルダ" Margin="0,0,0,12">
-                    <ItemsControl Margin="8" ItemsSource="{Binding AffectedRoots}">
+                <GroupBox Margin="0,0,0,12"
+                          Header="影響する対象フォルダ">
+                    <ItemsControl Margin="8"
+                                  ItemsSource="{Binding AffectedRoots}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <TextBlock Margin="0,2" Text="{Binding DisplayText}" TextWrapping="Wrap"/>
+                                <TextBlock Margin="0,2"
+                                           Text="{Binding DisplayText}"
+                                           TextWrapping="Wrap" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </GroupBox>
 
-                <GroupBox Header="Path衝突" Margin="0,0,0,12">
+                <GroupBox Margin="0,0,0,12"
+                          Header="Path衝突">
                     <StackPanel Margin="8">
-                        <TextBlock Margin="0,0,0,6" Text="衝突がある場合は安全のため保存場所の変更を適用できません。" TextWrapping="Wrap"/>
+                        <TextBlock Margin="0,0,0,6"
+                                   Text="衝突がある場合は安全のため保存場所の変更を適用できません。"
+                                   TextWrapping="Wrap" />
                         <ItemsControl ItemsSource="{Binding PathCollisions}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Margin="0,2" Text="{Binding DisplayText}" TextWrapping="Wrap"/>
+                                    <TextBlock Margin="0,2"
+                                               Text="{Binding DisplayText}"
+                                               TextWrapping="Wrap" />
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
@@ -62,19 +99,31 @@
                 </GroupBox>
 
                 <GroupBox Header="新しいフォルダで見つからなかった相対パス">
-                    <ListBox Margin="8" MinHeight="140" MaxHeight="260"
+                    <ListBox MinHeight="140"
+                             MaxHeight="260"
+                             Margin="8"
                              ItemsSource="{Binding MissingRelativePaths}"
+                             ScrollViewer.CanContentScroll="True"
                              VirtualizingPanel.IsVirtualizing="True"
-                             VirtualizingPanel.VirtualizationMode="Recycling"
-                             ScrollViewer.CanContentScroll="True"/>
+                             VirtualizingPanel.VirtualizationMode="Recycling" />
                 </GroupBox>
             </StackPanel>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Width="100" Height="32" Content="適用" IsDefault="True"
-                    IsEnabled="{Binding CanApply}" Click="Apply_Click"/>
-            <Button Width="100" Height="32" Margin="8,0,0,0" Content="キャンセル" IsCancel="True"/>
+        <StackPanel Grid.Row="4"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+            <Button Width="100"
+                    Height="32"
+                    Click="Apply_Click"
+                    Content="適用"
+                    IsDefault="True"
+                    IsEnabled="{Binding CanApply}" />
+            <Button Width="100"
+                    Height="32"
+                    Margin="8,0,0,0"
+                    Content="キャンセル"
+                    IsCancel="True" />
         </StackPanel>
     </Grid>
 </Window>

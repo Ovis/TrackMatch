@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.Sqlite;
 
 namespace TrackMatch.Infrastructure.Persistence;

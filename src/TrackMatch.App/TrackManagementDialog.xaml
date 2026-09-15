@@ -1,99 +1,157 @@
-<Window x:Class="TrackMatch.App.TrackManagementDialog"
+﻿<Window x:Class="TrackMatch.App.TrackManagementDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="音源管理" Width="1120" Height="760" MinWidth="900" MinHeight="600"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        Title="音源管理"
+        Width="1120"
+        Height="760"
+        MinWidth="900"
+        MinHeight="600"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
     <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="180"/>
-                <ColumnDefinition Width="20"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="表示"/>
-            <ComboBox x:Name="FilterComboBox" Grid.Column="2" SelectionChanged="FilterComboBox_SelectionChanged">
-                <ComboBoxItem Content="すべて" Tag="All"/>
-                <ComboBoxItem Content="Missing" Tag="Missing"/>
-                <ComboBoxItem Content="未所属" Tag="Unowned"/>
+            <TextBlock VerticalAlignment="Center"
+                       FontWeight="SemiBold"
+                       Text="表示" />
+            <ComboBox x:Name="FilterComboBox"
+                      Grid.Column="2"
+                      SelectionChanged="FilterComboBox_SelectionChanged">
+                <ComboBoxItem Content="すべて"
+                              Tag="All" />
+                <ComboBoxItem Content="Missing"
+                              Tag="Missing" />
+                <ComboBoxItem Content="未所属"
+                              Tag="Unowned" />
             </ComboBox>
-            <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right"
+            <TextBlock Grid.Column="4"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Center"
                        Style="{StaticResource SecondaryTextStyle}"
-                       Text="TrackMatchの管理データを操作します。元の音源ファイルは削除しません。"/>
+                       Text="TrackMatchの管理データを操作します。元の音源ファイルは削除しません。" />
         </Grid>
 
-        <DataGrid x:Name="TracksGrid" Grid.Row="2"
-                  AutoGenerateColumns="False" IsReadOnly="True"
-                  SelectionMode="Extended" SelectionUnit="FullRow"
-                  SelectionChanged="TracksGrid_SelectionChanged">
+        <DataGrid x:Name="TracksGrid"
+                  Grid.Row="2"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionChanged="TracksGrid_SelectionChanged"
+                  SelectionMode="Extended"
+                  SelectionUnit="FullRow">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="状態" Binding="{Binding StateText}" Width="90"/>
-                <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="180"/>
-                <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="160"/>
-                <DataGridTextColumn Header="所属ライブラリ" Binding="{Binding LibrariesText}" Width="180"/>
-                <DataGridTextColumn Header="パス" Binding="{Binding Path}" Width="*"/>
+                <DataGridTextColumn Width="90"
+                                    Binding="{Binding StateText}"
+                                    Header="状態" />
+                <DataGridTextColumn Width="180"
+                                    Binding="{Binding Title}"
+                                    Header="タイトル" />
+                <DataGridTextColumn Width="160"
+                                    Binding="{Binding Artist}"
+                                    Header="アーティスト" />
+                <DataGridTextColumn Width="180"
+                                    Binding="{Binding LibrariesText}"
+                                    Header="所属ライブラリ" />
+                <DataGridTextColumn Width="*"
+                                    Binding="{Binding Path}"
+                                    Header="パス" />
             </DataGrid.Columns>
         </DataGrid>
 
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Button x:Name="ReanalyzeSelectedButton" Padding="14,6" Content="選択を再解析"
-                    IsEnabled="False" Click="ReanalyzeSelected_Click"/>
-            <Button x:Name="DeleteSelectedButton" Grid.Column="2" Padding="14,6" Content="選択を管理データから削除"
-                    IsEnabled="False" Click="DeleteSelected_Click"/>
-            <Button x:Name="DeleteFilterButton" Grid.Column="4" Padding="14,6" Content="現在の表示をすべて削除"
-                    IsEnabled="False" Click="DeleteFilter_Click"/>
-            <TextBlock x:Name="CountText" Grid.Column="6" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}"/>
+            <Button x:Name="ReanalyzeSelectedButton"
+                    Padding="14,6"
+                    Click="ReanalyzeSelected_Click"
+                    Content="選択を再解析"
+                    IsEnabled="False" />
+            <Button x:Name="DeleteSelectedButton"
+                    Grid.Column="2"
+                    Padding="14,6"
+                    Click="DeleteSelected_Click"
+                    Content="選択を管理データから削除"
+                    IsEnabled="False" />
+            <Button x:Name="DeleteFilterButton"
+                    Grid.Column="4"
+                    Padding="14,6"
+                    Click="DeleteFilter_Click"
+                    Content="現在の表示をすべて削除"
+                    IsEnabled="False" />
+            <TextBlock x:Name="CountText"
+                       Grid.Column="6"
+                       VerticalAlignment="Center"
+                       Style="{StaticResource SecondaryTextStyle}" />
         </Grid>
 
-        <GroupBox Grid.Row="6" Header="範囲を指定して再解析" Padding="10">
+        <GroupBox Grid.Row="6"
+                  Padding="10"
+                  Header="範囲を指定して再解析">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="220"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="24"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="300"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="300" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="ライブラリ"/>
-                <ComboBox x:Name="LibraryComboBox" Grid.Column="2" DisplayMemberPath="Name"
-                          SelectionChanged="LibraryComboBox_SelectionChanged"/>
-                <Button Grid.Column="4" Padding="12,6" Content="ライブラリを再解析"
-                        Click="ReanalyzeLibrary_Click"/>
+                <TextBlock VerticalAlignment="Center"
+                           Text="ライブラリ" />
+                <ComboBox x:Name="LibraryComboBox"
+                          Grid.Column="2"
+                          DisplayMemberPath="Name"
+                          SelectionChanged="LibraryComboBox_SelectionChanged" />
+                <Button Grid.Column="4"
+                        Padding="12,6"
+                        Click="ReanalyzeLibrary_Click"
+                        Content="ライブラリを再解析" />
 
-                <TextBlock Grid.Column="6" VerticalAlignment="Center" Text="対象フォルダ"/>
-                <ComboBox x:Name="RootComboBox" Grid.Column="8" DisplayMemberPath="Path"/>
-                <Button Grid.Column="10" Padding="12,6" Content="対象フォルダを再解析"
-                        Click="ReanalyzeRoot_Click"/>
+                <TextBlock Grid.Column="6"
+                           VerticalAlignment="Center"
+                           Text="対象フォルダ" />
+                <ComboBox x:Name="RootComboBox"
+                          Grid.Column="8"
+                          DisplayMemberPath="Path" />
+                <Button Grid.Column="10"
+                        Padding="12,6"
+                        Click="ReanalyzeRoot_Click"
+                        Content="対象フォルダを再解析" />
 
-                <Button Grid.Column="12" Width="100" Content="閉じる" IsCancel="True" Click="Close_Click"/>
+                <Button Grid.Column="12"
+                        Width="100"
+                        Click="Close_Click"
+                        Content="閉じる"
+                        IsCancel="True" />
             </Grid>
         </GroupBox>
     </Grid>

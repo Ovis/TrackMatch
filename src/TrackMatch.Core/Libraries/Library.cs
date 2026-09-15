@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Libraries;
+﻿namespace TrackMatch.Core.Libraries;
 
 /// <summary>
 /// 1つ以上の音楽ライブラリRootを束ねる論理Libraryを表す。

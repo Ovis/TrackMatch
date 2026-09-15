@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// LibraryTrack Pendingの完了判定に使用するCandidate GenerationロジックVersionを定義する。

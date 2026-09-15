@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Persistence;
 

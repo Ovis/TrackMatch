@@ -1,4 +1,4 @@
-using NAudio.CoreAudioApi;
+﻿using NAudio.CoreAudioApi;
 using NAudio.SoundFile;
 using NAudio.Wave;
 using TrackMatch.Core.Playback;

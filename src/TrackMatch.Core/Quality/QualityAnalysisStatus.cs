@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// 音質解析結果のライフサイクル状態を表す。

@@ -1,4 +1,4 @@
-namespace TrackMatch.Application;
+﻿namespace TrackMatch.Application;
 
 /// <summary>
 /// バックグラウンド品質解析へ渡すTrackを表す。

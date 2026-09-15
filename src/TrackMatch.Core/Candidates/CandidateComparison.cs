@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// 候補Trackペアをraw Fingerprintで詳細比較した測定値を表す。

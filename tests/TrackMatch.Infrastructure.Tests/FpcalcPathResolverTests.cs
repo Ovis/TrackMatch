@@ -1,4 +1,4 @@
-using TrackMatch.Infrastructure.Chromaprint;
+﻿using TrackMatch.Infrastructure.Chromaprint;
 using Xunit;
 
 namespace TrackMatch.Infrastructure.Tests;

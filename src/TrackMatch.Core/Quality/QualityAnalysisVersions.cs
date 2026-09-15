@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// 保存済み品質解析キャッシュの互換性判定に使用するアルゴリズムバージョンを定義する。

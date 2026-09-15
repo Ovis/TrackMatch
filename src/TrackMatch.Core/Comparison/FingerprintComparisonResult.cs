@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Comparison;
+﻿namespace TrackMatch.Core.Comparison;
 
 /// <summary>
 /// 2つのraw fingerprintを最良Offsetで整列した比較結果を表す。

@@ -1,4 +1,4 @@
-using TrackMatch.Core.Candidates;
+﻿using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Persistence;
 using Xunit;

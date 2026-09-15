@@ -1,4 +1,4 @@
-namespace TrackMatch.Infrastructure.Persistence;
+﻿namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
 /// TrackMatchがユーザー単位で保持する永続データの標準配置先を提供する。

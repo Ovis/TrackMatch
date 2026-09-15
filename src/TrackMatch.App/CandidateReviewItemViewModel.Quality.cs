@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using TrackMatch.App.Quality;
 using TrackMatch.Core.Quality;

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Duplicates;
+﻿namespace TrackMatch.Core.Duplicates;
 
 /// <summary>
 /// Global ConfirmedDuplicate Graphから再構成した1つの連結成分を表す。

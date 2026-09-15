@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// 音声ファイルを解析し、Track単体の品質測定値を生成する。

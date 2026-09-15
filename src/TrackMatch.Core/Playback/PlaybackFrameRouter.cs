@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Playback;
+﻿namespace TrackMatch.Core.Playback;
 
 /// <summary>
 /// A/B Stereo Sample FrameへGainとPlayback Modeを適用する純粋Logicを提供する。

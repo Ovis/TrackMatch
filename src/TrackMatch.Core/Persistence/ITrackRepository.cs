@@ -1,4 +1,4 @@
-using TrackMatch.Core.Fingerprinting;
+﻿using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 
 namespace TrackMatch.Core.Persistence;

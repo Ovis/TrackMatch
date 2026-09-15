@@ -1,4 +1,4 @@
-using TrackMatch.Core.Persistence;
+﻿using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Scanning;
 

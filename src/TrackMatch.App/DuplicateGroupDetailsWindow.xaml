@@ -1,134 +1,343 @@
-<Window x:Class="TrackMatch.App.DuplicateGroupDetailsWindow"
+﻿<Window x:Class="TrackMatch.App.DuplicateGroupDetailsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="重複グループ" Height="760" Width="1180" MinHeight="620" MinWidth="980"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        Title="重複グループ"
+        Width="1180"
+        Height="760"
+        MinWidth="980"
+        MinHeight="620"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
     <Grid Margin="18">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <StackPanel>
-            <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding GroupTitle}"/>
-            <TextBlock Margin="0,4,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding FileCountText}"/>
+            <TextBlock FontSize="20"
+                       FontWeight="SemiBold"
+                       Text="{Binding GroupTitle}" />
+            <TextBlock Margin="0,4,0,0"
+                       Style="{StaticResource SecondaryTextStyle}"
+                       Text="{Binding FileCountText}" />
         </StackPanel>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*"/>
-                <ColumnDefinition Width="14"/>
-                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="2*" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="0">
+            <Border Grid.Column="0"
+                    Padding="0"
+                    Style="{StaticResource CardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Margin="12,12,12,8" Style="{StaticResource SectionTitleStyle}" Text="グループ内のファイル"/>
-                    <DataGrid x:Name="TrackGrid" Grid.Row="1" ItemsSource="{Binding AllTracks}" SelectedItem="{Binding SelectedTrack, Mode=TwoWay}"
-                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionUnit="FullRow">
+                    <TextBlock Margin="12,12,12,8"
+                               Style="{StaticResource SectionTitleStyle}"
+                               Text="グループ内のファイル" />
+                    <DataGrid x:Name="TrackGrid"
+                              Grid.Row="1"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              ItemsSource="{Binding AllTracks}"
+                              SelectedItem="{Binding SelectedTrack, Mode=TwoWay}"
+                              SelectionMode="Single"
+                              SelectionUnit="FullRow">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="状態" Binding="{Binding DispositionLabel}" Width="72"/>
-                            <DataGridTextColumn Header="ライブラリ" Binding="{Binding ScopeLabel}" Width="145"/>
-                            <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="*"/>
-                            <DataGridTextColumn Header="長さ" Binding="{Binding Duration}" Width="70"/>
-                            <DataGridTextColumn Header="情報" Binding="{Binding MetadataSummary}" Width="190"/>
+                            <DataGridTextColumn Width="72"
+                                                Binding="{Binding DispositionLabel}"
+                                                Header="状態" />
+                            <DataGridTextColumn Width="145"
+                                                Binding="{Binding ScopeLabel}"
+                                                Header="ライブラリ" />
+                            <DataGridTextColumn Width="*"
+                                                Binding="{Binding Title}"
+                                                Header="タイトル" />
+                            <DataGridTextColumn Width="70"
+                                                Binding="{Binding Duration}"
+                                                Header="長さ" />
+                            <DataGridTextColumn Width="190"
+                                                Binding="{Binding MetadataSummary}"
+                                                Header="情報" />
                         </DataGrid.Columns>
                     </DataGrid>
-                    <Border Grid.Row="2" Padding="12,9" Background="#F7F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
-                        <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="現在のライブラリ外にあるファイルも、重複関係を確認するため表示します。物理ファイルを動かす操作は、明示的に選択したファイルだけが対象です。" TextWrapping="Wrap"/>
+                    <Border Grid.Row="2"
+                            Padding="12,9"
+                            Background="#F7F8FA"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="0,1,0,0">
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="現在のライブラリ外にあるファイルも、重複関係を確認するため表示します。物理ファイルを動かす操作は、明示的に選択したファイルだけが対象です。"
+                                   TextWrapping="Wrap" />
                     </Border>
                 </Grid>
             </Border>
 
-            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="14" DataContext="{Binding SelectedTrack}">
+            <Border Grid.Column="2"
+                    Padding="14"
+                    DataContext="{Binding SelectedTrack}"
+                    Style="{StaticResource CardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="10"/><RowDefinition Height="*"/><RowDefinition Height="10"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="10" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="10" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock FontSize="19" FontWeight="SemiBold" Text="{Binding Title}" TextWrapping="Wrap"/>
-                            <TextBlock Margin="0,3,0,0" Text="{Binding Artist}" TextWrapping="Wrap"/>
-                            <TextBlock Margin="0,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding Album}" TextWrapping="Wrap"/>
-                            <Border Margin="0,8,0,0" Padding="8,3" CornerRadius="10" HorizontalAlignment="Left">
-                                <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="#EEF5FD"/><Style.Triggers><DataTrigger Binding="{Binding IsInCurrentLibrary}" Value="False"><Setter Property="Background" Value="#FFF1D9"/></DataTrigger></Style.Triggers></Style></Border.Style>
-                                <TextBlock FontWeight="SemiBold" Text="{Binding ScopeLabel}"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsInCurrentLibrary}" Value="False"><Setter Property="Foreground" Value="#A05A00"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+                            <TextBlock FontSize="19"
+                                       FontWeight="SemiBold"
+                                       Text="{Binding Title}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,3,0,0"
+                                       Text="{Binding Artist}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,2,0,0"
+                                       Style="{StaticResource SecondaryTextStyle}"
+                                       Text="{Binding Album}"
+                                       TextWrapping="Wrap" />
+                            <Border Margin="0,8,0,0"
+                                    Padding="8,3"
+                                    HorizontalAlignment="Left"
+                                    CornerRadius="10">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#EEF5FD" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsInCurrentLibrary}"
+                                                         Value="False">
+                                                <Setter Property="Background" Value="#FFF1D9" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock FontWeight="SemiBold"
+                                           Text="{Binding ScopeLabel}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsInCurrentLibrary}"
+                                                             Value="False">
+                                                    <Setter Property="Foreground" Value="#A05A00" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </Border>
                         </StackPanel>
-                        <Button Grid.Column="1" Width="32" Height="30" MinWidth="32" MinHeight="30" Padding="0" ToolTip="フォルダーを開く" Tag="{Binding Path}" Click="OpenFolder_Click">
-                            <Viewbox Width="18" Height="16"><Canvas Width="18" Height="16"><Path Data="M2,13 L4.5,6 L16,6 L13.5,13 Z M2,13 L2,4 L7,4 L9,6" Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.2" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
+                        <Button Grid.Column="1"
+                                Width="32"
+                                Height="30"
+                                MinWidth="32"
+                                MinHeight="30"
+                                Padding="0"
+                                Click="OpenFolder_Click"
+                                Tag="{Binding Path}"
+                                ToolTip="フォルダーを開く">
+                            <Viewbox Width="18"
+                                     Height="16">
+                                <Canvas Width="18"
+                                        Height="16">
+                                    <Path Data="M2,13 L4.5,6 L16,6 L13.5,13 Z M2,13 L2,4 L7,4 L9,6"
+                                          Stroke="{StaticResource TextSecondaryBrush}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.2" />
+                                </Canvas>
+                            </Viewbox>
                         </Button>
                     </Grid>
                     <TabControl Grid.Row="2">
                         <TabItem Header="基本情報">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel Margin="10">
-                                    <TextBlock Text="{Binding DetailMetadataSummary}" TextWrapping="Wrap"/>
-                                    <TextBlock Margin="0,6,0,0" Text="{Binding Duration, StringFormat=再生時間: {0}}"/>
-                                    <Separator Margin="0,10"/>
-                                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="ファイルパス"/>
-                                    <TextBlock Margin="0,4,0,0" Text="{Binding Path}" TextWrapping="Wrap"/>
-                                    <TextBlock Margin="0,10,0,0" Style="{StaticResource SecondaryTextStyle}" Text="ファイル状態"/>
-                                    <TextBlock Margin="0,4,0,0" Text="{Binding FileStateLabel}"/>
+                                    <TextBlock Text="{Binding DetailMetadataSummary}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,6,0,0"
+                                               Text="{Binding Duration, StringFormat=再生時間: {0}}" />
+                                    <Separator Margin="0,10" />
+                                    <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                               Text="ファイルパス" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding Path}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,10,0,0"
+                                               Style="{StaticResource SecondaryTextStyle}"
+                                               Text="ファイル状態" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding FileStateLabel}" />
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
                         <TabItem Header="重複判定">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <StackPanel Margin="10" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
-                                    <TextBlock FontWeight="SemiBold" Text="重複として確認されています"/>
-                                    <TextBlock Margin="0,4,0,10" Style="{StaticResource SecondaryTextStyle}" Text="選択中のファイルは、次のファイルと同じ音源として確認されています。" TextWrapping="Wrap"/>
+                                <StackPanel Margin="10"
+                                            DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="重複として確認されています" />
+                                    <TextBlock Margin="0,4,0,10"
+                                               Style="{StaticResource SecondaryTextStyle}"
+                                               Text="選択中のファイルは、次のファイルと同じ音源として確認されています。"
+                                               TextWrapping="Wrap" />
                                     <ItemsControl ItemsSource="{Binding SelectedRelations}">
-                                        <ItemsControl.ItemTemplate><DataTemplate>
-                                            <Border Margin="0,0,0,8" Padding="10" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Background="#F7F8FA">
-                                                <Grid>
-                                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Title}" TextWrapping="Wrap"/>
-                                                    <Border Grid.Column="1" Margin="8,0,0,0" Padding="7,2" CornerRadius="9" Background="#EEF5FD"><TextBlock FontSize="11" Foreground="{StaticResource AccentBrush}" Text="{Binding ScopeLabel}"/></Border>
-                                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,4,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding Path}" TextWrapping="Wrap"/>
-                                                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,7,0,0" Foreground="{StaticResource AccentBrush}" Text="重複として確認済み"/>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate></ItemsControl.ItemTemplate>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Margin="0,0,0,8"
+                                                        Padding="10"
+                                                        Background="#F7F8FA"
+                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="4">
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock FontWeight="SemiBold"
+                                                                   Text="{Binding Title}"
+                                                                   TextWrapping="Wrap" />
+                                                        <Border Grid.Column="1"
+                                                                Margin="8,0,0,0"
+                                                                Padding="7,2"
+                                                                Background="#EEF5FD"
+                                                                CornerRadius="9">
+                                                            <TextBlock FontSize="11"
+                                                                       Foreground="{StaticResource AccentBrush}"
+                                                                       Text="{Binding ScopeLabel}" />
+                                                        </Border>
+                                                        <TextBlock Grid.Row="1"
+                                                                   Grid.ColumnSpan="2"
+                                                                   Margin="0,4,0,0"
+                                                                   Style="{StaticResource SecondaryTextStyle}"
+                                                                   Text="{Binding Path}"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Grid.Row="2"
+                                                                   Grid.ColumnSpan="2"
+                                                                   Margin="0,7,0,0"
+                                                                   Foreground="{StaticResource AccentBrush}"
+                                                                   Text="重複として確認済み" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <TextBlock Margin="0,4,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding RelationEmptyText}" TextWrapping="Wrap"/>
+                                    <TextBlock Margin="0,4,0,0"
+                                               Style="{StaticResource SecondaryTextStyle}"
+                                               Text="{Binding RelationEmptyText}"
+                                               TextWrapping="Wrap" />
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
                     </TabControl>
-                    <Border Grid.Row="4" Padding="10" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
-                        <Button x:Name="PreviewButton" Width="82" HorizontalAlignment="Left" Padding="10,6" Content="▶ 再生" Tag="{Binding Path}" Click="Preview_Click"/>
+                    <Border Grid.Row="4"
+                            Padding="10"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4">
+                        <Button x:Name="PreviewButton"
+                                Width="82"
+                                Padding="10,6"
+                                HorizontalAlignment="Left"
+                                Click="Preview_Click"
+                                Content="▶ 再生"
+                                Tag="{Binding Path}" />
                     </Border>
                 </Grid>
             </Border>
         </Grid>
 
         <Grid Grid.Row="4">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal">
-                <Border Padding="10,6" CornerRadius="4" Background="#EAF6EC" VerticalAlignment="Center">
-                    <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding SelectedTrack.IsKeep}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
-                    <TextBlock Foreground="#287A35" FontWeight="SemiBold" Text="✓ このライブラリで残すファイル"/>
+                <Border Padding="10,6"
+                        VerticalAlignment="Center"
+                        Background="#EAF6EC"
+                        CornerRadius="4">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTrack.IsKeep}"
+                                             Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock FontWeight="SemiBold"
+                               Foreground="#287A35"
+                               Text="✓ このライブラリで残すファイル" />
                 </Border>
-                <Button Padding="14,7" Content="このファイルを残す" IsEnabled="{Binding SelectedTrack.CanSelectAsKeep}" Click="SetSelectedKeep_Click">
-                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding SelectedTrack.IsKeep}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                <Button Padding="14,7"
+                        Click="SetSelectedKeep_Click"
+                        Content="このファイルを残す"
+                        IsEnabled="{Binding SelectedTrack.CanSelectAsKeep}">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource {x:Type Button}}"
+                               TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTrack.IsKeep}"
+                                             Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                 </Button>
-                <Button Margin="8,0,0,0" Padding="14,7" Content="ごみ箱へ移動..." Click="TrashSelectedTrack_Click">
-                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding SelectedTrack.CanTrashGlobally}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                <Button Margin="8,0,0,0"
+                        Padding="14,7"
+                        Click="TrashSelectedTrack_Click"
+                        Content="ごみ箱へ移動...">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource {x:Type Button}}"
+                               TargetType="Button">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTrack.CanTrashGlobally}"
+                                             Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                 </Button>
-                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{Binding KeepStateText}"/>
+                <TextBlock Margin="12,0,0,0"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource SecondaryTextStyle}"
+                           Text="{Binding KeepStateText}" />
             </StackPanel>
-            <Button Grid.Column="1" Width="100" Content="閉じる" IsCancel="True" Click="Close_Click"/>
+            <Button Grid.Column="1"
+                    Width="100"
+                    Click="Close_Click"
+                    Content="閉じる"
+                    IsCancel="True" />
         </Grid>
     </Grid>
 </Window>

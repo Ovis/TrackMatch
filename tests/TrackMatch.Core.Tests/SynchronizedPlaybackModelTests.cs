@@ -1,4 +1,4 @@
-using TrackMatch.Core.Playback;
+﻿using TrackMatch.Core.Playback;
 using Xunit;
 
 namespace TrackMatch.Core.Tests;

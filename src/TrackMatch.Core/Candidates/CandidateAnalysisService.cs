@@ -1,4 +1,4 @@
-using TrackMatch.Core.Comparison;
+﻿using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Candidates;

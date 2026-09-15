@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Fingerprinting;
+﻿namespace TrackMatch.Core.Fingerprinting;
 
 /// <summary>
 /// 音源から生成したChromaprintのraw fingerprintを表す。

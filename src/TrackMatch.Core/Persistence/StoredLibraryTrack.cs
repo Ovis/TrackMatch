@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Persistence;
+﻿namespace TrackMatch.Core.Persistence;
 
 /// <summary>
 /// LibraryがGlobal Trackを比較対象として保持するMembershipを表す。

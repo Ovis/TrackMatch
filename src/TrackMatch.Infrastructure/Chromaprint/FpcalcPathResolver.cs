@@ -1,4 +1,4 @@
-namespace TrackMatch.Infrastructure.Chromaprint;
+﻿namespace TrackMatch.Infrastructure.Chromaprint;
 
 /// <summary>
 /// TrackMatchが利用するfpcalc実行ファイルの場所を解決する。

@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
 

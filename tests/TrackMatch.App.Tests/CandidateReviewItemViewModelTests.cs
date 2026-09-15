@@ -1,4 +1,4 @@
-using TrackMatch.Core.Candidates;
+﻿using TrackMatch.Core.Candidates;
 using Xunit;
 
 namespace TrackMatch.App.Tests;

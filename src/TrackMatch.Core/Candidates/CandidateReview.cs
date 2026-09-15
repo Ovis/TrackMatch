@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// Global Track Pairに対する人手の確定判定を表す。

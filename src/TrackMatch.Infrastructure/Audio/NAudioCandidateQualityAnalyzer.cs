@@ -1,4 +1,4 @@
-using NAudio.SoundFile;
+﻿using NAudio.SoundFile;
 using R128Net;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Playback;

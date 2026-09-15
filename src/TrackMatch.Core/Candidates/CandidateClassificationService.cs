@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Persistence;
 

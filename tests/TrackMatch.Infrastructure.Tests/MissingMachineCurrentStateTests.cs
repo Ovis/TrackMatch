@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Models;

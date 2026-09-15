@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;

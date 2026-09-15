@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Scanning;
+﻿namespace TrackMatch.Core.Scanning;
 
 /// <summary>
 /// 増分走査中にファイル単位で発生したエラーを表す。

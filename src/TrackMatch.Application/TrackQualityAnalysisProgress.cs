@@ -1,4 +1,4 @@
-namespace TrackMatch.Application;
+﻿namespace TrackMatch.Application;
 
 /// <summary>
 /// Track単体品質解析の全体進捗を表す。

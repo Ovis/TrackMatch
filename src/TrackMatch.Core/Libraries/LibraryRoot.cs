@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Libraries;
+﻿namespace TrackMatch.Core.Libraries;
 
 /// <summary>
 /// Libraryに登録された1つの音楽ファイルRootを表す。

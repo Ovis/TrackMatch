@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using TrackMatch.Application;
 using TrackMatch.Core.Persistence;
 using TrackMatch.Core.Quality;

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Classification;
+﻿namespace TrackMatch.Core.Classification;
 
 /// <summary>
 /// 音響関係分類の結果を表す。

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Persistence;
+﻿namespace TrackMatch.Core.Persistence;
 
 /// <summary>
 /// LibraryTrackの永続的なCandidate Generation Pending状態をCandidate生成処理へ公開する。

@@ -1,10 +1,9 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using TrackMatch.App;
 using TrackMatch.App.Quality;
 using Xunit;
 
@@ -177,8 +176,15 @@ public sealed class CandidateGridLayoutTests
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is T typed) yield return typed;
-            foreach (var descendant in FindVisualChildren<T>(child)) yield return descendant;
+            if (child is T typed)
+            {
+                yield return typed;
+            }
+
+            foreach (var descendant in FindVisualChildren<T>(child))
+            {
+                yield return descendant;
+            }
         }
     }
 

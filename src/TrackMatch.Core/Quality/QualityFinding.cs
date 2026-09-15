@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// 品質所見の重要度を表す。品質の総合点ではなく、利用者が確認すべき度合いだけを表現する。

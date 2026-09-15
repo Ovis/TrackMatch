@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Infrastructure.Persistence;

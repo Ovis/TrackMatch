@@ -1,6 +1,6 @@
-using Microsoft.Win32;
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
+using Microsoft.Win32;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;
 

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Libraries;
+﻿namespace TrackMatch.Core.Libraries;
 
 /// <summary>
 /// Root保存場所変更によって連動して移動扱いとなるLibrary Rootを表す。

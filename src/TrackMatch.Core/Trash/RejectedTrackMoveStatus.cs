@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Trash;
+﻿namespace TrackMatch.Core.Trash;
 
 /// <summary>
 /// Reject TrackのTrash移動可否または実行結果を表す。

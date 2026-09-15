@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// 順序に依存しないTrackペア識別子を表す。

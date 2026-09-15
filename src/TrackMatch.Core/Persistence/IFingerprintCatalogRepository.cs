@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Persistence;
+﻿namespace TrackMatch.Core.Persistence;
 
 /// <summary>
 /// 候補生成で利用する保存済みFingerprintの読み取り境界を定義する。

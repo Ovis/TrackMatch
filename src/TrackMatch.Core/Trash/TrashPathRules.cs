@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Trash;
+﻿namespace TrackMatch.Core.Trash;
 
 /// <summary>
 /// Trash RootとLibrary Rootの配置、および元Audio FileからTrash内DestinationへのPath変換規則を提供する。

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Classification;
+﻿namespace TrackMatch.Core.Classification;
 
 /// <summary>
 /// 音響関係分類で使用するしきい値を表す。
