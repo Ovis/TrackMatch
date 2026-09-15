@@ -69,6 +69,9 @@ public sealed class CandidateGridLayoutTests
                 var noScrollHeaderFillerBottom = noScrollHeaderFillerPosition.Y + noScrollHeaderFiller.ActualHeight;
                 var noScrollHeaderCornerBottomBorderPosition = headerCornerBottomBorder.TranslatePoint(new Point(), window);
                 var noScrollRightEdgeOverlayPosition = rightEdgeOverlay.TranslatePoint(new Point(), window);
+                var noScrollSelectedRow = FindVisualChildren<DataGridRow>(candidateGrid)
+                    .Single(item => item.IsSelected);
+                var noScrollSelectedRowPosition = noScrollSelectedRow.TranslatePoint(new Point(), window);
 
                 window.Close();
                 VerifyQualityPanelScroll();
@@ -88,7 +91,10 @@ public sealed class CandidateGridLayoutTests
                 Assert.NotEqual(Visibility.Visible, noScrollVerticalScrollBar.Visibility);
                 Assert.Equal(noScrollGridRight, noScrollOverlayRight, precision: 5);
                 Assert.Equal(1, headerCornerOverlay.BorderThickness.Right, precision: 5);
-                Assert.Equal(noScrollGridRight - rightEdgeOverlay.ActualWidth, noScrollRightEdgeOverlayPosition.X, precision: 5);
+                Assert.Equal(noScrollGridRight, noScrollRightEdgeOverlayPosition.X, precision: 5);
+                Assert.True(
+                    noScrollSelectedRowPosition.X + noScrollSelectedRow.ActualWidth <= noScrollRightEdgeOverlayPosition.X,
+                    "選択行が右端境界の描画領域まで到達しています。");
                 Assert.Equal(candidateGrid.ActualHeight, rightEdgeOverlay.ActualHeight, precision: 5);
                 Assert.False(rightEdgeOverlay.IsHitTestVisible);
                 // Fillerヘッダーの下辺より下に線を置くと、DPI丸めで右端だけ1px欠ける。
