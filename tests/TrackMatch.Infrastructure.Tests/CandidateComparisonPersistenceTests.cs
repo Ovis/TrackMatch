@@ -101,6 +101,21 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateComparisonRepository_RejectsNewResultWhenTrackBecameMissing()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        await new SqliteTrackRepository(_database).MarkMissingAsync(_trackIdB, TestContext.Current.CancellationToken);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.UpsertAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken));
+
+        Assert.Contains("Missing", exception.Message, StringComparison.Ordinal);
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
     public async Task CandidateComparisonRepository_ReturnsComparedAtUtc()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
