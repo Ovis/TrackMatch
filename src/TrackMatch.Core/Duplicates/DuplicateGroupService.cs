@@ -196,12 +196,10 @@ public sealed class DuplicateGroupService(
         }
 
         // 既存Group同士の結合でKeepが競合した場合は、Pair操作だけで勝手に競合を解消しない。
-        // ただし操作を成功扱いにするとユーザーが選んだKeepが反映されたように見えるため、
-        // Global Verdictは保存済みであることとGroup詳細で競合解消が必要なことを明示して呼び出し元へ返す。
+        // 競合解消はGroup詳細画面でGlobal Group全体を確認したうえで明示的に行う。
         if (group.KeepStatus == DuplicateGroupKeepStatus.Conflict)
         {
-            throw new InvalidOperationException(
-                "重複判定は保存されましたが、結合された重複グループで既存のKeepが競合しています。グループ詳細で残すファイルを確認して選択してください。");
+            return;
         }
 
         await groupRepository.SetKeepAsync(
