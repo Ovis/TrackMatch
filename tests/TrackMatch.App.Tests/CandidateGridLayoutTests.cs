@@ -40,6 +40,8 @@ public sealed class CandidateGridLayoutTests
                 var headerCornerOverlay = (Border)window.FindName("CandidateGridHeaderCornerOverlay");
                 var verticalScrollBarPosition = verticalScrollBar.TranslatePoint(new Point(), window);
                 var headerCornerOverlayPosition = headerCornerOverlay.TranslatePoint(new Point(), window);
+                var verticalScrollBarWidth = verticalScrollBar.ActualWidth;
+                var headerCornerOverlayWidth = headerCornerOverlay.ActualWidth;
                 var headerTexts = FindVisualChildren<DataGridColumnHeader>(candidateGrid)
                     .Where(item => item.Column is not null)
                     .Select(item => item.Column!.Header)
@@ -48,6 +50,16 @@ public sealed class CandidateGridLayoutTests
                 var headerTop = FindVisualChildren<DataGridColumnHeader>(candidateGrid)
                     .First(item => item.Column is null)
                     .TranslatePoint(new Point(), window).Y;
+                var selectedCandidate = candidateGrid.SelectedItem;
+
+                candidateGrid.ItemsSource = Enumerable.Range(0, 2).Select(index => new CandidateRow(index));
+                candidateGrid.UpdateLayout();
+                var noScrollVerticalScrollBar = FindVisualChildren<ScrollBar>(candidateGrid)
+                    .Single(item => item.Orientation == Orientation.Vertical);
+                var noScrollGridPosition = candidateGrid.TranslatePoint(new Point(), window);
+                var noScrollOverlayPosition = headerCornerOverlay.TranslatePoint(new Point(), window);
+                var noScrollGridRight = noScrollGridPosition.X + candidateGrid.ActualWidth;
+                var noScrollOverlayRight = noScrollOverlayPosition.X + headerCornerOverlay.ActualWidth;
 
                 window.Close();
                 VerifyQualityPanelScroll();
@@ -57,13 +69,17 @@ public sealed class CandidateGridLayoutTests
                 // 設定ボタンと同じbusy-state Bindingで操作自体を禁止する。
                 Assert.NotNull(isEnabledBinding);
                 Assert.Equal(nameof(MainWindowViewModel.CanManageLibraries), isEnabledBinding.Path.Path);
-                Assert.Equal(verticalScrollBar.ActualWidth, headerCornerOverlay.ActualWidth, precision: 5);
+                Assert.Equal(verticalScrollBarWidth, headerCornerOverlayWidth, precision: 5);
                 // DataGridの外枠1px分だけScrollBar本体とOverlayのX座標がずれるため、
                 // 完全一致ではなく同じ右端予約領域を覆っていることを1px許容で検証する。
                 Assert.InRange(Math.Abs(verticalScrollBarPosition.X - headerCornerOverlayPosition.X), 0, 1.1);
                 Assert.Equal(headerTop, headerCornerOverlayPosition.Y, precision: 5);
-                Assert.IsType<CandidateRow>(candidateGrid.SelectedItem);
+                Assert.IsType<CandidateRow>(selectedCandidate);
                 Assert.Equal(["分類", "A", "B", "一致度", "レビュー結果"], headerTexts);
+                Assert.NotEqual(Visibility.Visible, noScrollVerticalScrollBar.Visibility);
+                Assert.Equal(noScrollGridRight, noScrollOverlayRight, precision: 5);
+                Assert.Equal(1, headerCornerOverlay.BorderThickness.Right, precision: 5);
+
             }
             catch (Exception caught)
             {
