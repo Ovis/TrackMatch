@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using TrackMatch.App;
 using TrackMatch.App.Quality;
 using Xunit;
@@ -54,7 +55,7 @@ public sealed class CandidateGridLayoutTests
                     .TranslatePoint(new Point(), window).Y;
                 var selectedCandidate = candidateGrid.SelectedItem;
 
-                candidateGrid.ItemsSource = Enumerable.Range(0, 2).Select(index => new CandidateRow(index));
+                candidateGrid.ItemsSource = Enumerable.Range(0, 3).Select(index => new CandidateRow(index));
                 candidateGrid.SelectedIndex = 0;
                 candidateGrid.UpdateLayout();
                 var noScrollVerticalScrollBar = FindVisualChildren<ScrollBar>(candidateGrid)
@@ -72,6 +73,10 @@ public sealed class CandidateGridLayoutTests
                 var noScrollSelectedRow = FindVisualChildren<DataGridRow>(candidateGrid)
                     .Single(item => item.IsSelected);
                 var noScrollSelectedRowPosition = noScrollSelectedRow.TranslatePoint(new Point(), window);
+                var noScrollHeaderCornerFirstRowPixel = ReadPixel(
+                    RenderWindow(window),
+                    (int)Math.Floor(noScrollOverlayPosition.X),
+                    (int)Math.Floor(noScrollSelectedRowPosition.Y) + 1);
 
                 window.Close();
                 VerifyQualityPanelScroll();
@@ -95,6 +100,7 @@ public sealed class CandidateGridLayoutTests
                 Assert.True(
                     noScrollSelectedRowPosition.X + noScrollSelectedRow.ActualWidth <= noScrollRightEdgeOverlayPosition.X,
                     "選択行が右端境界の描画領域まで到達しています。");
+                Assert.Equal(Color.FromRgb(0x0F, 0x6C, 0xBD), noScrollHeaderCornerFirstRowPixel);
                 Assert.Equal(candidateGrid.ActualHeight, rightEdgeOverlay.ActualHeight, precision: 5);
                 Assert.False(rightEdgeOverlay.IsHitTestVisible);
                 // Fillerヘッダーの下辺より下に線を置くと、DPI丸めで右端だけ1px欠ける。
@@ -166,6 +172,25 @@ public sealed class CandidateGridLayoutTests
             if (child is T typed) yield return typed;
             foreach (var descendant in FindVisualChildren<T>(child)) yield return descendant;
         }
+    }
+
+    private static RenderTargetBitmap RenderWindow(Window window)
+    {
+        var bitmap = new RenderTargetBitmap(
+            (int)Math.Ceiling(window.ActualWidth),
+            (int)Math.Ceiling(window.ActualHeight),
+            96,
+            96,
+            PixelFormats.Pbgra32);
+        bitmap.Render(window);
+        return bitmap;
+    }
+
+    private static Color ReadPixel(BitmapSource bitmap, int x, int y)
+    {
+        var pixels = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
+        return Color.FromArgb(pixels[3], pixels[2], pixels[1], pixels[0]);
     }
 
     private sealed record CandidateRow(int Index)
