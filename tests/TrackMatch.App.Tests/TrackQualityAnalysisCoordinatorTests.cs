@@ -89,6 +89,49 @@ public sealed class TrackQualityAnalysisCoordinatorTests
         Assert.Equal(QualityAnalysisStatus.Failed, repository.Values[2].Status);
     }
 
+    [Fact]
+    public async Task RunAsync_CancelledTrackDoesNotLeaveAnalyzingState()
+    {
+        var repository = new InMemoryRepository();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var analyzer = new BlockingAnalyzer(started);
+        var coordinator = new TrackQualityAnalysisCoordinator(analyzer, repository, workerCount: 1);
+        using var cancellation = new CancellationTokenSource();
+        var run = coordinator.RunAsync(CreateRequests(1), cancellationToken: cancellation.Token);
+
+        await started.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(QualityAnalysisStatus.Analyzing, repository.Values[1].Status);
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.False(repository.Values.ContainsKey(1));
+    }
+
+    [Fact]
+    public async Task RunAsync_OldCancellationDoesNotDeleteNewerAnalyzingGeneration()
+    {
+        var repository = new InMemoryRepository();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var analyzer = new BlockingAnalyzer(started);
+        var coordinator = new TrackQualityAnalysisCoordinator(analyzer, repository, workerCount: 1);
+        using var cancellation = new CancellationTokenSource();
+        var run = coordinator.RunAsync(CreateRequests(1), cancellationToken: cancellation.Token);
+
+        await started.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var oldMarker = repository.Values[1].AnalyzedAtUtc;
+        Assert.NotNull(oldMarker);
+
+        var newerMarker = oldMarker.Value.AddTicks(1);
+        await repository.UpsertAsync(CreateAnalyzingState(1, newerMarker), TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        var current = repository.Values[1];
+        Assert.Equal(QualityAnalysisStatus.Analyzing, current.Status);
+        Assert.Equal(newerMarker, current.AnalyzedAtUtc);
+    }
+
     private static IReadOnlyCollection<TrackQualityAnalysisRequest> CreateRequests(params long[] trackIds)
         => trackIds
             .Select(trackId => new TrackQualityAnalysisRequest(
@@ -118,6 +161,28 @@ public sealed class TrackQualityAnalysisCoordinatorTests
             DateTime.UtcNow,
             status == QualityAnalysisStatus.Failed ? "failed" : null);
 
+    private static TrackQualityAnalysis CreateAnalyzingState(long trackId, DateTime startedAtUtc)
+        => new(
+            trackId,
+            QualityAnalysisVersions.TrackQualityAnalysis,
+            QualityAnalysisStatus.Analyzing,
+            null,
+            null,
+            null,
+            null,
+            0,
+            0,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            startedAtUtc,
+            null);
+
     private sealed class RecordingAnalyzer(Func<long, Task>? onAnalyze = null) : ITrackQualityAnalyzer
     {
         private readonly ConcurrentQueue<long> _startedTrackIds = new();
@@ -140,8 +205,22 @@ public sealed class TrackQualityAnalysisCoordinatorTests
         }
     }
 
+    private sealed class BlockingAnalyzer(TaskCompletionSource<bool> started) : ITrackQualityAnalyzer
+    {
+        public async Task<TrackQualityAnalysis> AnalyzeAsync(
+            long trackId,
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            started.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return CreateResult(trackId, QualityAnalysisStatus.Analyzed);
+        }
+    }
+
     private sealed class InMemoryRepository : ITrackQualityAnalysisRepository
     {
+        private readonly object _gate = new();
         public ConcurrentDictionary<long, TrackQualityAnalysis> Values { get; } = new();
 
         public Task<TrackQualityAnalysis?> GetAsync(long trackId, CancellationToken cancellationToken = default)
@@ -154,6 +233,44 @@ public sealed class TrackQualityAnalysisCoordinatorTests
         {
             Values[analysis.TrackId] = analysis;
             return Task.CompletedTask;
+        }
+
+        public Task<bool> TryCompleteAnalyzingAsync(
+            TrackQualityAnalysis analysis,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                if (!Values.TryGetValue(analysis.TrackId, out var current)
+                    || current.Status != QualityAnalysisStatus.Analyzing
+                    || current.AnalyzedAtUtc != analyzingStartedAtUtc)
+                {
+                    return Task.FromResult(false);
+                }
+
+                Values[analysis.TrackId] = analysis;
+                return Task.FromResult(true);
+            }
+        }
+
+        public Task<bool> DeleteAnalyzingAsync(
+            long trackId,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                if (!Values.TryGetValue(trackId, out var current)
+                    || current.Status != QualityAnalysisStatus.Analyzing
+                    || current.AnalyzedAtUtc != analyzingStartedAtUtc)
+                {
+                    return Task.FromResult(false);
+                }
+
+                Values.TryRemove(trackId, out _);
+                return Task.FromResult(true);
+            }
         }
 
         public Task DeleteAsync(long trackId, CancellationToken cancellationToken = default)

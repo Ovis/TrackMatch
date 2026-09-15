@@ -23,6 +23,23 @@ public interface ICandidateQualityComparisonRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 自分が開始したAnalyzing状態がまだCurrentの場合だけ比較結果へ置換する。
+    /// </summary>
+    Task<bool> TryCompleteAnalyzingAsync(
+        CandidateQualityComparison comparison,
+        DateTime analyzingStartedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 自分が開始したAnalyzing状態がまだCurrentの場合だけ削除する。
+    /// </summary>
+    Task<bool> DeleteAnalyzingAsync(
+        long trackIdA,
+        long trackIdB,
+        DateTime analyzingStartedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 比較条件変更や手動再解析に備えて指定Candidateのキャッシュを削除する。
     /// </summary>
     Task DeleteAsync(long trackIdA, long trackIdB, CancellationToken cancellationToken = default);

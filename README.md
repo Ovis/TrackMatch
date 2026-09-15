@@ -1,13 +1,16 @@
 # TrackMatch
 
-TrackMatch is a tool for finding acoustically duplicate or related FLAC tracks in a music library.
+TrackMatch is a Windows desktop application for finding acoustically duplicate or related FLAC tracks in a music library.
 
-The project is being built around acoustic fingerprints so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
+The application uses Chromaprint fingerprints so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
 
 ## Requirements
 
-- .NET 10 SDK
-- `fpcalc` from Chromaprint for fingerprint comparison commands
+- Windows 10/11
+- .NET 10 SDK for development
+- Chromaprint `fpcalc` for fingerprint extraction
+
+Release archives include the required `fpcalc` files and native audio dependencies.
 
 ## Build
 
@@ -16,194 +19,72 @@ dotnet restore TrackMatch.sln
 dotnet build TrackMatch.sln --configuration Release
 ```
 
-## Scan FLAC metadata
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music"
-```
-
-The scanner recursively enumerates FLAC files and reads STREAMINFO and Vorbis Comment metadata without reading the audio frames themselves. A malformed or unreadable FLAC file is reported as an error while the remaining files continue to be scanned.
-
-To persist the library in SQLite and perform an incremental scan including Chromaprint extraction, specify `--db`:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music" --db ".\trackmatch.db"
-```
-
-`fpcalc` can also be specified explicitly:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- scan "D:\Music" --db ".\trackmatch.db" --fpcalc "C:\Tools\fpcalc.exe"
-```
-
-The first run registers all readable FLAC tracks and stores raw Chromaprint fingerprints. Later runs compare file size and last-write time, update metadata and regenerate fingerprints only for changed tracks, leave unchanged tracks with existing fingerprints untouched, and retry tracks whose fingerprint is still missing. Tracks that disappeared from the scanned root are retained with `IsMissing` set. Metadata or fingerprint failures are recorded as per-file errors without aborting the rest of the scan. Each run is recorded in `ScanSessions` with added, updated, missing, and error counts.
-
-## Generate comparison candidates
-
-After fingerprints are stored, generate a reduced set of track pairs for detailed comparison:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- generate-candidates --db ".\trackmatch.db"
-```
-
-Candidate generation does not compare every pair in the library. It builds overlapping segment SimHashes from the stored raw Chromaprint fingerprints and uses a multi-index Hamming search to find acoustically promising track pairs. The defaults are 256 fingerprint items per segment, a 128-item stride, and a maximum segment SimHash Hamming distance of 3.
-
-The candidate-generation parameters can be changed for calibration without rebuilding the application:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- generate-candidates --db ".\trackmatch.db" --segment-length 256 --stride 128 --max-distance 3
-```
-
-`--algorithm` can be used when working with a fingerprint algorithm other than the current default of 2. Candidate generation replaces the current `CandidatePairs` set. Replacing candidate pairs also removes detailed comparison and classification results that belong to the previous candidate set.
-
-## Analyze and classify generated candidates
-
-Run the offset-aware raw-fingerprint comparison only for the generated candidate pairs:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackmatch.db"
-```
-
-The command reuses fingerprints already stored in SQLite; it does not run `fpcalc` again. For every available candidate pair it stores similarity, best offset, matched duration, coverage for both tracks, and duration ratio in `CandidateComparisons`. A stale candidate whose fingerprint is no longer available is skipped instead of comparing invalid data.
-
-After a threshold profile has been calibrated from Probe measurements, pass it to the same command to classify the detailed comparison results and export a human-reviewable report:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- analyze-candidates --db ".\trackmatch.db" --profile ".\thresholds.json" --format csv --output ".\candidates.csv"
-```
-
-`--format` accepts `csv`, `text`, or `txt`. If `--output` is omitted, the report is written to standard output. File output uses UTF-8 with BOM. The report contains relationship kind, similarity, coverage values, duration ratio, best offset, matched duration, and both tracks' artist/title/album/genre/path metadata.
-
-Classification results are also stored in `CandidateClassifications`. The serialized threshold profile used for each classification is retained so the decision conditions can be traced later. Re-running classification replaces the previous classifications with results from the current profile.
-
-## Review candidates with the WPF app
-
-`TrackMatch.App` provides the first Windows GUI for human review. It reads the same SQLite database as the Scanner and lists classified, not-yet-reviewed candidate pairs.
+## Run
 
 ```powershell
 dotnet run --project src/TrackMatch.App
 ```
 
-Select the SQLite database used by the Scanner. The list shows the relationship classification and similarity, while the detail pane shows both tracks' title, artist, album, genre, file path, coverage values, duration ratio, and classification reason.
+TrackMatch is operated through the WPF application. The former command-line host has been removed so scanning, candidate generation, comparison, review, duplicate-group management, and Trash operations all use the same Library-scoped application workflow.
 
-The three review actions are:
+## Library workflow
 
-- `重複ではない` - saves `NotDuplicate`
-- `重複 / Aを残す` - saves `ConfirmedDuplicate` with Track A as Keep
-- `重複 / Bを残す` - saves `ConfirmedDuplicate` with Track B as Keep
+Create a Library from the application and register one or more target folders. A physical audio file is stored as a Global Track identified by its normalized absolute path, while Library membership is managed separately.
 
-After saving a review, the pair is removed from the current list because reviewed pairs are excluded by the shared repository query. The GUI does not move or delete audio files in this stage; file operations remain explicit Scanner operations.
-
-## Review a candidate from the CLI
-
-A reviewed pair is stored independently from `CandidatePairs`, so regenerating candidates does not lose the decision. Reviewed pairs are excluded from future candidate generation and from classification reports immediately. Track order is normalized, so `123/456` and `456/123` refer to the same pair.
-
-Mark a pair as not duplicate:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --note "different arrangement"
-```
-
-The default decision remains `NotDuplicate` for compatibility. To confirm that a pair is duplicate and record which copy should be retained, specify `--decision duplicate` and `--keep`:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- review-candidate --db ".\trackmatch.db" --track-a 123 --track-b 456 --decision duplicate --keep 123 --note "keep original album copy"
-```
-
-`--keep` must be one of the two Track IDs in the reviewed pair. The retained Track is stored separately from the pair decision so the rejected copy can later be moved without asking again.
-
-## Move rejected tracks to Trash
-
-`trash-reviewed` builds a move plan from `ConfirmedDuplicate` reviews. It is a dry-run by default and preserves each rejected track's path relative to the library root under the Trash root:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- trash-reviewed --db ".\trackmatch.db" --library-root "D:\Music" --trash-root "D:\MusicTrash"
-```
-
-Review the reported `Ready` rows, then add `--execute` to actually move them:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- trash-reviewed --db ".\trackmatch.db" --library-root "D:\Music" --trash-root "D:\MusicTrash" --execute
-```
-
-The command never overwrites an existing Trash file. It also blocks a track when review data conflicts and the same Track ID is selected as both Keep and Reject across different confirmed duplicate pairs. Tracks outside the specified library root, already-missing tracks, missing source files, and existing destinations are reported instead of moved. The Trash root must be outside the library root so moved FLAC files are not re-discovered by a later scan.
-
-After a successful move, the rejected Track is marked `IsMissing` and its stored fingerprint is removed immediately. The original file is not deleted; it is moved to the corresponding relative path under the Trash root.
-
-The current library pipeline is therefore:
+The normal workflow is:
 
 ```text
-scan -> generate-candidates -> analyze-candidates -> classify/export -> human review -> trash-reviewed
+Library scan
+  -> candidate generation
+  -> detailed comparison
+  -> automatic classification
+  -> human review
+  -> duplicate-group Keep selection
+  -> optional Trash move
 ```
 
-The repository intentionally does not provide arbitrary default relationship thresholds. Use real Probe measurements to create `thresholds.json` before classifying the library.
+A scan recursively reads supported audio metadata and extracts Chromaprint fingerprints when required. Later scans reuse unchanged Global Track analysis data and mark files that disappear from a successfully enumerated Root as Missing.
 
-## Compare two tracks with Chromaprint
+Candidate generation is always scoped to the selected Library. Different Libraries may share the same Global Track, but TrackMatch does not create comparison candidates between tracks that do not coexist in the same Library.
 
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- compare "D:\Music\a.flac" "D:\Music\b.flac"
-```
+## Human review
 
-Use `--csv` for machine-readable output. `fpcalc` can be specified with `--fpcalc`, the `TRACKMATCH_FPCALC` environment variable, or `PATH`.
+The candidate list provides these Global Human Verdict operations:
 
-The Probe uses the complete raw fingerprint (`fpcalc -raw -json -length 0 -algorithm 2`) and performs offset-aware comparison. Classification thresholds are intentionally not fixed yet; they will be calibrated using known real-library pairs.
+- `重複ではない` — records `NotDuplicate`
+- `重複 / Aを残す` — records `ConfirmedDuplicate` and selects A as the current Library's Keep
+- `重複 / Bを残す` — records `ConfirmedDuplicate` and selects B as the current Library's Keep
 
-## Run a batch Probe
+The duplicate/not-duplicate verdict is Global for the Track pair. Keep selection is Library-specific and is managed as Duplicate Group state. If a Global Verdict created from another Library is changed, the application warns that the change is visible from every Library containing that pair.
 
-Create an input CSV with the following columns:
+ConfirmedDuplicate edges form Global Duplicate Groups. A Library may choose a Keep Track from the Global Group even when that Track is outside the current Library membership; this does not add membership automatically.
 
-```csv
-Label,ExpectedRelation,FileA,FileB,Notes
-same-track,duplicate,D:\Music\album-a\track.flac,D:\Music\album-b\track.flac,same recording on different CDs
-full-vs-tv,tv-size,D:\Music\full.flac,D:\Music\tv-size.flac,
-```
+## Track management
 
-`ExpectedRelation` is a free-form label intended for calibration data, for example `duplicate`, `remaster`, `tv-size`, `instrumental`, `remix`, `live`, or `unrelated`.
+The Track management window can display all Global Tracks, Missing Tracks, and tracks that are no longer owned by any Library. It also provides Force Reanalysis and explicit deletion of TrackMatch-managed data.
 
-Run all pairs and write a result CSV:
+Force Reanalysis invalidates machine analysis data and the current Human Verdict for affected Tracks while retaining review history. Explicit Track deletion removes TrackMatch data but never deletes the original audio file.
 
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- probe .\probe-pairs.csv --output .\probe-results.csv
-```
+## Root relocation
 
-During one Probe run, fingerprints are cached by file path so an audio file shared by several pairs is processed by `fpcalc` only once.
+Library Roots can be remapped when a music directory is moved. Root Remap preserves Global Track IDs and reusable analysis data, updates affected child Roots and membership-relative paths, and marks tracks as Missing when the expected destination file is absent.
 
-## Analyze Probe results
+Path collisions are detected before applying the remap. TrackMatch does not automatically add unrelated Library memberships merely because the destination overlaps a Root belonging to another Library.
 
-After collecting known-pair results, summarize the distribution for each `ExpectedRelation`:
+## Trash
 
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- analyze-probe .\probe-results.csv
-```
+Trash processing is explicit. Tracks selected for removal from the current Library's duplicate groups are moved under the configured Trash Root without overwriting an existing destination.
 
-The summary reports count and minimum / median / maximum values for similarity, the lower and higher of the two coverage values, and duration ratio. These statistics are intended to calibrate classification thresholds from real audio rather than hard-code thresholds before measurements exist.
+Shared Global Tracks are handled conservatively: the application shows the affected Libraries before moving a file. Once a physical file is moved away, that Global Track becomes Missing for every Library that referenced it. If the database update fails after the physical move, TrackMatch attempts to move the file back before reporting the failure.
 
-## Classify Probe results with a calibrated profile
-
-The relationship classifier has no built-in threshold defaults. Create a JSON profile from the measured distributions with all of the following properties:
-
-- `DuplicateMinimumSimilarity`
-- `DuplicateMinimumCoverage`
-- `DuplicateMinimumDurationRatio`
-- `ShortVersionMinimumSimilarity`
-- `ShortVersionMinimumMaximumCoverage`
-- `ShortVersionMaximumMinimumCoverage`
-- `ShortVersionMaximumDurationRatio`
-- `AlternateVersionMinimumSimilarity`
-
-All values are ratios from `0.0` through `1.0`. Apply the profile to the same Probe result CSV:
-
-```powershell
-dotnet run --project src/TrackMatch.Scanner -- classify-probe .\probe-results.csv --profile .\thresholds.json
-```
-
-Each row is classified as `DuplicateCandidate`, `ShortVersionCandidate`, `AlternateVersionCandidate`, or `NeedsReview`. The output keeps `ExpectedRelation` beside the predicted relation so calibration can be iterated without changing the classifier code. Threshold values should be chosen from real Probe measurements; the repository intentionally does not provide arbitrary default numbers.
+If a Trash/Missing file is later restored to its original path, TrackMatch reuses the same Global Track ID and retains the historical verdict/disposition records, but the current Library Keep is returned to an unselected state. The restored file must therefore be reviewed again before Trash can be executed from the old disposition.
 
 ## Project structure
 
-- `TrackMatch.Core` - domain models, fingerprint comparison, relationship classification, candidate generation and Probe orchestration.
-- `TrackMatch.Infrastructure` - file-system, FLAC metadata, SQLite persistence and Chromaprint process integration.
-- `TrackMatch.Scanner` - command-line host and text/CSV input-output.
-- `TrackMatch.App` - WPF human-review UI over the shared SQLite database.
-- `TrackMatch.Core.Tests` - Core tests.
-- `TrackMatch.Infrastructure.Tests` - Infrastructure tests.
+- `TrackMatch.Core` — domain models, candidate generation, fingerprint comparison, duplicate-group rules, and analysis services.
+- `TrackMatch.Infrastructure` — file-system access, audio metadata, SQLite persistence, Chromaprint integration, and Trash I/O.
+- `TrackMatch.Application` — Library-scoped application workflows used by the WPF UI.
+- `TrackMatch.App` — WPF desktop application.
+- `TrackMatch.Core.Tests` — Core unit tests.
+- `TrackMatch.Infrastructure.Tests` — SQLite and infrastructure integration tests.
+- `TrackMatch.App.Tests` — application/UI-facing regression tests.

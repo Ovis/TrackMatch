@@ -4,7 +4,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Core.Scanning;
 
 /// <summary>
-/// ファイルシステムと保存済みTrackを照合し、変更された対応Audio FileだけをDBへ反映する。
+/// Library Rootのファイルシステム状態をGlobal TrackとLibrary Membershipへ増分反映する。
 /// </summary>
 public sealed class IncrementalLibraryScanService(
     ILibraryScanner scanner,
@@ -14,16 +14,29 @@ public sealed class IncrementalLibraryScanService(
     int fingerprintAlgorithm)
 {
     /// <summary>
-    /// 対象フォルダを増分走査し、必要なメタデータとFingerprintを更新する。
+    /// 指定Library Rootを増分走査し、Global Track・Membership・Fingerprintを更新する。
     /// </summary>
-    /// <param name="rootPath">走査対象の対象フォルダ</param>
-    /// <param name="cancellationToken">処理のキャンセル要求</param>
-    /// <param name="progress">ファイル単位の処理件数を通知する進捗通知先</param>
+    /// <remarks>
+    /// Root列挙が最後まで正常完了した場合だけMissingを確定する。アクセス失敗やキャンセルで処理が中断した場合、
+    /// 見えなかったTrackをMissingにすることはない。一方、完了済みTrack単位の更新はRollbackせず再利用する。
+    /// </remarks>
     public async Task<IncrementalScanResult> ScanAsync(
+        long libraryId,
+        long rootId,
         string rootPath,
         CancellationToken cancellationToken = default,
         IProgress<IncrementalScanProgress>? progress = null)
     {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        if (rootId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rootId));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         if (fingerprintAlgorithm < 0)
         {
@@ -44,10 +57,10 @@ public sealed class IncrementalLibraryScanService(
 
         try
         {
-            var storedTracks = await trackRepository.GetByRootPathAsync(fullRootPath, cancellationToken);
-            var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootPathAsync(fullRootPath, cancellationToken);
-            var storedByPath = storedTracks.ToDictionary(
-                track => Path.GetFullPath(track.Metadata.Path),
+            var storedEntries = await trackRepository.GetByRootAsync(libraryId, rootId, cancellationToken);
+            var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootAsync(libraryId, rootId, cancellationToken);
+            var storedByPath = storedEntries.ToDictionary(
+                entry => Path.GetFullPath(entry.Track.Metadata.Path),
                 StringComparer.OrdinalIgnoreCase);
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -61,36 +74,38 @@ public sealed class IncrementalLibraryScanService(
 
                 if (!result.IsSuccess)
                 {
-                    errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗した。"));
+                    errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗しました。"));
                     progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
                     continue;
                 }
 
                 processed++;
                 var metadata = result.Metadata!;
-                var isNew = !storedByPath.TryGetValue(fullPath, out var stored);
-                var needsMetadataUpdate = isNew || stored!.IsMissing || HasChanged(stored, metadata);
-                long trackId;
+                var hasMembership = storedByPath.TryGetValue(fullPath, out var storedEntry);
+                var wasMissing = hasMembership && storedEntry.Track.IsMissing;
+                var contentChanged = hasMembership && HasChanged(storedEntry.Track, metadata);
 
-                if (isNew)
+                // UpsertはPath Identityを共有するため、別Libraryで既知のTrackなら同じTrackIdを再利用する。
+                var trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                var relativePath = Path.GetRelativePath(fullRootPath, fullPath);
+                await trackRepository.EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+
+                if (!hasMembership)
                 {
-                    trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
                     added++;
                 }
-                else if (needsMetadataUpdate)
+                else if (wasMissing || contentChanged)
                 {
-                    trackId = stored!.Id;
-                    await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
-                    // Missingから復活した場合も旧Fingerprintを無条件には信用せず、通常の変更と同様に再生成する。
-                    await trackRepository.DeleteFingerprintAsync(trackId, cancellationToken);
                     updated++;
                 }
-                else
+
+                var needsFingerprint = contentChanged || missingFingerprintIds.Contains(trackId);
+                if (!hasMembership && !needsFingerprint)
                 {
-                    trackId = stored!.Id;
+                    // 新Membershipが既知Global Trackを再利用した場合は既存Fingerprintも共有する。
+                    needsFingerprint = await trackRepository.GetFingerprintAsync(trackId, cancellationToken) is null;
                 }
 
-                var needsFingerprint = isNew || needsMetadataUpdate || missingFingerprintIds.Contains(trackId);
                 if (needsFingerprint)
                 {
                     try
@@ -105,23 +120,24 @@ public sealed class IncrementalLibraryScanService(
                 }
 
                 // Fingerprint生成まで含めて1ファイル分の処理が完了した時点で進捗を進める。
-                // 件数だけ先行すると、時間のかかるFingerprint処理中にUI上の進捗が実態より先へ進むためここで通知する。
                 progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
             }
 
-            foreach (var stored in storedTracks)
-            {
-                if (stored.IsMissing || seenPaths.Contains(Path.GetFullPath(stored.Metadata.Path)))
-                {
-                    continue;
-                }
-
-                await trackRepository.MarkMissingAsync(stored.Id, cancellationToken);
-                removed++;
-            }
+            // Missing確定へ入る直前をCancellationの最終受付点とする。
+            // ここを通過した後に部分的なMissingだけを残すと同じRoot内で観測時点が分裂するため、
+            // 対象集合はRepositoryの1 Transactionでキャンセル不可として確定する。
+            cancellationToken.ThrowIfCancellationRequested();
+            var missingTrackIds = storedEntries
+                .Where(entry => !entry.Track.IsMissing
+                    && !seenPaths.Contains(Path.GetFullPath(entry.Track.Metadata.Path)))
+                .Select(entry => entry.Track.Id)
+                .Distinct()
+                .ToArray();
+            await trackRepository.MarkMissingBatchAsync(missingTrackIds, CancellationToken.None);
+            removed = missingTrackIds.Length;
 
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
-            await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, cancellationToken);
+            await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
             return new IncrementalScanResult(sessionId, summary, errors);
         }
         catch

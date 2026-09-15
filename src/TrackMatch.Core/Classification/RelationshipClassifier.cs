@@ -1,5 +1,3 @@
-using TrackMatch.Core.Probe;
-
 namespace TrackMatch.Core.Classification;
 
 /// <summary>
@@ -9,6 +7,10 @@ public sealed class RelationshipClassifier
 {
     private readonly RelationshipThresholdProfile _profile;
 
+    /// <summary>
+    /// 指定したしきい値Profileを使用する分類器を生成する。
+    /// </summary>
+    /// <param name="profile">音響関係の分類に使用するしきい値Profile</param>
     public RelationshipClassifier(RelationshipThresholdProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -16,12 +18,13 @@ public sealed class RelationshipClassifier
         _profile = profile;
     }
 
-    public RelationshipClassificationResult Classify(ProbeMeasurement measurement)
-    {
-        ArgumentNullException.ThrowIfNull(measurement);
-        return Classify(measurement.Similarity, measurement.CoverageA, measurement.CoverageB, measurement.DurationRatio);
-    }
-
+    /// <summary>
+    /// 詳細比較で得た音響指標から音源同士の関係を分類する。
+    /// </summary>
+    /// <param name="similarity">音響一致度</param>
+    /// <param name="coverageA">Track A側の一致範囲</param>
+    /// <param name="coverageB">Track B側の一致範囲</param>
+    /// <param name="durationRatio">短い方の再生時間を長い方で割った比率</param>
     public RelationshipClassificationResult Classify(
         double similarity,
         double coverageA,

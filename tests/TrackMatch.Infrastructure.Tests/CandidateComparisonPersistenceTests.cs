@@ -49,8 +49,10 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
         var similarity = await connection.ExecuteScalarAsync<double>("SELECT Similarity FROM CandidateComparisons;");
+        var version = await connection.ExecuteScalarAsync<long>("SELECT ComparisonVersion FROM CandidateComparisons;");
         Assert.Equal(1, count);
         Assert.Equal(0.987, similarity, 6);
+        Assert.Equal(CandidateComparisonAlgorithmVersion.Current, version);
 
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync([], TestContext.Current.CancellationToken);
         count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
@@ -99,6 +101,21 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateComparisonRepository_RejectsNewResultWhenTrackBecameMissing()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        await new SqliteTrackRepository(_database).MarkMissingAsync(_trackIdB, TestContext.Current.CancellationToken);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.UpsertAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken));
+
+        Assert.Contains("Missing", exception.Message, StringComparison.Ordinal);
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
     public async Task CandidateComparisonRepository_ReturnsComparedAtUtc()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
@@ -110,6 +127,26 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         var comparedAt = values[CandidatePairKey.Create(_trackIdA, _trackIdB)];
         Assert.True(comparedAt >= before);
         Assert.Equal(DateTimeKind.Utc, comparedAt.Kind);
+    }
+
+    [Fact]
+    public async Task CandidateComparisonRepository_DoesNotExposeOlderAlgorithmVersionAsCurrent()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                "UPDATE CandidateComparisons SET ComparisonVersion = @Version;",
+                new { Version = CandidateComparisonAlgorithmVersion.Current - 1 });
+        }
+
+        var comparedAt = await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken);
+        var currentComparisons = await repository.GetAllAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(CandidatePairKey.Create(_trackIdA, _trackIdB), comparedAt.Keys);
+        Assert.Empty(currentComparisons);
     }
 
     private CandidateComparison CreateComparison(double similarity)

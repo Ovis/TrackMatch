@@ -62,8 +62,13 @@ public sealed class CandidateQualityAnalysisService
             return null;
         }
 
+        var analyzingStartedAtUtc = QualityAnalysisGeneration.CreateTimestamp();
         await _candidateRepository.UpsertAsync(
-            CreateState(candidate.TrackIdA, candidate.TrackIdB, QualityAnalysisStatus.Analyzing),
+            CreateState(
+                candidate.TrackIdA,
+                candidate.TrackIdB,
+                QualityAnalysisStatus.Analyzing,
+                comparedAtUtc: analyzingStartedAtUtc),
             cancellationToken);
 
         CandidateQualityComparison result;
@@ -79,6 +84,12 @@ public sealed class CandidateQualityAnalysisService
         }
         catch (OperationCanceledException)
         {
+            // Cancel後にAnalyzingだけを残さず、かつ新しいセッションのマーカーは削除しない。
+            await _candidateRepository.DeleteAnalyzingAsync(
+                candidate.TrackIdA,
+                candidate.TrackIdB,
+                analyzingStartedAtUtc,
+                CancellationToken.None);
             throw;
         }
         catch (Exception ex)
@@ -92,8 +103,27 @@ public sealed class CandidateQualityAnalysisService
                 ex.Message);
         }
 
-        await _candidateRepository.UpsertAsync(result, cancellationToken);
-        return result;
+        bool committed;
+        try
+        {
+            committed = await _candidateRepository.TryCompleteAnalyzingAsync(
+                result,
+                analyzingStartedAtUtc,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            await _candidateRepository.DeleteAnalyzingAsync(
+                candidate.TrackIdA,
+                candidate.TrackIdB,
+                analyzingStartedAtUtc,
+                CancellationToken.None);
+            throw;
+        }
+
+        // Force Reanalysis、Content Change、新しい品質解析セッション等でマーカーが失効した場合は
+        // 古い結果をCurrentへ復活させず破棄する。
+        return committed ? result : null;
     }
 
     private static bool IsUsableTrackAnalysis(TrackQualityAnalysis? analysis)
@@ -105,7 +135,8 @@ public sealed class CandidateQualityAnalysisService
         long trackIdA,
         long trackIdB,
         QualityAnalysisStatus status,
-        string? failureReason = null)
+        string? failureReason = null,
+        DateTime? comparedAtUtc = null)
         => new(
             trackIdA,
             trackIdB,
@@ -118,6 +149,6 @@ public sealed class CandidateQualityAnalysisService
             null,
             null,
             null,
-            null,
+            comparedAtUtc,
             failureReason);
 }

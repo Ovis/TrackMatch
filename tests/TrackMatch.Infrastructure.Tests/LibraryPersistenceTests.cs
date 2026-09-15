@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
@@ -6,7 +7,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// LibraryとRootの永続化規則を実SQLiteで検証する。
+/// Library/Rootを論理スコープとして扱い、Global Trackを所有しない永続化規則を検証する。
 /// </summary>
 public sealed class LibraryPersistenceTests : IAsyncLifetime
 {
@@ -51,7 +52,7 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CreateAsync_RejectsOverlappingRootsWithoutLeavingPartialLibrary()
+    public async Task CreateAsync_RejectsOverlappingRootsInsideSameLibrary()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => _repository.CreateAsync(
             "Music",
@@ -62,7 +63,7 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AddRootAsync_RejectsOverlapAcrossLibraries()
+    public async Task AddRootAsync_AllowsOverlapAcrossLibraries()
     {
         var music = await _repository.CreateAsync(
             "Music",
@@ -73,10 +74,12 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
             [@"E:\Soundtrack"],
             TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _repository.AddRootAsync(
+        var added = await _repository.AddRootAsync(
             music.Id,
             @"E:\Soundtrack\Anime",
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(@"E:\Soundtrack\Anime", added.Path);
     }
 
     [Fact]
@@ -94,7 +97,7 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RemoveRootAsync_DeletesTracksBelongingToRemovedRoot()
+    public async Task RemoveRootAsync_RemovesMembershipButPreservesGlobalTrack()
     {
         var library = await _repository.CreateAsync(
             "Music",
@@ -109,50 +112,92 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
         var trackId = await tracks.UpsertMetadataAsync(
             CreateMetadata(@"D:\Music\Album\track.flac"),
             TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            library.Id,
+            removedRoot.Id,
+            trackId,
+            @"Album\track.flac",
+            TestContext.Current.CancellationToken);
 
         await _repository.RemoveRootAsync(
             library.Id,
             removedRoot.Id,
             TestContext.Current.CancellationToken);
 
-        var stored = Assert.IsType<TrackMatch.Core.Libraries.Library>(
+        var storedLibrary = Assert.IsType<TrackMatch.Core.Libraries.Library>(
             await _repository.GetAsync(library.Id, TestContext.Current.CancellationToken));
-        var root = Assert.Single(stored.Roots);
+        var root = Assert.Single(storedLibrary.Roots);
         Assert.Equal(replacement.Id, root.Id);
-        Assert.Null(await tracks.GetByPathAsync(@"D:\Music\Album\track.flac", TestContext.Current.CancellationToken));
+        Assert.NotNull(await tracks.GetByPathAsync(@"D:\Music\Album\track.flac", TestContext.Current.CancellationToken));
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Tracks WHERE Id = $trackId;";
-        command.Parameters.AddWithValue("$trackId", trackId);
-        Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM Tracks WHERE Id = $value;", trackId));
+        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryTracks WHERE TrackId = $value;", trackId));
     }
 
     [Fact]
-    public async Task DeleteAsync_DeletesLibraryRootsAndTracks()
+    public async Task RemoveRootAsync_RemovesKeepWhenGroupIsNoLongerReachableFromLibrary()
+    {
+        var library = await _repository.CreateAsync(
+            "Music",
+            [@"D:\Music", @"E:\Music"],
+            TestContext.Current.CancellationToken);
+        var removedRoot = library.Roots.Single(root => root.Path.StartsWith(@"D:\", StringComparison.OrdinalIgnoreCase));
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\a.flac"), TestContext.Current.CancellationToken);
+        var trackB = await tracks.UpsertMetadataAsync(CreateMetadata(@"D:\Music\b.flac"), TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, removedRoot.Id, trackA, "a.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(library.Id, removedRoot.Id, trackB, "b.flac", TestContext.Current.CancellationToken);
+
+        var groups = new SqliteDuplicateGroupRepository(_database);
+        await groups.ReplaceGlobalAsync(
+            [new DuplicateGroupRebuildItem(null, [trackA, trackB])],
+            TestContext.Current.CancellationToken);
+        var group = Assert.Single(await groups.GetByLibraryIdAsync(library.Id, TestContext.Current.CancellationToken));
+        await groups.SetKeepAsync(library.Id, group.Id, trackA, "UserSelected", TestContext.Current.CancellationToken);
+
+        await _repository.RemoveRootAsync(library.Id, removedRoot.Id, TestContext.Current.CancellationToken);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0L, await ScalarAsync(
+            connection,
+            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepStates WHERE LibraryId = $value;",
+            library.Id));
+        Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM DuplicateGroups WHERE Id = $value;", group.Id));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesLibraryScopeButPreservesGlobalTracks()
     {
         var library = await _repository.CreateAsync(
             "Music",
             [@"D:\Music", @"E:\Imported"],
             TestContext.Current.CancellationToken);
         var tracks = new SqliteTrackRepository(_database);
-        await tracks.UpsertMetadataAsync(
+        var trackId = await tracks.UpsertMetadataAsync(
             CreateMetadata(@"D:\Music\track.flac"),
+            TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            library.Id,
+            library.Roots[0].Id,
+            trackId,
+            "track.flac",
             TestContext.Current.CancellationToken);
 
         await _repository.DeleteAsync(library.Id, TestContext.Current.CancellationToken);
 
         Assert.Null(await _repository.GetAsync(library.Id, TestContext.Current.CancellationToken));
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryRoots WHERE LibraryId = $libraryId;", library.Id));
-        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM Tracks WHERE LibraryId = $libraryId;", library.Id));
+        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryRoots WHERE LibraryId = $value;", library.Id));
+        Assert.Equal(0L, await ScalarAsync(connection, "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = $value;", library.Id));
+        Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM Tracks WHERE Id = $value;", trackId));
     }
 
-    private static async Task<long> ScalarAsync(SqliteConnection connection, string sql, long libraryId)
+    private static async Task<long> ScalarAsync(SqliteConnection connection, string sql, long value)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        command.Parameters.AddWithValue("$libraryId", libraryId);
+        command.Parameters.AddWithValue("$value", value);
         return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
     }
 

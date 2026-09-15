@@ -25,7 +25,7 @@ public sealed class CandidateGenerationServiceTests
             catalog,
             sketches,
             pairs,
-            new EmptyReviewRepository(),
+            new MutableReviewRepository(),
             sketcher,
             new CandidatePairGenerator(sketcher));
         var options = new CandidateGenerationOptions();
@@ -57,6 +57,110 @@ public sealed class CandidateGenerationServiceTests
         Assert.Equal(2, updated.Pairs.Count);
         Assert.Equal(3, pairs.Pairs.Count);
         Assert.Contains(pairs.Pairs, pair => pair.TrackIdA == 2 && pair.TrackIdB == 3);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_InactiveTrackDoesNotInvalidateStoredMachinePairs()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+            Stored(3, values, extractedAt),
+        ]);
+        var pairs = new FakePairRepository();
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            new FakeSketchRepository(),
+            pairs,
+            new MutableReviewRepository(),
+            sketcher,
+            new CandidatePairGenerator(sketcher));
+        var options = new CandidateGenerationOptions();
+
+        await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+        Assert.Equal(3, pairs.Pairs.Count);
+
+        // Missing TrackはActive Fingerprint集合から一時的に外れるが、同Contentで復帰したときに
+        // Comparison等を再利用できるよう、Candidate Pair自体は失効させない。
+        catalog.Items =
+        [
+            Stored(1, values, extractedAt),
+            Stored(3, values, extractedAt),
+        ];
+
+        var result = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsFullRebuild);
+        Assert.Empty(result.Pairs);
+        Assert.Empty(pairs.LastAffectedTrackIds);
+        Assert.Equal(3, pairs.Pairs.Count);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ReviewedPairRemainsMachineCandidateButIsNotReturnedAsReviewable()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+        ]);
+        var sketches = new FakeSketchRepository();
+        var pairs = new FakePairRepository();
+        var reviews = new MutableReviewRepository();
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            sketches,
+            pairs,
+            reviews,
+            sketcher,
+            new CandidatePairGenerator(sketcher));
+        var options = new CandidateGenerationOptions();
+
+        var initial = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+        var pair = Assert.Single(initial.Pairs);
+        reviews.ExcludedPairs.Add(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
+
+        var second = await service.GenerateAsync(2, options, TestContext.Current.CancellationToken);
+
+        Assert.Empty(second.Pairs);
+        var persisted = Assert.Single(pairs.Pairs);
+        Assert.Equal(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB), CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_DoesNotCompletePendingWhenCandidatePersistenceFails()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+        ]);
+        var work = new FakeGenerationWorkRepository([1, 2]);
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            new FakeSketchRepository(),
+            new FailingPairRepository(),
+            new MutableReviewRepository(),
+            sketcher,
+            new CandidatePairGenerator(sketcher),
+            work);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAsync(
+            2,
+            new CandidateGenerationOptions(),
+            TestContext.Current.CancellationToken));
+
+        Assert.Empty(work.CompletedTrackIds);
     }
 
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values, DateTime extractedAt)
@@ -95,10 +199,26 @@ public sealed class CandidateGenerationServiceTests
     private sealed class FakePairRepository : ICandidatePairRepository
     {
         public IReadOnlyList<CandidatePair> Pairs { get; private set; } = [];
+        public IReadOnlyList<long> LastAffectedTrackIds { get; private set; } = [];
 
         public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> pairs, CancellationToken cancellationToken = default)
         {
             Pairs = pairs.ToArray();
+            LastAffectedTrackIds = [];
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceForTracksAsync(
+            IReadOnlyCollection<long> trackIds,
+            IReadOnlyCollection<CandidatePair> pairs,
+            CancellationToken cancellationToken = default)
+        {
+            LastAffectedTrackIds = trackIds.Distinct().OrderBy(trackId => trackId).ToArray();
+            var affected = LastAffectedTrackIds.ToHashSet();
+            Pairs = Pairs
+                .Where(pair => !affected.Contains(pair.TrackIdA) && !affected.Contains(pair.TrackIdB))
+                .Concat(pairs)
+                .ToArray();
             return Task.CompletedTask;
         }
 
@@ -106,8 +226,33 @@ public sealed class CandidateGenerationServiceTests
             => Task.FromResult(Pairs);
     }
 
-    private sealed class EmptyReviewRepository : ICandidateReviewRepository
+    private sealed class FailingPairRepository : ICandidatePairRepository
     {
+        public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> pairs, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("candidate persistence failed");
+
+        public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidatePair>>([]);
+    }
+
+    private sealed class FakeGenerationWorkRepository(IReadOnlyCollection<long> pendingTrackIds) : ICandidateGenerationWorkRepository
+    {
+        public List<long> CompletedTrackIds { get; } = [];
+
+        public Task<IReadOnlySet<long>> GetPendingTrackIdsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<long>>(pendingTrackIds.ToHashSet());
+
+        public Task MarkCompletedAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+        {
+            CompletedTrackIds.AddRange(trackIds);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class MutableReviewRepository : ICandidateReviewRepository
+    {
+        public HashSet<CandidatePairKey> ExcludedPairs { get; } = [];
+
         public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -115,6 +260,6 @@ public sealed class CandidateGenerationServiceTests
             => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
 
         public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(new HashSet<CandidatePairKey>());
+            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(ExcludedPairs);
     }
 }

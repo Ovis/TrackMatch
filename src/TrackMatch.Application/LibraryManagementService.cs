@@ -1,3 +1,4 @@
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
@@ -26,6 +27,11 @@ public sealed class LibraryManagementService
             ? null
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(trashRoot));
     }
+
+    /// <summary>
+    /// 同じ管理画面からGlobal Track管理Serviceを生成するためのDB Pathを公開する。
+    /// </summary>
+    public string DatabasePath => _databasePath;
 
     /// <summary>
     /// Library一覧をRoot込みで取得する。
@@ -69,7 +75,7 @@ public sealed class LibraryManagementService
     }
 
     /// <summary>
-    /// Root削除前に確認表示へ使うTrack件数を取得する。
+    /// Root削除前に確認表示へ使うMembership件数を取得する。
     /// </summary>
     public async Task<long> GetRootTrackCountAsync(long rootId, CancellationToken cancellationToken = default)
     {
@@ -78,7 +84,7 @@ public sealed class LibraryManagementService
     }
 
     /// <summary>
-    /// Library削除前に確認表示へ使うRoot数とTrack数を取得する。
+    /// Library削除前に確認表示へ使うRoot数とMembership Track数を取得する。
     /// </summary>
     public async Task<LibraryDeleteSummary> GetDeleteSummaryAsync(long libraryId, CancellationToken cancellationToken = default)
     {
@@ -87,7 +93,7 @@ public sealed class LibraryManagementService
     }
 
     /// <summary>
-    /// Rootと配下TrackMatch管理データを削除する。元Audio Fileは操作しない。
+    /// RootとそのLibrary Membershipを削除する。Global Trackと元Audio Fileは操作しない。
     /// </summary>
     public async Task RemoveRootAsync(long libraryId, long rootId, CancellationToken cancellationToken = default)
     {
@@ -96,7 +102,7 @@ public sealed class LibraryManagementService
     }
 
     /// <summary>
-    /// Libraryと配下TrackMatch管理データを削除する。元Audio Fileは操作しない。
+    /// LibraryとLibrary固有状態を削除する。Global Trackと元Audio Fileは操作しない。
     /// </summary>
     public async Task DeleteLibraryAsync(long libraryId, CancellationToken cancellationToken = default)
     {
@@ -120,8 +126,12 @@ public sealed class LibraryManagementService
     }
 
     /// <summary>
-    /// Trash Rootとの配置を再検証し、Preview済みRoot保存場所変更を適用する。
+    /// Trash Rootとの配置を再検証し、Preview済みGlobal Root relocationを適用する。
     /// </summary>
+    /// <remarks>
+    /// Remap本体のCommit後はTrackのMissing状態やMembershipが正本となるため、呼び出し元Cancelでは
+    /// Keep Current State整理とGlobal Duplicate Group再同期を中断しない。
+    /// </remarks>
     public async Task<LibraryRootRemapResult> RemapRootAsync(
         long libraryId,
         long rootId,
@@ -130,8 +140,20 @@ public sealed class LibraryManagementService
     {
         ValidateAgainstTrash([newRootPath]);
         var database = await OpenDatabaseAsync(cancellationToken);
-        return await new SqliteLibraryRootRemapService(database)
+        var result = await new SqliteLibraryRootRemapService(database)
             .ApplyAsync(libraryId, rootId, newRootPath, cancellationToken);
+
+        // Remapでは複数LibraryのRoot/MembershipとGlobal Missingが同時に変わり得る。
+        // Commit後に古いLibrary固有KeepやMaterialized Groupを残さないよう、正本から必ず再整合する。
+        await new SqliteLibraryKeepStateMaintenance(database)
+            .CleanupUnrelatedCurrentStatesAsync(CancellationToken.None);
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var tracks = new SqliteTrackLookupRepository(database);
+        var groups = new SqliteDuplicateGroupRepository(database);
+        await new DuplicateGroupService(reviews, tracks, groups)
+            .SynchronizeGlobalAsync(CancellationToken.None);
+
+        return result;
     }
 
     private void ValidateAgainstTrash(IEnumerable<string> rootPaths)

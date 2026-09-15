@@ -69,7 +69,6 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await EnsureNameAvailableAsync(connection, transaction, normalizedName.Key, null, cancellationToken);
-        await EnsureRootsAvailableAsync(connection, transaction, normalizedRoots.Select(x => x.Key), null, cancellationToken);
 
         var libraryId = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             """
@@ -84,6 +83,15 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
         var roots = new List<LibraryRoot>(normalizedRoots.Length);
         foreach (var root in normalizedRoots)
         {
+            // Root重複禁止はLibrary内だけに適用する。別Libraryでは同一Pathや親子包含を意図的に許可する。
+            await EnsureRootAvailableWithinLibraryAsync(
+                connection,
+                transaction,
+                libraryId,
+                root.Key,
+                excludedRootId: null,
+                cancellationToken);
+
             var rootId = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
                 """
                 INSERT INTO LibraryRoots (LibraryId, Path, PathKey)
@@ -124,7 +132,13 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await EnsureLibraryExistsAsync(connection, transaction, libraryId, cancellationToken);
-        await EnsureRootsAvailableAsync(connection, transaction, [normalizedRoot.Key], null, cancellationToken);
+        await EnsureRootAvailableWithinLibraryAsync(
+            connection,
+            transaction,
+            libraryId,
+            normalizedRoot.Key,
+            excludedRootId: null,
+            cancellationToken);
 
         var rootId = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             """
@@ -156,6 +170,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             throw new InvalidOperationException("ライブラリの最後の対象フォルダは削除できません。代わりの対象フォルダを追加するか、ライブラリ自体を削除してください。");
         }
 
+        // LibraryTracksはRoot FKのCASCADEで即時削除する。Global Trackと解析データは意図的に残す。
         var affected = await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM LibraryRoots WHERE Id = @RootId AND LibraryId = @LibraryId;",
             new { RootId = rootId, LibraryId = libraryId },
@@ -166,6 +181,13 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             throw new InvalidOperationException("指定した対象フォルダはライブラリに存在しません。");
         }
 
+        // Root削除でGroupへの最後のActive Membershipを失ったKeepは、Currentから消す前に履歴へ残す。
+        await SqliteLibraryKeepStateMaintenance.ArchiveAndDeleteUnrelatedCurrentStatesAsync(
+            connection,
+            transaction,
+            libraryId,
+            cancellationToken);
+
         transaction.Commit();
     }
 
@@ -173,14 +195,22 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
     public async Task DeleteAsync(long libraryId, CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        using var transaction = connection.BeginTransaction();
+        await EnsureLibraryExistsAsync(connection, transaction, libraryId, cancellationToken);
+
+        // Library固有KeepはLibrary FKのCASCADEで消えるため、その前に失効状態をHistoryへ退避する。
+        await SqliteLibraryKeepStateMaintenance.ArchiveLibraryCurrentStatesAsync(
+            connection,
+            transaction,
+            libraryId,
+            cancellationToken);
+
+        await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM Libraries WHERE Id = @LibraryId;",
             new { LibraryId = libraryId },
+            transaction,
             cancellationToken: cancellationToken));
-        if (affected == 0)
-        {
-            throw new InvalidOperationException("指定したライブラリは存在しません。");
-        }
+        transaction.Commit();
     }
 
     private static void EnsureNoOverlapWithin((string DisplayPath, string Key)[] roots)
@@ -191,7 +221,7 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
             {
                 if (LibraryValueNormalizer.Overlaps(roots[i].Key, roots[j].Key))
                 {
-                    throw new InvalidOperationException($"対象フォルダ同士を同一または包含関係にはできません: {roots[i].DisplayPath} / {roots[j].DisplayPath}");
+                    throw new InvalidOperationException($"同じライブラリの対象フォルダ同士を同一または包含関係にはできません: {roots[i].DisplayPath} / {roots[j].DisplayPath}");
                 }
             }
         }
@@ -215,26 +245,29 @@ public sealed class SqliteLibraryRepository(SqliteDatabase database) : ILibraryR
         }
     }
 
-    private static async Task EnsureRootsAvailableAsync(
+    private static async Task EnsureRootAvailableWithinLibraryAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
         Microsoft.Data.Sqlite.SqliteTransaction transaction,
-        IEnumerable<string> rootKeys,
+        long libraryId,
+        string rootKey,
         long? excludedRootId,
         CancellationToken cancellationToken)
     {
         var existing = (await connection.QueryAsync<RootKeyRow>(new CommandDefinition(
-            "SELECT Id, Path, PathKey FROM LibraryRoots WHERE @ExcludedRootId IS NULL OR Id <> @ExcludedRootId;",
-            new { ExcludedRootId = excludedRootId },
+            """
+            SELECT Id, Path, PathKey
+            FROM LibraryRoots
+            WHERE LibraryId = @LibraryId
+              AND (@ExcludedRootId IS NULL OR Id <> @ExcludedRootId);
+            """,
+            new { LibraryId = libraryId, ExcludedRootId = excludedRootId },
             transaction,
             cancellationToken: cancellationToken))).ToArray();
 
-        foreach (var key in rootKeys)
+        var conflict = existing.FirstOrDefault(root => LibraryValueNormalizer.Overlaps(rootKey, root.PathKey));
+        if (conflict is not null)
         {
-            var conflict = existing.FirstOrDefault(root => LibraryValueNormalizer.Overlaps(key, root.PathKey));
-            if (conflict is not null)
-            {
-                throw new InvalidOperationException($"対象フォルダは既存の対象フォルダと同一または包含関係にあります: {conflict.Path}");
-            }
+            throw new InvalidOperationException($"対象フォルダは同じライブラリの既存対象フォルダと同一または包含関係にあります: {conflict.Path}");
         }
     }
 

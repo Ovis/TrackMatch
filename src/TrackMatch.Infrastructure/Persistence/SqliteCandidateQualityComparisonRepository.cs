@@ -39,13 +39,7 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
         CandidateQualityComparison comparison,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(comparison);
-        var (a, b) = NormalizePair(comparison.TrackIdA, comparison.TrackIdB);
-        if (a != comparison.TrackIdA || b != comparison.TrackIdB)
-        {
-            throw new ArgumentException("Candidate品質比較はTrackIdA < TrackIdBの順序で保存する必要があります。", nameof(comparison));
-        }
-
+        ValidateComparison(comparison);
         const string sql = """
             INSERT INTO CandidateQualityComparisons (
                 TrackIdA, TrackIdB, ComparisonVersion, Status, MatchedLoudnessDifferenceLu,
@@ -76,23 +70,91 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             sql,
+            ToParameters(comparison),
+            cancellationToken: cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryCompleteAnalyzingAsync(
+        CandidateQualityComparison comparison,
+        DateTime analyzingStartedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateComparison(comparison);
+        if (comparison.Status == QualityAnalysisStatus.Analyzing)
+        {
+            throw new ArgumentException("完了結果をAnalyzing状態として保存できません。", nameof(comparison));
+        }
+
+        const string sql = """
+            UPDATE CandidateQualityComparisons
+            SET ComparisonVersion = @ComparisonVersion,
+                Status = @Status,
+                MatchedLoudnessDifferenceLu = @MatchedLoudnessDifferenceLu,
+                GainDifferenceMeanDb = @GainDifferenceMeanDb,
+                GainDifferenceStandardDeviationDb = @GainDifferenceStandardDeviationDb,
+                PeakToLoudnessRatioDifferenceDb = @PeakToLoudnessRatioDifferenceDb,
+                LoudnessRangeDifferenceLu = @LoudnessRangeDifferenceLu,
+                IsPrimarilyGainDifference = @IsPrimarilyGainDifference,
+                RelativeHighFrequencyDifference = @RelativeHighFrequencyDifference,
+                ComparedAtUtcTicks = @ComparedAtUtcTicks,
+                FailureReason = @FailureReason
+            WHERE TrackIdA = @TrackIdA
+              AND TrackIdB = @TrackIdB
+              AND Status = 'Analyzing'
+              AND ComparedAtUtcTicks = @ExpectedAnalyzingStartedAtUtcTicks;
+            """;
+
+        var parameters = ToParameters(comparison);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            sql,
             new
             {
-                comparison.TrackIdA,
-                comparison.TrackIdB,
-                comparison.ComparisonVersion,
-                Status = comparison.Status.ToString(),
-                comparison.MatchedLoudnessDifferenceLu,
-                comparison.GainDifferenceMeanDb,
-                comparison.GainDifferenceStandardDeviationDb,
-                comparison.PeakToLoudnessRatioDifferenceDb,
-                comparison.LoudnessRangeDifferenceLu,
-                IsPrimarilyGainDifference = comparison.IsPrimarilyGainDifference is null ? (long?)null : comparison.IsPrimarilyGainDifference.Value ? 1L : 0L,
-                comparison.RelativeHighFrequencyDifference,
-                ComparedAtUtcTicks = comparison.ComparedAtUtc?.Ticks,
-                comparison.FailureReason,
+                parameters.TrackIdA,
+                parameters.TrackIdB,
+                parameters.ComparisonVersion,
+                parameters.Status,
+                parameters.MatchedLoudnessDifferenceLu,
+                parameters.GainDifferenceMeanDb,
+                parameters.GainDifferenceStandardDeviationDb,
+                parameters.PeakToLoudnessRatioDifferenceDb,
+                parameters.LoudnessRangeDifferenceLu,
+                parameters.IsPrimarilyGainDifference,
+                parameters.RelativeHighFrequencyDifference,
+                parameters.ComparedAtUtcTicks,
+                parameters.FailureReason,
+                ExpectedAnalyzingStartedAtUtcTicks = analyzingStartedAtUtc.ToUniversalTime().Ticks,
             },
             cancellationToken: cancellationToken));
+        return affected == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteAnalyzingAsync(
+        long trackIdA,
+        long trackIdB,
+        DateTime analyzingStartedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var (a, b) = NormalizePair(trackIdA, trackIdB);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM CandidateQualityComparisons
+            WHERE TrackIdA = @TrackIdA
+              AND TrackIdB = @TrackIdB
+              AND Status = 'Analyzing'
+              AND ComparedAtUtcTicks = @ExpectedAnalyzingStartedAtUtcTicks;
+            """,
+            new
+            {
+                TrackIdA = a,
+                TrackIdB = b,
+                ExpectedAnalyzingStartedAtUtcTicks = analyzingStartedAtUtc.ToUniversalTime().Ticks,
+            },
+            cancellationToken: cancellationToken));
+        return affected == 1;
     }
 
     /// <inheritdoc />
@@ -104,6 +166,16 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
             "DELETE FROM CandidateQualityComparisons WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
             new { TrackIdA = a, TrackIdB = b },
             cancellationToken: cancellationToken));
+    }
+
+    private static void ValidateComparison(CandidateQualityComparison comparison)
+    {
+        ArgumentNullException.ThrowIfNull(comparison);
+        var (a, b) = NormalizePair(comparison.TrackIdA, comparison.TrackIdB);
+        if (a != comparison.TrackIdA || b != comparison.TrackIdB)
+        {
+            throw new ArgumentException("Candidate品質比較はTrackIdA < TrackIdBの順序で保存する必要があります。", nameof(comparison));
+        }
     }
 
     private static (long A, long B) NormalizePair(long trackIdA, long trackIdB)
@@ -126,6 +198,22 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
         return trackIdA < trackIdB ? (trackIdA, trackIdB) : (trackIdB, trackIdA);
     }
 
+    private static ComparisonParameters ToParameters(CandidateQualityComparison comparison)
+        => new(
+            comparison.TrackIdA,
+            comparison.TrackIdB,
+            comparison.ComparisonVersion,
+            comparison.Status.ToString(),
+            comparison.MatchedLoudnessDifferenceLu,
+            comparison.GainDifferenceMeanDb,
+            comparison.GainDifferenceStandardDeviationDb,
+            comparison.PeakToLoudnessRatioDifferenceDb,
+            comparison.LoudnessRangeDifferenceLu,
+            comparison.IsPrimarilyGainDifference is null ? null : comparison.IsPrimarilyGainDifference.Value ? 1L : 0L,
+            comparison.RelativeHighFrequencyDifference,
+            comparison.ComparedAtUtc?.ToUniversalTime().Ticks,
+            comparison.FailureReason);
+
     private static CandidateQualityComparison ToDomain(Row row)
         => new(
             row.TrackIdA,
@@ -141,6 +229,21 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
             row.RelativeHighFrequencyDifference,
             row.ComparedAtUtcTicks is null ? null : new DateTime(row.ComparedAtUtcTicks.Value, DateTimeKind.Utc),
             row.FailureReason);
+
+    private sealed record ComparisonParameters(
+        long TrackIdA,
+        long TrackIdB,
+        int ComparisonVersion,
+        string Status,
+        double? MatchedLoudnessDifferenceLu,
+        double? GainDifferenceMeanDb,
+        double? GainDifferenceStandardDeviationDb,
+        double? PeakToLoudnessRatioDifferenceDb,
+        double? LoudnessRangeDifferenceLu,
+        long? IsPrimarilyGainDifference,
+        double? RelativeHighFrequencyDifference,
+        long? ComparedAtUtcTicks,
+        string? FailureReason);
 
     private sealed record Row(
         long TrackIdA,

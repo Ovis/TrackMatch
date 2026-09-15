@@ -88,6 +88,30 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TrackQualityAnalysisRepository_OldGenerationCannotCompleteOrDeleteNewerAnalyzingState()
+    {
+        var repository = new SqliteTrackQualityAnalysisRepository(_database);
+        var oldStart = new DateTime(2026, 9, 12, 1, 0, 0, DateTimeKind.Utc);
+        var newStart = oldStart.AddTicks(1);
+        await repository.UpsertAsync(CreateTrackState(QualityAnalysisStatus.Analyzing, newStart), TestContext.Current.CancellationToken);
+
+        var completed = await repository.TryCompleteAnalyzingAsync(
+            CreateTrackState(QualityAnalysisStatus.Analyzed, DateTime.UtcNow),
+            oldStart,
+            TestContext.Current.CancellationToken);
+        var deleted = await repository.DeleteAnalyzingAsync(
+            _trackIdA,
+            oldStart,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(completed);
+        Assert.False(deleted);
+        var current = Assert.IsType<TrackQualityAnalysis>(await repository.GetAsync(_trackIdA, TestContext.Current.CancellationToken));
+        Assert.Equal(QualityAnalysisStatus.Analyzing, current.Status);
+        Assert.Equal(newStart, current.AnalyzedAtUtc);
+    }
+
+    [Fact]
     public async Task CandidateQualityComparisonRepository_RoundTripsValues()
     {
         var repository = new SqliteCandidateQualityComparisonRepository(_database);
@@ -111,6 +135,34 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
         var actual = await repository.GetAsync(_trackIdA, _trackIdB, TestContext.Current.CancellationToken);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task CandidateQualityComparisonRepository_OldGenerationCannotCompleteOrDeleteNewerAnalyzingState()
+    {
+        var repository = new SqliteCandidateQualityComparisonRepository(_database);
+        var oldStart = new DateTime(2026, 9, 12, 2, 0, 0, DateTimeKind.Utc);
+        var newStart = oldStart.AddTicks(1);
+        await repository.UpsertAsync(CreateCandidateState(QualityAnalysisStatus.Analyzing, newStart), TestContext.Current.CancellationToken);
+
+        var completed = await repository.TryCompleteAnalyzingAsync(
+            CreateCandidateState(QualityAnalysisStatus.Analyzed, DateTime.UtcNow),
+            oldStart,
+            TestContext.Current.CancellationToken);
+        var deleted = await repository.DeleteAnalyzingAsync(
+            _trackIdA,
+            _trackIdB,
+            oldStart,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(completed);
+        Assert.False(deleted);
+        var current = Assert.IsType<CandidateQualityComparison>(await repository.GetAsync(
+            _trackIdA,
+            _trackIdB,
+            TestContext.Current.CancellationToken));
+        Assert.Equal(QualityAnalysisStatus.Analyzing, current.Status);
+        Assert.Equal(newStart, current.ComparedAtUtc);
     }
 
     [Fact]
@@ -139,6 +191,44 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
         var actual = await repository.GetAsync(_trackIdA, _trackIdB, TestContext.Current.CancellationToken);
         Assert.Null(actual);
     }
+
+    private TrackQualityAnalysis CreateTrackState(QualityAnalysisStatus status, DateTime atUtc)
+        => new(
+            _trackIdA,
+            QualityAnalysisVersions.TrackQualityAnalysis,
+            status,
+            null,
+            null,
+            null,
+            null,
+            0,
+            0,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            atUtc,
+            null);
+
+    private CandidateQualityComparison CreateCandidateState(QualityAnalysisStatus status, DateTime atUtc)
+        => new(
+            _trackIdA,
+            _trackIdB,
+            QualityAnalysisVersions.CandidateQualityComparison,
+            status,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            atUtc,
+            null);
 
     private AudioTrackMetadata CreateMetadata(string fileName)
         => new(

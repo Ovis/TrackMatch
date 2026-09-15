@@ -137,7 +137,7 @@ public partial class LibraryManagementDialog : Window
         var confirmation = new ConfirmationDialog(
             "ライブラリを削除",
             $"ライブラリ「{library.Name}」を削除しますか？",
-            $"対象フォルダ: {summary.RootCount:N0}\n音源: {summary.TrackCount:N0}\n\nフィンガープリント・候補・レビューなどのTrackMatch管理データも削除されます。元の音源ファイルは削除されません。",
+            $"対象フォルダ: {summary.RootCount:N0}\n登録音源: {summary.TrackCount:N0}\n\nこのライブラリの対象フォルダ・所属情報・ライブラリ固有のKeep状態を削除します。Global Track、フィンガープリント、比較結果、人間の重複判定、元の音源ファイルは削除されません。",
             "削除",
             "キャンセル",
             kind: AppDialogKind.Warning)
@@ -170,7 +170,7 @@ public partial class LibraryManagementDialog : Window
             var confirmation = new ConfirmationDialog(
                 "対象フォルダを削除",
                 $"対象フォルダ「{root.Path}」を削除しますか？",
-                $"対象音源: {count:N0}\nTrackMatch管理データは削除されますが、元の音源ファイルは削除されません。",
+                $"この対象フォルダ由来の所属情報 {count:N0} 件をライブラリから外します。Global Track、フィンガープリント、比較結果、人間の重複判定、元の音源ファイルは削除されません。",
                 "削除",
                 "キャンセル",
                 kind: AppDialogKind.Warning)
@@ -210,6 +210,21 @@ public partial class LibraryManagementDialog : Window
         SelectedTrashRoot = picker.FolderName;
         TrashRootTextBox.Text = SelectedTrashRoot;
         StatusText.Text = "ごみ箱のパスは閉じるときに保存されます。";
+    }
+
+    private async void ManageTracks_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await ConfirmUnsavedNameAsync()) return;
+
+        // Track管理はGlobal DB状態を変更するため、現在のLibrary一覧をSnapshotとして渡し、
+        // Dialogを閉じた後にLibrary表示も読み直してMembership削除等を反映する。
+        var selectedId = _selectedLibrary?.Id;
+        new TrackManagementDialog(
+            new TrackManagementService(_service.DatabasePath),
+            _libraries,
+            selectedId)
+        { Owner = this }.ShowDialog();
+        await ReloadAsync(selectedId);
     }
 
     private async void Close_Click(object sender, RoutedEventArgs e)

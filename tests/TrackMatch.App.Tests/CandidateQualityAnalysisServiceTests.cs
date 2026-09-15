@@ -59,6 +59,33 @@ public sealed class CandidateQualityAnalysisServiceTests
         Assert.Equal(QualityAnalysisStatus.Analyzed, candidateRepository.Value!.Status);
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_CancellationRemovesOnlyOwnedAnalyzingGeneration()
+    {
+        var trackRepository = CreateReadyTrackRepository();
+        var candidateRepository = new CandidateRepository();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var analyzer = new BlockingAnalyzer(started);
+        var service = new CandidateQualityAnalysisService(analyzer, trackRepository, candidateRepository);
+        using var cancellation = new CancellationTokenSource();
+        var run = service.AnalyzeAsync(CreateRequest(), force: true, cancellationToken: cancellation.Token);
+
+        await started.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var oldMarker = Assert.IsType<DateTime>(candidateRepository.Value!.ComparedAtUtc);
+        Assert.Equal(QualityAnalysisStatus.Analyzing, candidateRepository.Value.Status);
+
+        // 新しいセッションが同PairへAnalyzingを書いた状態を再現する。
+        // 古いセッションのCancelは開始時刻が異なる新状態を削除してはならない。
+        var newerMarker = oldMarker.AddTicks(1);
+        candidateRepository.Value = CreateCandidateState(QualityAnalysisStatus.Analyzing, newerMarker);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.NotNull(candidateRepository.Value);
+        Assert.Equal(QualityAnalysisStatus.Analyzing, candidateRepository.Value!.Status);
+        Assert.Equal(newerMarker, candidateRepository.Value.ComparedAtUtc);
+    }
+
     private static CandidateQualityAnalysisRequest CreateRequest()
         => new(
             new CandidateComparison(
@@ -121,6 +148,22 @@ public sealed class CandidateQualityAnalysisServiceTests
             DateTime.UnixEpoch,
             null);
 
+    private static CandidateQualityComparison CreateCandidateState(QualityAnalysisStatus status, DateTime comparedAtUtc)
+        => new(
+            1,
+            2,
+            QualityAnalysisVersions.CandidateQualityComparison,
+            status,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            comparedAtUtc,
+            null);
+
     private sealed class RecordingAnalyzer : ICandidateQualityAnalyzer
     {
         public int CallCount { get; private set; }
@@ -138,6 +181,22 @@ public sealed class CandidateQualityAnalysisServiceTests
         }
     }
 
+    private sealed class BlockingAnalyzer(TaskCompletionSource<bool> started) : ICandidateQualityAnalyzer
+    {
+        public async Task<CandidateQualityComparison> AnalyzeAsync(
+            CandidateComparison candidate,
+            string pathA,
+            string pathB,
+            TrackQualityAnalysis analysisA,
+            TrackQualityAnalysis analysisB,
+            CancellationToken cancellationToken = default)
+        {
+            started.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return CreateCandidateResult();
+        }
+    }
+
     private sealed class TrackRepository : ITrackQualityAnalysisRepository
     {
         public Dictionary<long, TrackQualityAnalysis> Values { get; } = [];
@@ -152,6 +211,38 @@ public sealed class CandidateQualityAnalysisServiceTests
         {
             Values[analysis.TrackId] = analysis;
             return Task.CompletedTask;
+        }
+
+        public Task<bool> TryCompleteAnalyzingAsync(
+            TrackQualityAnalysis analysis,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Values.TryGetValue(analysis.TrackId, out var current)
+                || current.Status != QualityAnalysisStatus.Analyzing
+                || current.AnalyzedAtUtc != analyzingStartedAtUtc)
+            {
+                return Task.FromResult(false);
+            }
+
+            Values[analysis.TrackId] = analysis;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> DeleteAnalyzingAsync(
+            long trackId,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Values.TryGetValue(trackId, out var current)
+                || current.Status != QualityAnalysisStatus.Analyzing
+                || current.AnalyzedAtUtc != analyzingStartedAtUtc)
+            {
+                return Task.FromResult(false);
+            }
+
+            Values.Remove(trackId);
+            return Task.FromResult(true);
         }
 
         public Task DeleteAsync(long trackId, CancellationToken cancellationToken = default)
@@ -177,6 +268,39 @@ public sealed class CandidateQualityAnalysisServiceTests
         {
             Value = comparison;
             return Task.CompletedTask;
+        }
+
+        public Task<bool> TryCompleteAnalyzingAsync(
+            CandidateQualityComparison comparison,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (Value is null
+                || Value.Status != QualityAnalysisStatus.Analyzing
+                || Value.ComparedAtUtc != analyzingStartedAtUtc)
+            {
+                return Task.FromResult(false);
+            }
+
+            Value = comparison;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> DeleteAnalyzingAsync(
+            long trackIdA,
+            long trackIdB,
+            DateTime analyzingStartedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (Value is null
+                || Value.Status != QualityAnalysisStatus.Analyzing
+                || Value.ComparedAtUtc != analyzingStartedAtUtc)
+            {
+                return Task.FromResult(false);
+            }
+
+            Value = null;
+            return Task.FromResult(true);
         }
 
         public Task DeleteAsync(long trackIdA, long trackIdB, CancellationToken cancellationToken = default)

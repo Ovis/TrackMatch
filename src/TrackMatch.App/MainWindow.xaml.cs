@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Trash;
 
@@ -107,7 +108,8 @@ public partial class MainWindow : Window
         _viewModel.CandidateListMode = CandidateTabs.SelectedIndex switch
         {
             1 => CandidateReviewListMode.Reviewed,
-            2 => CandidateReviewListMode.All,
+            2 => CandidateReviewListMode.ReReviewRecommended,
+            3 => CandidateReviewListMode.All,
             _ => CandidateReviewListMode.Unreviewed,
         };
     }
@@ -119,6 +121,43 @@ public partial class MainWindow : Window
             if (!await EnsureTrashRootAsync()) return;
             var preview = await _viewModel.ProcessTrashAsync(execute: false);
             if (preview is null) return;
+
+            if (preview.SharedTrackImpacts.Count > 0)
+            {
+                var impactedLibraries = preview.SharedTrackImpacts
+                    .SelectMany(impact => impact.OtherLibraries)
+                    .Select(library => library.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var keepLibraries = preview.SharedTrackImpacts
+                    .SelectMany(impact => impact.KeepLibraries)
+                    .Select(library => library.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var detail = $"影響するLibrary: {string.Join("、", impactedLibraries)}";
+                if (keepLibraries.Length > 0)
+                {
+                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」に指定されています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
+                }
+
+                // Shared Trackは1つの物理ファイルを複数Libraryが参照するため、通常のTrash確認とは別に影響範囲を明示する。
+                var sharedConfirmation = new ConfirmationDialog(
+                    "他のLibraryにも影響します",
+                    $"移動対象のうち {preview.SharedTrackImpacts.Count} 件は他のLibraryでも参照されています。",
+                    detail,
+                    "影響を確認して続行",
+                    "キャンセル",
+                    kind: keepLibraries.Length > 0 ? AppDialogKind.Warning : AppDialogKind.Information)
+                { Owner = this };
+                sharedConfirmation.ShowDialog();
+                if (sharedConfirmation.SelectedResult != AppDialogResult.Primary)
+                {
+                    return;
+                }
+            }
 
             var collisionBehavior = TrashDestinationCollisionBehavior.Skip;
             var collisions = preview.Items.Count(item => item.Status == RejectedTrackMoveStatus.DestinationExists);
@@ -246,7 +285,7 @@ public partial class MainWindow : Window
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
-        => await ExecuteReviewActionAsync(_viewModel.MarkNotDuplicateAsync);
+        => await ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync);
 
     private async void KeepA_Click(object sender, RoutedEventArgs e)
     {
@@ -284,7 +323,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            await ExecuteReviewActionAsync(action);
+            await ExecuteReviewActionAsync(CandidateReviewDecision.ConfirmedDuplicate, action);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
@@ -292,16 +331,69 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ExecuteReviewActionAsync(Func<Task> action)
+    private async Task ExecuteReviewActionAsync(CandidateReviewDecision? targetDecision, Func<Task> action)
     {
         try
         {
+            if (!ConfirmGlobalVerdictOverwrite(targetDecision))
+            {
+                return;
+            }
+
             await action();
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
             ShowReviewError(exception);
         }
+    }
+
+    /// <summary>
+    /// 他Libraryで確定したGlobal Human Verdictを現在Libraryから実際に変更する場合だけ、影響範囲を明示して確認する。
+    /// </summary>
+    /// <param name="targetDecision">操作後のGlobal Verdict。nullは未確定へ戻す操作</param>
+    private bool ConfirmGlobalVerdictOverwrite(CandidateReviewDecision? targetDecision)
+    {
+        var selected = _viewModel.SelectedCandidate;
+        var library = _viewModel.SelectedLibrary;
+        if (selected is null || library is null || selected.Row.ReviewDecision is null)
+        {
+            return true;
+        }
+
+        // 同じVerdictでKeepだけを変更する操作はLibrary固有Dispositionだけが変わるため、Global変更警告は不要。
+        if (selected.Row.ReviewDecision == targetDecision)
+        {
+            return true;
+        }
+
+        var sourceLibraryId = selected.Row.ReviewSourceLibraryId;
+        var sourceNameSnapshot = selected.Row.ReviewSourceLibraryName;
+        if (sourceLibraryId == library.Id)
+        {
+            return true;
+        }
+
+        // Source Library削除後はFKがNULLになるが、Snapshotが残っていれば別Libraryで確定したVerdictである。
+        // NULLだけを「出所なし」と扱うと、削除済みLibrary由来のGlobal Verdictを警告なしで変更できてしまう。
+        if (sourceLibraryId is null && string.IsNullOrWhiteSpace(sourceNameSnapshot))
+        {
+            return true;
+        }
+
+        var sourceName = !string.IsNullOrWhiteSpace(sourceNameSnapshot)
+            ? sourceNameSnapshot
+            : $"Library #{sourceLibraryId}";
+        var confirmation = new ConfirmationDialog(
+            "他のLibraryで確定した判定を変更します",
+            $"この判定は「{sourceName}」で確定されています。",
+            "Human VerdictはGlobal Pair単位で共有されるため、ここで変更すると他のLibraryから見える判定も同時に変わります。",
+            "Global判定を変更",
+            "キャンセル",
+            kind: AppDialogKind.Warning)
+        { Owner = this };
+        confirmation.ShowDialog();
+        return confirmation.SelectedResult == AppDialogResult.Primary;
     }
 
     private void ShowReviewError(Exception exception)
@@ -317,14 +409,14 @@ public partial class MainWindow : Window
 
     private async void ShowDuplicateGroupDetails_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not long groupId)
+        if (sender is not Button button || button.Tag is not long groupId || _viewModel.SelectedLibrary is not { } library)
         {
             return;
         }
 
         // Main WindowのA/B同期再生と詳細画面の簡易試聴が同時に鳴らないよう、詳細表示前に停止する。
         _viewModel.StopPlayback();
-        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, groupId) { Owner = this }.ShowDialog();
+        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this }.ShowDialog();
         await _viewModel.RefreshDuplicateGroupsAsync();
     }
 
@@ -367,6 +459,6 @@ public partial class MainWindow : Window
         confirmation.ShowDialog();
 
         if (confirmation.SelectedResult == AppDialogResult.Primary)
-            await ExecuteReviewActionAsync(_viewModel.ClearReviewAsync);
+            await ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync);
     }
 }

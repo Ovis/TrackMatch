@@ -6,7 +6,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// Candidate Generation向けに有効なTrackのFingerprintをSQLiteから読み出す。
+/// Candidate Generation向けに有効なGlobal TrackのFingerprintをSQLiteから読み出す。
 /// </summary>
 public sealed class SqliteFingerprintCatalogRepository(
     SqliteDatabase database,
@@ -22,7 +22,11 @@ public sealed class SqliteFingerprintCatalogRepository(
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE t.IsMissing = 0
               AND f.Algorithm = @Algorithm
-              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id))
             ORDER BY f.TrackId;
             """;
 
@@ -44,7 +48,11 @@ public sealed class SqliteFingerprintCatalogRepository(
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE t.IsMissing = 0
               AND f.Algorithm = @Algorithm
-              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id))
             ORDER BY f.TrackId;
             """;
 
@@ -78,14 +86,17 @@ public sealed class SqliteFingerprintCatalogRepository(
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE t.IsMissing = 0
               AND f.Algorithm = @Algorithm
-              AND (@LibraryId IS NULL OR t.LibraryId = @LibraryId)
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id))
               AND f.TrackId IN @TrackIds
             ORDER BY f.TrackId;
             """;
 
         var result = new List<StoredFingerprint>(trackIds.Count);
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        // SQLiteのパラメータ数上限に余裕を持たせるため、Track IDは小さな単位に分割して取得する。
         foreach (var batch in trackIds.Chunk(500))
         {
             var rows = await connection.QueryAsync<FingerprintRow>(new CommandDefinition(
@@ -109,7 +120,7 @@ public sealed class SqliteFingerprintCatalogRepository(
     {
         if (bytes.Length % sizeof(uint) != 0)
         {
-            throw new InvalidDataException("Fingerprint BLOBの長さが4byte境界ではない。");
+            throw new InvalidDataException("Fingerprint BLOBの長さが4byte境界ではありません。");
         }
 
         var values = new uint[bytes.Length / sizeof(uint)];
@@ -121,7 +132,6 @@ public sealed class SqliteFingerprintCatalogRepository(
         return values;
     }
 
-    // SQLite INTEGERはInt64として返るため、DapperのコンストラクタMaterialize境界ではlongで受ける。
     private sealed record FingerprintRow(
         long TrackId,
         long Algorithm,

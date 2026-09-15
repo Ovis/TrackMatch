@@ -13,34 +13,32 @@ public sealed class CandidateReviewTests
         Assert.Equal(new CandidatePairKey(1, 2), CandidatePairKey.Create(2, 1));
     }
 
-    [Fact]
-    public void ConfirmedDuplicate_RequiresKeepTrackFromPair()
-    {
-        var pair = CandidatePairKey.Create(1, 2);
-
-        var valid = new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, 2);
-        valid.Validate();
-
-        Assert.Throws<ArgumentException>(() =>
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null).Validate());
-        Assert.Throws<ArgumentException>(() =>
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null, 3).Validate());
-    }
-
-    [Fact]
-    public void NotDuplicate_DoesNotAcceptKeepTrack()
+    [Theory]
+    [InlineData(CandidateReviewDecision.NotDuplicate)]
+    [InlineData(CandidateReviewDecision.ConfirmedDuplicate)]
+    public void GlobalVerdict_ValidDecisionsDoNotRequireKeepTrack(CandidateReviewDecision decision)
     {
         var review = new CandidateReview(
             CandidatePairKey.Create(1, 2),
-            CandidateReviewDecision.NotDuplicate,
-            null,
-            1);
+            decision,
+            null);
 
-        Assert.Throws<ArgumentException>(review.Validate);
+        review.Validate();
     }
 
     [Fact]
-    public async Task GenerateAsync_ExcludesReviewedPair()
+    public void GlobalVerdict_UnknownDecisionIsRejected()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            (CandidateReviewDecision)999,
+            null);
+
+        Assert.Throws<ArgumentOutOfRangeException>(review.Validate);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ExcludesReviewedPairFromReviewableResultButKeepsMachinePair()
     {
         var values = Enumerable.Repeat(0u, 300).ToArray();
         var fingerprints = new FakeFingerprintCatalogRepository(
@@ -63,7 +61,8 @@ public sealed class CandidateReviewTests
         var result = await service.GenerateAsync(2, new CandidateGenerationOptions(), TestContext.Current.CancellationToken);
 
         Assert.Empty(result.Pairs);
-        Assert.Empty(pairRepository.Pairs);
+        var persisted = Assert.Single(pairRepository.Pairs);
+        Assert.Equal(CandidatePairKey.Create(1, 2), CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
     }
 
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values)

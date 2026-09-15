@@ -43,6 +43,8 @@ public sealed record CandidateReviewReportRow(
     int? ChannelsA,
     int? ChannelsB,
     CandidateReviewDecision? ReviewDecision = null,
-    long? KeepTrackId = null,
     uint? YearA = null,
-    uint? YearB = null);
+    uint? YearB = null,
+    long? ReviewSourceLibraryId = null,
+    string? ReviewSourceLibraryName = null,
+    bool ReReviewRecommended = false);

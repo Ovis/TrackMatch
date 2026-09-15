@@ -5,7 +5,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Infrastructure.Persistence;
 
 /// <summary>
-/// 候補Trackペアの詳細Fingerprint比較結果をSQLiteへ保存する。
+/// 候補TrackペアのGlobal Fingerprint比較結果をSQLiteへ保存する。
 /// </summary>
 public sealed class SqliteCandidateComparisonRepository(
     SqliteDatabase database,
@@ -21,18 +21,36 @@ public sealed class SqliteCandidateComparisonRepository(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         if (libraryId is null)
         {
+            // Missing Trackを含むComparisonは今回の比較対象ではないため、Active Pairだけを置換する。
+            // 同Content復帰時に再利用できるMachine Cacheを、全件置換APIが誤って削除しないようにする。
             await connection.ExecuteAsync(new CommandDefinition(
-                "DELETE FROM CandidateComparisons;",
+                """
+                DELETE FROM CandidateComparisons
+                WHERE EXISTS (
+                        SELECT 1 FROM Tracks a
+                        WHERE a.Id = CandidateComparisons.TrackIdA AND a.IsMissing = 0)
+                  AND EXISTS (
+                        SELECT 1 FROM Tracks b
+                        WHERE b.Id = CandidateComparisons.TrackIdB AND b.IsMissing = 0);
+                """,
                 transaction: transaction,
                 cancellationToken: cancellationToken));
         }
         else
         {
+            // Library MembershipはMissing後も残るため、Membership条件だけで削除するとMissing Cacheまで失われる。
+            // 現在利用可能なPairだけを今回の置換対象とする。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidateComparisons
-                WHERE TrackIdA IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId)
-                  AND TrackIdB IN (SELECT Id FROM Tracks WHERE LibraryId = @LibraryId);
+                WHERE EXISTS (
+                        SELECT 1 FROM LibraryTracks a
+                        INNER JOIN Tracks ta ON ta.Id = a.TrackId AND ta.IsMissing = 0
+                        WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateComparisons.TrackIdA)
+                  AND EXISTS (
+                        SELECT 1 FROM LibraryTracks b
+                        INNER JOIN Tracks tb ON tb.Id = b.TrackId AND tb.IsMissing = 0
+                        WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateComparisons.TrackIdB);
                 """,
                 new { LibraryId = libraryId },
                 transaction,
@@ -59,13 +77,9 @@ public sealed class SqliteCandidateComparisonRepository(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await EnsureComparisonsInScopeAsync(connection, transaction, comparisons, cancellationToken);
 
-        // 詳細比較値が変わったペアの分類結果は古くなるため、再分類されるまで表示対象に残さない。
-        const string deleteClassificationSql = """
-            DELETE FROM CandidateClassifications
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
-            """;
+        // Machine Comparisonが変わった場合は分類だけ再計算する。Human VerdictはGlobalな人間判断なので維持する。
         await connection.ExecuteAsync(new CommandDefinition(
-            deleteClassificationSql,
+            "DELETE FROM CandidateClassifications WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
             comparisons.Select(item => new { item.TrackIdA, item.TrackIdB }),
             transaction,
             cancellationToken: cancellationToken));
@@ -81,17 +95,25 @@ public sealed class SqliteCandidateComparisonRepository(
             SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
                    c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
             FROM CandidateComparisons c
-            INNER JOIN Tracks a ON a.Id = c.TrackIdA
-            INNER JOIN Tracks b ON b.Id = c.TrackIdB
-            WHERE @LibraryId IS NULL
-               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId)
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            WHERE c.ComparisonVersion = @ComparisonVersion
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB)))
             ORDER BY c.Similarity DESC, c.TrackIdA, c.TrackIdB;
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.Select(ToDomain).ToArray();
     }
@@ -103,16 +125,24 @@ public sealed class SqliteCandidateComparisonRepository(
         const string sql = """
             SELECT c.TrackIdA, c.TrackIdB, c.ComparedAtUtcTicks
             FROM CandidateComparisons c
-            INNER JOIN Tracks a ON a.Id = c.TrackIdA
-            INNER JOIN Tracks b ON b.Id = c.TrackIdB
-            WHERE @LibraryId IS NULL
-               OR (a.LibraryId = @LibraryId AND b.LibraryId = @LibraryId);
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            WHERE c.ComparisonVersion = @ComparisonVersion
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB)));
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ComparedAtRow>(new CommandDefinition(
             sql,
-            new { LibraryId = libraryId },
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
             cancellationToken: cancellationToken));
         return rows.ToDictionary(
             row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB),
@@ -125,7 +155,7 @@ public sealed class SqliteCandidateComparisonRepository(
         IReadOnlyCollection<CandidateComparison> comparisons,
         CancellationToken cancellationToken)
     {
-        if (libraryId is null || comparisons.Count == 0)
+        if (comparisons.Count == 0)
         {
             return;
         }
@@ -135,13 +165,25 @@ public sealed class SqliteCandidateComparisonRepository(
             .Distinct()
             .ToArray();
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM Tracks WHERE LibraryId = @LibraryId AND Id IN @TrackIds;",
+            """
+            SELECT COUNT(*)
+            FROM Tracks t
+            WHERE t.Id IN @TrackIds
+              AND t.IsMissing = 0
+              AND (
+                    @LibraryId IS NULL
+                 OR EXISTS (
+                        SELECT 1 FROM LibraryTracks lt
+                        WHERE lt.LibraryId = @LibraryId AND lt.TrackId = t.Id));
+            """,
             new { LibraryId = libraryId, TrackIds = trackIds },
             transaction,
             cancellationToken: cancellationToken));
         if (count != trackIds.Length)
         {
-            throw new InvalidOperationException("異なるLibraryのTrackをCandidate Comparisonとして保存できません。");
+            // Missing中の既存Comparison Cacheは保持するが、新しいCurrent結果を書き込むことは許可しない。
+            // Scan/Trash等と解析処理が競合しても、古い音源に対する結果が復帰後のCurrentへ混入しないための境界である。
+            throw new InvalidOperationException("Missingまたは現在LibraryのMembership外TrackをCandidate Comparisonとして保存できません。");
         }
     }
 
@@ -160,11 +202,11 @@ public sealed class SqliteCandidateComparisonRepository(
             INSERT INTO CandidateComparisons (
                 TrackIdA, TrackIdB, Similarity, BestOffsetItems, BestOffsetTicks,
                 MatchedItems, MatchedDurationTicks, CoverageA, CoverageB, DurationRatio,
-                ComparedAtUtcTicks)
+                ComparisonVersion, ComparedAtUtcTicks)
             VALUES (
                 @TrackIdA, @TrackIdB, @Similarity, @BestOffsetItems, @BestOffsetTicks,
                 @MatchedItems, @MatchedDurationTicks, @CoverageA, @CoverageB, @DurationRatio,
-                @ComparedAtUtcTicks)
+                @ComparisonVersion, @ComparedAtUtcTicks)
             ON CONFLICT (TrackIdA, TrackIdB) DO UPDATE SET
                 Similarity = excluded.Similarity,
                 BestOffsetItems = excluded.BestOffsetItems,
@@ -174,6 +216,7 @@ public sealed class SqliteCandidateComparisonRepository(
                 CoverageA = excluded.CoverageA,
                 CoverageB = excluded.CoverageB,
                 DurationRatio = excluded.DurationRatio,
+                ComparisonVersion = excluded.ComparisonVersion,
                 ComparedAtUtcTicks = excluded.ComparedAtUtcTicks;
             """;
         var comparedAt = DateTime.UtcNow.Ticks;
@@ -189,6 +232,7 @@ public sealed class SqliteCandidateComparisonRepository(
             item.CoverageA,
             item.CoverageB,
             item.DurationRatio,
+            ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
             ComparedAtUtcTicks = comparedAt,
         });
         await connection.ExecuteAsync(new CommandDefinition(

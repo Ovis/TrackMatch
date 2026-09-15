@@ -3,7 +3,7 @@ using TrackMatch.Core.Persistence;
 namespace TrackMatch.Core.Candidates;
 
 /// <summary>
-/// 保存済みFingerprintから候補ペアを構築し、変更Trackだけ差分更新する。
+/// 保存済みFingerprintから候補ペアを構築し、変更TrackとLibraryTrack Pendingだけ差分更新する。
 /// </summary>
 public sealed class CandidateGenerationService(
     IFingerprintCatalogRepository fingerprintCatalog,
@@ -11,7 +11,8 @@ public sealed class CandidateGenerationService(
     ICandidatePairRepository candidatePairRepository,
     ICandidateReviewRepository reviewRepository,
     FingerprintSegmentSketcher sketcher,
-    CandidatePairGenerator pairGenerator)
+    CandidatePairGenerator pairGenerator,
+    ICandidateGenerationWorkRepository? workRepository = null)
 {
     /// <summary>
     /// 保存済みFingerprintから候補ペアを生成する。
@@ -37,14 +38,14 @@ public sealed class CandidateGenerationService(
         var fingerprintStates = await fingerprintCatalog.GetActiveStatesAsync(fingerprintAlgorithm, cancellationToken);
         var activeByTrackId = fingerprintStates.ToDictionary(item => item.TrackId);
         var cachedStates = await sketchRepository.GetTrackStatesAsync(fingerprintAlgorithm, options, cancellationToken);
+        var pendingTrackIds = workRepository is null
+            ? new HashSet<long>()
+            : (await workRepository.GetPendingTrackIdsAsync(cancellationToken)).ToHashSet();
 
         var changedTrackIds = fingerprintStates
             .Where(item => !cachedStates.TryGetValue(item.TrackId, out var cachedAt)
                 || cachedAt != item.ExtractedAtUtc)
             .Select(item => item.TrackId)
-            .ToHashSet();
-        var inactiveTrackIds = cachedStates.Keys
-            .Where(trackId => !activeByTrackId.ContainsKey(trackId))
             .ToHashSet();
 
         // キャッシュがない初回や候補生成パラメータ変更時は全Trackを索引対象にし、候補集合も全再構築する。
@@ -88,6 +89,12 @@ public sealed class CandidateGenerationService(
                 value.CompletedSketches,
                 value.TotalSketches)));
 
+        // Missing TrackはActive Fingerprint集合から外れるが、それだけを理由にMachine Comparison Cacheまで失効させない。
+        // Content ChangeとForce Reanalysisは各専用経路でCandidatePairsを明示的に無効化するため、
+        // Candidate Generationでは「現在再評価が必要なTrack」だけを差分置換対象にする。
+        var affectedTrackIds = changedTrackIds
+            .Concat(pendingTrackIds)
+            .ToHashSet();
         IReadOnlyList<CandidatePair> generatedPairs;
         if (fullRebuild)
         {
@@ -97,53 +104,57 @@ public sealed class CandidateGenerationService(
                 options.MaximumSegmentHashHammingDistance,
                 pairProgress);
         }
+        else if (affectedTrackIds.Count == 0)
+        {
+            progress?.Report(new CandidateGenerationProgress(
+                CandidateGenerationProgressPhase.SearchingPairs,
+                allSketches.Count,
+                allSketches.Count));
+            generatedPairs = [];
+        }
         else
         {
-            var affectedTrackIds = changedTrackIds
-                .Concat(inactiveTrackIds)
-                .ToHashSet();
-            if (affectedTrackIds.Count == 0)
-            {
-                progress?.Report(new CandidateGenerationProgress(
-                    CandidateGenerationProgressPhase.SearchingPairs,
-                    allSketches.Count,
-                    allSketches.Count));
-                generatedPairs = [];
-            }
-            else
-            {
-                generatedPairs = pairGenerator.GenerateFromSketches(
-                    allSketches,
-                    affectedTrackIds,
-                    options.MaximumSegmentHashHammingDistance,
-                    pairProgress);
-            }
+            // PendingはFingerprint/Sketchが既知でも、新しいLibrary MembershipやGeneration Version変更によって
+            // このLibrary内の組合せ探索だけが未完了なTrackを表すため、changed Trackと同じ起点集合へ含める。
+            generatedPairs = pairGenerator.GenerateFromSketches(
+                allSketches,
+                affectedTrackIds,
+                options.MaximumSegmentHashHammingDistance,
+                pairProgress);
         }
 
-        var excluded = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
-        var pairs = generatedPairs
-            .Where(pair => !excluded.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
+        var reviewedPairs = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
+        var reviewablePairs = generatedPairs
+            .Where(pair => !reviewedPairs.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
             .ToArray();
 
+        // Human Verdictが付いたPairもMachine Current StateとしてCandidatePairsへ残す。
+        // ここで削除するとFK CASCADEでComparisonまで失われ、Comparison Algorithm更新後の再計算や
+        // Human Verdictとの矛盾を検出する「再確認推奨」に到達できなくなる。
         if (fullRebuild)
         {
-            await candidatePairRepository.ReplaceAllAsync(pairs, cancellationToken);
+            await candidatePairRepository.ReplaceAllAsync(generatedPairs, cancellationToken);
         }
         else
         {
-            var affectedTrackIds = changedTrackIds
-                .Concat(inactiveTrackIds)
-                .ToArray();
-            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds, pairs, cancellationToken);
+            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), generatedPairs, cancellationToken);
+        }
 
-            // レビューはFingerprint更新と独立して発生するため、無変更実行でも新規レビュー済みペアを候補集合から除外する。
-            await candidatePairRepository.DeleteAsync(excluded.ToArray(), cancellationToken);
+        if (workRepository is not null && pendingTrackIds.Count != 0)
+        {
+            // Pendingの完了条件はFingerprintの存在そのものではなく、このGenerate実行で候補探索と
+            // CandidatePairs永続化が正常完了したこと。ここへ到達した時点でのみActiveなPendingを完了扱いにする。
+            var completedPending = pendingTrackIds
+                .Where(activeByTrackId.ContainsKey)
+                .Where(affectedTrackIds.Contains)
+                .ToArray();
+            await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
         }
 
         return new CandidateGenerationResult(
             fingerprintStates.Count,
             allSketches.Count,
-            pairs,
+            reviewablePairs,
             changedTrackIds.Count,
             fullRebuild);
     }

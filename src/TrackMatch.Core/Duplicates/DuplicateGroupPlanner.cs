@@ -3,20 +3,20 @@ using TrackMatch.Core.Candidates;
 namespace TrackMatch.Core.Duplicates;
 
 /// <summary>
-/// ConfirmedDuplicateを無向グラフとして扱い、確定済み重複グループを安全に再構成する。
+/// Global ConfirmedDuplicateを無向グラフとして扱い、Global Duplicate Groupの再構成計画を生成する。
 /// </summary>
 public static class DuplicateGroupPlanner
 {
     /// <summary>
-    /// 現在のレビュー集合から重複グループの再構成計画を生成する。
+    /// Current Human Verdict集合からGlobal Duplicate Groupの連結成分を構成する。
     /// </summary>
-    /// <param name="reviews">同一Libraryに属するレビューだけを渡す</param>
-    /// <param name="existingGroups">同一Libraryに属する既存グループ</param>
-    /// <param name="preferredKeepTrackId">今回のレビューで明示されたKeep。所属成分に存在する場合は最優先する</param>
+    /// <remarks>
+    /// KeepはLibrary固有Dispositionなので、このPlannerでは選択しない。既存Group IDは、結合・分割後も
+    /// 一意に引き継げる成分だけへ再利用候補として渡す。
+    /// </remarks>
     public static IReadOnlyList<DuplicateGroupRebuildItem> Build(
         IReadOnlyCollection<CandidateReview> reviews,
-        IReadOnlyCollection<DuplicateGroup> existingGroups,
-        long? preferredKeepTrackId = null)
+        IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
     {
         ArgumentNullException.ThrowIfNull(reviews);
         ArgumentNullException.ThrowIfNull(existingGroups);
@@ -32,9 +32,12 @@ public static class DuplicateGroupPlanner
             AddEdge(adjacency, review.Pair.TrackIdA, review.Pair.TrackIdB);
         }
 
-        var components = BuildComponents(adjacency);
+        var components = BuildComponents(adjacency)
+            .Where(component => component.Count >= 2)
+            .OrderBy(component => component.Min())
+            .ToArray();
         var componentByTrack = new Dictionary<long, int>();
-        for (var index = 0; index < components.Count; index++)
+        for (var index = 0; index < components.Length; index++)
         {
             foreach (var trackId in components[index])
             {
@@ -42,8 +45,7 @@ public static class DuplicateGroupPlanner
             }
         }
 
-        // ConfirmedDuplicateを推移的な「同一音源群」として扱うため、同じ連結成分内の
-        // NotDuplicateは削除判断の根拠を矛盾させる。黙ってグループ化せず保存前に拒否する。
+        // ConfirmedDuplicateを推移的な同一音源関係として扱うため、同じ連結成分内のNotDuplicateは矛盾する。
         foreach (var review in reviews.Where(review => review.Decision == CandidateReviewDecision.NotDuplicate))
         {
             if (componentByTrack.TryGetValue(review.Pair.TrackIdA, out var componentA)
@@ -55,77 +57,43 @@ public static class DuplicateGroupPlanner
             }
         }
 
-        var result = new List<DuplicateGroupRebuildItem>(components.Count);
-        foreach (var component in components.OrderBy(component => component.Min()))
+        // Split/Merge時のGroup IDは、旧Groupと新ComponentのOverlapが最大になる組合せから優先して割り当てる。
+        // Componentの処理順だけで小さい側へ旧IDが渡るとHistory追跡が不安定になるため、割当を先に全体で決める。
+        var assignments = new Dictionary<int, long>();
+        var usedGroupIds = new HashSet<long>();
+        foreach (var candidate in existingGroups
+                     .SelectMany(group => components.Select((component, index) => new
+                     {
+                         GroupId = group.Id,
+                         ComponentIndex = index,
+                         Overlap = group.TrackIds.Count(component.Contains),
+                         ComponentMin = component.Min(),
+                     }))
+                     .Where(candidate => candidate.Overlap > 0)
+                     .OrderByDescending(candidate => candidate.Overlap)
+                     .ThenBy(candidate => candidate.GroupId)
+                     .ThenBy(candidate => candidate.ComponentMin))
         {
-            if (component.Count < 2)
+            if (usedGroupIds.Contains(candidate.GroupId)
+                || assignments.ContainsKey(candidate.ComponentIndex))
             {
                 continue;
             }
 
-            var overlappingGroups = existingGroups
-                .Where(group => group.TrackIds.Any(component.Contains))
-                .Select(group => new
-                {
-                    Group = group,
-                    Overlap = group.TrackIds.Count(component.Contains),
-                })
-                .ToArray();
+            usedGroupIds.Add(candidate.GroupId);
+            assignments[candidate.ComponentIndex] = candidate.GroupId;
+        }
 
-            // 分割時に同じ既存IDを複数成分へ再利用しないため、旧Keepを含む成分だけが
-            // そのグループIDを引き継げる。結合時は今回のKeepを持つ旧グループを優先する。
-            var reusableGroups = overlappingGroups
-                .Where(item => component.Contains(item.Group.KeepTrackId))
-                .OrderByDescending(item => preferredKeepTrackId is not null && item.Group.KeepTrackId == preferredKeepTrackId)
-                .ThenByDescending(item => item.Overlap)
-                .ThenBy(item => item.Group.Id)
-                .ToArray();
-            var retainedGroup = reusableGroups.FirstOrDefault()?.Group;
-
-            var keepTrackId = ChooseKeepTrackId(
-                component,
-                confirmed,
-                retainedGroup,
-                preferredKeepTrackId);
-
+        var result = new List<DuplicateGroupRebuildItem>(components.Length);
+        for (var index = 0; index < components.Length; index++)
+        {
+            var component = components[index];
             result.Add(new DuplicateGroupRebuildItem(
-                retainedGroup?.Id,
-                keepTrackId,
+                assignments.GetValueOrDefault(index) is { } groupId && groupId > 0 ? groupId : null,
                 component.Order().ToArray()));
         }
 
         return result;
-    }
-
-    private static long ChooseKeepTrackId(
-        IReadOnlySet<long> component,
-        IReadOnlyCollection<CandidateReview> confirmed,
-        DuplicateGroup? retainedGroup,
-        long? preferredKeepTrackId)
-    {
-        if (preferredKeepTrackId is { } preferred && component.Contains(preferred))
-        {
-            return preferred;
-        }
-
-        if (retainedGroup is not null && component.Contains(retainedGroup.KeepTrackId))
-        {
-            return retainedGroup.KeepTrackId;
-        }
-
-        // 旧Keepを含まない側へ分割された場合にも必ず1件残す必要がある。
-        // 過去のペアレビューでKeepに選ばれたTrackを優先し、同条件ならTrack IDで決定的に選ぶ。
-        var reviewedKeeps = confirmed
-            .Where(review => component.Contains(review.Pair.TrackIdA) && component.Contains(review.Pair.TrackIdB))
-            .Select(review => review.KeepTrackId!.Value)
-            .Where(component.Contains)
-            .GroupBy(trackId => trackId)
-            .OrderByDescending(group => group.Count())
-            .ThenBy(group => group.Key)
-            .Select(group => (long?)group.Key)
-            .FirstOrDefault();
-
-        return reviewedKeeps ?? component.Min();
     }
 
     private static List<HashSet<long>> BuildComponents(IReadOnlyDictionary<long, HashSet<long>> adjacency)

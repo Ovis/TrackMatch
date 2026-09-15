@@ -38,9 +38,8 @@ jobs:
       - name: Publish Windows x64
         shell: pwsh
         run: |
-          # GUIとScannerは共通DLLと同梱fpcalcを利用するため、同じ配布ディレクトリへまとめる。
+          # 配布対象はWPFアプリのみ。fpcalcとnative依存は同じ配布ディレクトリへまとめる。
           dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained false -o artifacts/package
-          dotnet publish src/TrackMatch.Scanner/TrackMatch.Scanner.csproj -c Release -r win-x64 --self-contained false -o artifacts/package
           Copy-Item THIRD_PARTY_NOTICES.md artifacts/package/THIRD_PARTY_NOTICES.md
 
       - name: Download and verify libsndfile
@@ -89,7 +88,7 @@ jobs:
             throw 'fpcalc.exe was not found in the Chromaprint archive.'
           }
 
-          # GUI/Scanner双方のAppContext.BaseDirectoryからfpcalc/fpcalc.exeとして解決できる共通配置にする。
+          # WPFアプリがAppContext.BaseDirectoryからfpcalc/fpcalc.exeとして解決できる配置にする。
           $sourceDir = $fpcalc.Directory.FullName
           $destination = "artifacts/package/fpcalc"
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
@@ -128,7 +127,6 @@ jobs:
           # Release作成前に、実行時必須のnative依存とライセンス文書が最終配布ディレクトリへ入っていることを保証する。
           $required = @(
             'artifacts/package/TrackMatch.App.exe',
-            'artifacts/package/TrackMatch.Scanner.exe',
             'artifacts/package/sndfile.dll',
             'artifacts/package/libsndfile-LGPL-2.1.txt',
             'artifacts/package/THIRD_PARTY_NOTICES.md',
