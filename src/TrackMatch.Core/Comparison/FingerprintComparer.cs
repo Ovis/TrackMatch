@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using TrackMatch.Core.Fingerprinting;
 
 namespace TrackMatch.Core.Comparison;

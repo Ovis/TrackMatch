@@ -1,4 +1,4 @@
-using NAudio.SoundFile;
+﻿using NAudio.SoundFile;
 using TrackMatch.Core.Quality;
 
 namespace TrackMatch.Infrastructure.Audio;

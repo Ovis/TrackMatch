@@ -1,5 +1,4 @@
-using System.Text.Json;
-using TrackMatch.Infrastructure.Persistence;
+﻿using TrackMatch.Infrastructure.Persistence;
 
 namespace TrackMatch.App.Settings;
 

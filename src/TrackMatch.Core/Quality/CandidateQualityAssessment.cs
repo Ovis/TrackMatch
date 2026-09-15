@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// Candidate A/Bの聴感上の音量関係を表す。

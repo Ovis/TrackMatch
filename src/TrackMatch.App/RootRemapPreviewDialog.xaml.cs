@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using TrackMatch.Core.Libraries;
 
 namespace TrackMatch.App;

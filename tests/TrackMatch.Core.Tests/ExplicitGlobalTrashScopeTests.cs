@@ -1,4 +1,4 @@
-using TrackMatch.Core.Duplicates;
+﻿using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Persistence;

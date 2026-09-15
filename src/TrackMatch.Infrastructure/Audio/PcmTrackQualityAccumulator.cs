@@ -1,4 +1,4 @@
-using R128Net;
+﻿using R128Net;
 using TrackMatch.Core.Quality;
 
 namespace TrackMatch.Infrastructure.Audio;

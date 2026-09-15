@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Duplicates;
+﻿namespace TrackMatch.Core.Duplicates;
 
 /// <summary>
 /// Library ProjectionやKeep状態を含まない、Global ConfirmedDuplicate Graphの連結成分を表す。

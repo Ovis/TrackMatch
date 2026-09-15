@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Playback;
+﻿namespace TrackMatch.Core.Playback;
 
 /// <summary>
 /// A/B同期再生で使用する出力Routingを表す。

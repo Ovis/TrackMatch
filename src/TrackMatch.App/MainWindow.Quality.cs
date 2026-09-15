@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -29,15 +29,25 @@ public partial class MainWindow
 
     internal void EnsureQualityAnalysisStarted()
     {
-        if (_qualityLifecycleAttached) return;
+        if (_qualityLifecycleAttached)
+        {
+            return;
+        }
+
         _qualityLifecycleAttached = true;
         _qualityController = new MainWindowQualityAnalysisController(_viewModel, text =>
         {
-            if (_qualityAnalysisStatusTextBlock is not null) _qualityAnalysisStatusTextBlock.Text = text;
+            if (_qualityAnalysisStatusTextBlock is not null)
+            {
+                _qualityAnalysisStatusTextBlock.Text = text;
+            }
         });
         _viewModel.PropertyChanged += QualityViewModel_PropertyChanged;
         Closed += QualityWindow_Closed;
-        if (!_viewModel.IsLoading && !_viewModel.IsAnalyzing && _viewModel.SelectedLibrary is not null) _qualityController.Restart();
+        if (!_viewModel.IsLoading && !_viewModel.IsAnalyzing && _viewModel.SelectedLibrary is not null)
+        {
+            _qualityController.Restart();
+        }
     }
 
     internal Task ReanalyzeSelectedQualityAsync() => _qualityController?.ReanalyzeSelectedAsync() ?? Task.CompletedTask;
@@ -52,7 +62,10 @@ public partial class MainWindow
 
     private void EnsureQualityUiAttached()
     {
-        if (_qualityUiAttached) return;
+        if (_qualityUiAttached)
+        {
+            return;
+        }
 
         var comparisonGroup = FindVisualChildren<GroupBox>(this)
             .FirstOrDefault(item => string.Equals(item.Header?.ToString(), "比較結果", StringComparison.Ordinal));
@@ -182,7 +195,10 @@ public partial class MainWindow
         var playbackGroup = detailGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "A/B 同期再生", StringComparison.Ordinal));
         var reviewGrid = detailGrid.Children.OfType<Grid>()
             .FirstOrDefault(item => item.Children.OfType<Button>().Any(button => string.Equals(button.Content?.ToString(), "重複ではない", StringComparison.Ordinal)));
-        if (sourceGrid is null || playbackGroup is null || reviewGrid is null) return;
+        if (sourceGrid is null || playbackGroup is null || reviewGrid is null)
+        {
+            return;
+        }
 
         ReplaceSourcePanels(sourceGrid);
         CompactComparisonResult(comparisonGroup);
@@ -246,13 +262,24 @@ public partial class MainWindow
     {
         var sourceA = sourceGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 A", StringComparison.Ordinal));
         var sourceB = sourceGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 B", StringComparison.Ordinal));
-        if (sourceA is not null) sourceA.Content = new CandidateSourceSummaryPanel(isTrackA: true);
-        if (sourceB is not null) sourceB.Content = new CandidateSourceSummaryPanel(isTrackA: false);
+        if (sourceA is not null)
+        {
+            sourceA.Content = new CandidateSourceSummaryPanel(isTrackA: true);
+        }
+
+        if (sourceB is not null)
+        {
+            sourceB.Content = new CandidateSourceSummaryPanel(isTrackA: false);
+        }
     }
 
     private static void CompactComparisonResult(GroupBox comparisonGroup)
     {
-        if (comparisonGroup.Content is not Panel comparisonPanel) return;
+        if (comparisonGroup.Content is not Panel comparisonPanel)
+        {
+            return;
+        }
+
         comparisonPanel.VerticalAlignment = VerticalAlignment.Top;
         comparisonGroup.VerticalContentAlignment = VerticalAlignment.Top;
     }
@@ -297,15 +324,25 @@ public partial class MainWindow
 
     private static void ScrollSourcePanelsToTop(Grid sourceGrid)
     {
-        foreach (var scrollViewer in FindVisualChildren<ScrollViewer>(sourceGrid)) scrollViewer.ScrollToTop();
+        foreach (var scrollViewer in FindVisualChildren<ScrollViewer>(sourceGrid))
+        {
+            scrollViewer.ScrollToTop();
+        }
     }
 
     private void AttachQualityProgressToFooter()
     {
-        if (Content is not Grid rootGrid) return;
+        if (Content is not Grid rootGrid)
+        {
+            return;
+        }
         // 新UIではFooterをBorderで包むため、旧実装の「Row 8直下のGrid」前提を外す。
         var footerBorder = rootGrid.Children.OfType<Border>().FirstOrDefault(item => Grid.GetRow(item) == 8);
-        if (footerBorder?.Child is not Grid footer) return;
+        if (footerBorder?.Child is not Grid footer)
+        {
+            return;
+        }
+
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _qualityAnalysisStatusTextBlock = new TextBlock { Text = "音質解析: 待機中", VerticalAlignment = VerticalAlignment.Center };
@@ -320,9 +357,16 @@ public partial class MainWindow
             UpdateCandidateDetailState();
         }
 
-        if (_qualityController is null) return;
+        if (_qualityController is null)
+        {
+            return;
+        }
+
         if (e.PropertyName == nameof(MainWindowViewModel.IsAnalyzing) && _viewModel.IsAnalyzing) { _qualityController.Stop(); return; }
-        if (e.PropertyName == nameof(MainWindowViewModel.IsLoading) && !_viewModel.IsLoading && !_viewModel.IsAnalyzing) _qualityController.Restart();
+        if (e.PropertyName == nameof(MainWindowViewModel.IsLoading) && !_viewModel.IsLoading && !_viewModel.IsAnalyzing)
+        {
+            _qualityController.Restart();
+        }
     }
 
     private void QualityWindow_Closed(object? sender, EventArgs e)
@@ -338,8 +382,15 @@ public partial class MainWindow
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is T typed) yield return typed;
-            foreach (var descendant in FindVisualChildren<T>(child)) yield return descendant;
+            if (child is T typed)
+            {
+                yield return typed;
+            }
+
+            foreach (var descendant in FindVisualChildren<T>(child))
+            {
+                yield return descendant;
+            }
         }
     }
 }

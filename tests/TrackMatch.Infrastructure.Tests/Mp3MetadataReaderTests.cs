@@ -1,4 +1,4 @@
-using TrackMatch.Infrastructure.Audio;
+﻿using TrackMatch.Infrastructure.Audio;
 using Xunit;
 
 namespace TrackMatch.Infrastructure.Tests;

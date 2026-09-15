@@ -1,4 +1,4 @@
-namespace TrackMatch.App.Quality;
+﻿namespace TrackMatch.App.Quality;
 
 /// <summary>
 /// Candidate一覧と詳細パネルへ表示する音質比較の整形済み状態を保持する。

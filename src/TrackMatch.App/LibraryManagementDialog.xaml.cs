@@ -1,6 +1,6 @@
-using Microsoft.Win32;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;
 
@@ -53,7 +53,11 @@ public partial class LibraryManagementDialog : Window
 
     private async void LibrariesListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_revertingSelection) return;
+        if (_revertingSelection)
+        {
+            return;
+        }
+
         var next = LibrariesListBox.SelectedItem as Library;
         if (!await ConfirmUnsavedNameAsync())
         {
@@ -79,14 +83,20 @@ public partial class LibraryManagementDialog : Window
     private void NameTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_loadingSelection && _selectedLibrary is not null)
+        {
             _nameDirty = !string.Equals(NameTextBox.Text, _selectedLibrary.Name, StringComparison.Ordinal);
+        }
     }
 
     private async void SaveName_Click(object sender, RoutedEventArgs e) => await SaveNameAsync();
 
     private async Task<bool> SaveNameAsync()
     {
-        if (_selectedLibrary is null || !_nameDirty) return true;
+        if (_selectedLibrary is null || !_nameDirty)
+        {
+            return true;
+        }
+
         try
         {
             var id = _selectedLibrary.Id;
@@ -101,7 +111,10 @@ public partial class LibraryManagementDialog : Window
 
     private async Task<bool> ConfirmUnsavedNameAsync()
     {
-        if (!_nameDirty) return true;
+        if (!_nameDirty)
+        {
+            return true;
+        }
 
         var dialog = new ConfirmationDialog(
             "未保存のライブラリ名",
@@ -115,23 +128,40 @@ public partial class LibraryManagementDialog : Window
         dialog.ShowDialog();
 
         if (dialog.SelectedResult == AppDialogResult.Tertiary || dialog.SelectedResult == AppDialogResult.None)
+        {
             return false;
+        }
+
         if (dialog.SelectedResult == AppDialogResult.Primary)
+        {
             return await SaveNameAsync();
+        }
+
         return true;
     }
 
     private async void NewLibrary_Click(object sender, RoutedEventArgs e)
     {
-        if (!await ConfirmUnsavedNameAsync()) return;
+        if (!await ConfirmUnsavedNameAsync())
+        {
+            return;
+        }
+
         var dialog = new NewLibraryDialog(_service) { Owner = this };
-        if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null) await ReloadAsync(dialog.CreatedLibrary.Id);
+        if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
+        {
+            await ReloadAsync(dialog.CreatedLibrary.Id);
+        }
     }
 
     private async void DeleteLibrary_Click(object sender, RoutedEventArgs e)
     {
         var library = _selectedLibrary;
-        if (library is null) return;
+        if (library is null)
+        {
+            return;
+        }
+
         var summary = await _service.GetDeleteSummaryAsync(library.Id);
 
         var confirmation = new ConfirmationDialog(
@@ -143,7 +173,10 @@ public partial class LibraryManagementDialog : Window
             kind: AppDialogKind.Warning)
         { Owner = this };
         confirmation.ShowDialog();
-        if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+        if (confirmation.SelectedResult != AppDialogResult.Primary)
+        {
+            return;
+        }
 
         await _service.DeleteLibraryAsync(library.Id);
         await ReloadAsync(null);
@@ -152,9 +185,17 @@ public partial class LibraryManagementDialog : Window
     private async void AddRoot_Click(object sender, RoutedEventArgs e)
     {
         var library = _selectedLibrary;
-        if (library is null) return;
+        if (library is null)
+        {
+            return;
+        }
+
         var dialog = new OpenFolderDialog { Title = "追加する対象フォルダを選択", Multiselect = false };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
         try { await _service.AddRootAsync(library.Id, dialog.FolderName); await ReloadAsync(library.Id); }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { StatusText.Text = exception.Message; }
     }
@@ -163,7 +204,11 @@ public partial class LibraryManagementDialog : Window
     {
         var library = _selectedLibrary;
         var root = RootsListBox.SelectedItem as LibraryRoot;
-        if (library is null || root is null) return;
+        if (library is null || root is null)
+        {
+            return;
+        }
+
         try
         {
             var count = await _service.GetRootTrackCountAsync(root.Id);
@@ -176,7 +221,10 @@ public partial class LibraryManagementDialog : Window
                 kind: AppDialogKind.Warning)
             { Owner = this };
             confirmation.ShowDialog();
-            if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+            if (confirmation.SelectedResult != AppDialogResult.Primary)
+            {
+                return;
+            }
 
             await _service.RemoveRootAsync(library.Id, root.Id);
             await ReloadAsync(library.Id);
@@ -188,14 +236,26 @@ public partial class LibraryManagementDialog : Window
     {
         var library = _selectedLibrary;
         var root = RootsListBox.SelectedItem as LibraryRoot;
-        if (library is null || root is null) return;
+        if (library is null || root is null)
+        {
+            return;
+        }
+
         var picker = new OpenFolderDialog { Title = "新しい保存場所を選択", Multiselect = false };
-        if (picker.ShowDialog(this) != true) return;
+        if (picker.ShowDialog(this) != true)
+        {
+            return;
+        }
+
         try
         {
             var preview = await _service.PreviewRootRemapAsync(library.Id, root.Id, picker.FolderName);
             var confirmation = new RootRemapPreviewDialog(preview) { Owner = this };
-            if (confirmation.ShowDialog() != true) return;
+            if (confirmation.ShowDialog() != true)
+            {
+                return;
+            }
+
             await _service.RemapRootAsync(library.Id, root.Id, picker.FolderName);
             await ReloadAsync(library.Id);
             StatusText.Text = "対象フォルダの保存場所を変更しました。通常のスキャン・分析は自動実行していません。";
@@ -206,7 +266,11 @@ public partial class LibraryManagementDialog : Window
     private void BrowseTrashRoot_Click(object sender, RoutedEventArgs e)
     {
         var picker = new OpenFolderDialog { Title = "ごみ箱フォルダを選択", Multiselect = false };
-        if (picker.ShowDialog(this) != true) return;
+        if (picker.ShowDialog(this) != true)
+        {
+            return;
+        }
+
         SelectedTrashRoot = picker.FolderName;
         TrashRootTextBox.Text = SelectedTrashRoot;
         StatusText.Text = "ごみ箱のパスは閉じるときに保存されます。";
@@ -214,7 +278,10 @@ public partial class LibraryManagementDialog : Window
 
     private async void ManageTracks_Click(object sender, RoutedEventArgs e)
     {
-        if (!await ConfirmUnsavedNameAsync()) return;
+        if (!await ConfirmUnsavedNameAsync())
+        {
+            return;
+        }
 
         // Track管理はGlobal DB状態を変更するため、現在のLibrary一覧をSnapshotとして渡し、
         // Dialogを閉じた後にLibrary表示も読み直してMembership削除等を反映する。
@@ -229,7 +296,11 @@ public partial class LibraryManagementDialog : Window
 
     private async void Close_Click(object sender, RoutedEventArgs e)
     {
-        if (!await ConfirmUnsavedNameAsync()) return;
+        if (!await ConfirmUnsavedNameAsync())
+        {
+            return;
+        }
+
         _allowClose = true;
         DialogResult = true;
     }
@@ -247,7 +318,11 @@ public partial class LibraryManagementDialog : Window
     {
         try
         {
-            if (!await ConfirmUnsavedNameAsync()) return;
+            if (!await ConfirmUnsavedNameAsync())
+            {
+                return;
+            }
+
             _allowClose = true;
             Close();
         }

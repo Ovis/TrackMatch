@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;

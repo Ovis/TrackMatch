@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Classification;
+﻿namespace TrackMatch.Core.Classification;
 
 /// <summary>
 /// 2音源間の音響的な関係を表す候補分類。

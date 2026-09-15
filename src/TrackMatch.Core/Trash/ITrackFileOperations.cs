@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Trash;
+﻿namespace TrackMatch.Core.Trash;
 
 /// <summary>
 /// Reject Trackのファイル操作を抽象化する。

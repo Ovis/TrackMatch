@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Models;
+﻿namespace TrackMatch.Core.Models;
 
 /// <summary>
 /// 音源ファイルから取得した、比較処理と人手レビューの基礎となるメタデータを表す。

@@ -1,4 +1,4 @@
-using TrackMatch.Core.Candidates;
+﻿using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Persistence;
 using Xunit;

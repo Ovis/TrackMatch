@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Persistence;
+﻿namespace TrackMatch.Core.Persistence;
 
 /// <summary>
 /// ライブラリ走査1回分の結果件数を表す。

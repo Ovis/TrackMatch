@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using TrackMatch.Application;
 using TrackMatch.Core.Libraries;

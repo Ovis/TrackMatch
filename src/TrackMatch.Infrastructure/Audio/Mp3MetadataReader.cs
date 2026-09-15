@@ -1,4 +1,4 @@
-using TagLib;
+﻿using TagLib;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Scanning;
 

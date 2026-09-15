@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Quality;
@@ -61,7 +61,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     {
         ThrowIfDisposed();
         var selected = _viewModel.SelectedCandidate;
-        if (selected is null) return;
+        if (selected is null)
+        {
+            return;
+        }
 
         await StopAndWaitAsync();
         var generation = ++_sessionGeneration;
@@ -79,7 +82,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         try
         {
             var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
-            if (IsCurrent(generation)) _trackCoordinator = coordinator;
+            if (IsCurrent(generation))
+            {
+                _trackCoordinator = coordinator;
+            }
+
             var progress = new Progress<TrackQualityAnalysisProgress>(value =>
                 SetStatusIfCurrent(generation, $"音質解析中 {value.CompletedCount} / {value.TotalCount}"));
             await coordinator.RunAsync(
@@ -100,13 +107,24 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         }
         finally
         {
-            if (IsCurrent(generation)) _trackCoordinator = null;
-            if (ReferenceEquals(_cancellation, cancellation)) _cancellation = null;
+            if (IsCurrent(generation))
+            {
+                _trackCoordinator = null;
+            }
+
+            if (ReferenceEquals(_cancellation, cancellation))
+            {
+                _cancellation = null;
+            }
+
             cancellation.Dispose();
         }
 
         // 別のRestart/Stopでこの手動解析が旧世代になった場合、その新しい状態を上書きして再起動しない。
-        if (!_disposed && IsCurrent(generation)) Restart();
+        if (!_disposed && IsCurrent(generation))
+        {
+            Restart();
+        }
     }
 
     /// <summary>実行中の品質解析へキャンセルを要求する。アプリ終了時は完了待ちを行わない。</summary>
@@ -120,7 +138,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
         Stop();
@@ -147,7 +169,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var candidateService = CreateCandidateService(trackRepository, candidateRepository);
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
-        if (IsCurrent(generation)) _trackCoordinator = coordinator;
+        if (IsCurrent(generation))
+        {
+            _trackCoordinator = coordinator;
+        }
+
         var requests = TrackQualityAnalysisRequestFactory.FromCandidates(rows);
         var progress = new Progress<TrackQualityAnalysisProgress>(value =>
             SetStatusIfCurrent(generation, $"音質解析中 {value.CompletedCount} / {value.TotalCount}"));
@@ -174,7 +200,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         }
 
         await trackTask;
-        if (IsCurrent(generation)) _trackCoordinator = null;
+        if (IsCurrent(generation))
+        {
+            _trackCoordinator = null;
+        }
 
         var orderedRows = OrderSelectedFirst(rows);
         var completed = 0;
@@ -233,7 +262,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     private IReadOnlyList<CandidateReviewReportRow> OrderSelectedFirst(IReadOnlyList<CandidateReviewReportRow> rows)
     {
         var selected = _viewModel.SelectedCandidate;
-        if (selected is null) return rows;
+        if (selected is null)
+        {
+            return rows;
+        }
+
         return rows.OrderByDescending(row => row.TrackIdA == selected.TrackIdA && row.TrackIdB == selected.TrackIdB).ToArray();
     }
 
@@ -265,7 +298,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     {
         var task = _sessionTask;
         Stop();
-        if (task is null) return;
+        if (task is null)
+        {
+            return;
+        }
+
         try
         {
             await task;
@@ -296,7 +333,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             {
                 _cancellation = null;
                 _sessionTask = null;
-                if (IsCurrent(generation)) _trackCoordinator = null;
+                if (IsCurrent(generation))
+                {
+                    _trackCoordinator = null;
+                }
             }
 
             // Restart後に旧CancellationTokenSourceがCurrentでなくなっていても、所有者はこのObserverなので必ず解放する。
@@ -322,7 +362,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     private void SetStatusIfCurrent(int generation, string status)
     {
-        if (IsCurrent(generation)) _setStatusText(status);
+        if (IsCurrent(generation))
+        {
+            _setStatusText(status);
+        }
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);

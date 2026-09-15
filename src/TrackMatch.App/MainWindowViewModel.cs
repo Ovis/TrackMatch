@@ -1,15 +1,12 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using TrackMatch.App.Playback;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
-using TrackMatch.Core.Playback;
 using TrackMatch.Core.Scanning;
 using TrackMatch.Core.Trash;
 using TrackMatch.Infrastructure.Persistence;
@@ -60,7 +57,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         get => _selectedLibrary;
         set
         {
-            if (ReferenceEquals(_selectedLibrary, value) || _selectedLibrary?.Id == value?.Id) return;
+            if (ReferenceEquals(_selectedLibrary, value) || _selectedLibrary?.Id == value?.Id)
+            {
+                return;
+            }
+
             RememberCurrentCandidate();
             StopPlayback();
             _selectedLibrary = value;
@@ -75,7 +76,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         get => _selectedCandidate;
         set
         {
-            if (ReferenceEquals(_selectedCandidate, value)) return;
+            if (ReferenceEquals(_selectedCandidate, value))
+            {
+                return;
+            }
+
             _selectedCandidate = value;
             Playback.LoadCandidate(value);
             OnPropertyChanged();
@@ -90,13 +95,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public CandidateReviewListMode CandidateListMode
     {
         get => _candidateListMode;
-        set { if (_candidateListMode == value) return; _candidateListMode = value; OnPropertyChanged(); ApplyCandidateFilter(); }
+        set { if (_candidateListMode == value) { return; } _candidateListMode = value; OnPropertyChanged(); ApplyCandidateFilter(); }
     }
 
     public string TrashRoot
     {
         get => _trashRoot;
-        private set { if (_trashRoot == value) return; _trashRoot = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanProcessTrash)); }
+        private set { if (_trashRoot == value) { return; } _trashRoot = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanProcessTrash)); }
     }
 
     public int SimilarityDisplayLowerBoundPercent
@@ -105,7 +110,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         set
         {
             var normalized = Math.Clamp(value, 0, 100);
-            if (_similarityDisplayLowerBoundPercent == normalized) return;
+            if (_similarityDisplayLowerBoundPercent == normalized)
+            {
+                return;
+            }
+
             _similarityDisplayLowerBoundPercent = normalized;
             OnPropertyChanged();
             NotifyCandidateCountsChanged();
@@ -130,9 +139,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
     public string AnalysisStatusText { get => _analysisStatusText; private set => SetField(ref _analysisStatusText, value); }
     public string TrashStatusText { get => _trashStatusText; private set => SetField(ref _trashStatusText, value); }
-    public bool IsLoading { get => _isLoading; private set { if (SetField(ref _isLoading, value)) NotifyCommandStateChanged(); } }
-    public bool IsAnalyzing { get => _isAnalyzing; private set { if (SetField(ref _isAnalyzing, value)) NotifyCommandStateChanged(); } }
-    public bool IsCancellingAnalysis { get => _isCancellingAnalysis; private set { if (SetField(ref _isCancellingAnalysis, value)) OnPropertyChanged(nameof(CanCancelAnalysis)); } }
+    public bool IsLoading { get => _isLoading; private set { if (SetField(ref _isLoading, value)) { NotifyCommandStateChanged(); } } }
+    public bool IsAnalyzing { get => _isAnalyzing; private set { if (SetField(ref _isAnalyzing, value)) { NotifyCommandStateChanged(); } } }
+    public bool IsCancellingAnalysis { get => _isCancellingAnalysis; private set { if (SetField(ref _isCancellingAnalysis, value)) { OnPropertyChanged(nameof(CanCancelAnalysis)); } } }
     public int AnalysisErrorCount => _analysisErrors.Count;
     public IReadOnlyList<IncrementalScanError> AnalysisErrors => _analysisErrors;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -152,7 +161,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
             var management = new LibraryManagementService(DatabasePath, TrashRoot);
             var libraries = await management.GetLibrariesAsync();
-            Libraries.Clear(); foreach (var library in libraries) Libraries.Add(library);
+            Libraries.Clear(); foreach (var library in libraries)
+            {
+                Libraries.Add(library);
+            }
+
             var selectedId = preferredLibraryId ?? SelectedLibrary?.Id ?? _settings.LastSelectedLibraryId;
             SelectedLibrary = libraries.FirstOrDefault(item => item.Id == selectedId) ?? libraries.FirstOrDefault();
             await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync();
@@ -166,7 +179,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     public async Task SelectLibraryAsync(Library? library)
     {
-        if (IsAnalyzing || IsLoading) return;
+        if (IsAnalyzing || IsLoading)
+        {
+            return;
+        }
+
         SelectedLibrary = library; IsLoading = true;
         try { await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync(); }
         finally { IsLoading = false; }
@@ -193,7 +210,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
             var result = await workflow.RunAsync(library.Id, progress, _analysisCancellation.Token);
             var summaries = result.Scan.Roots.Select(item => item.Summary).ToArray();
-            foreach (var error in result.Scan.Roots.SelectMany(item => item.Errors)) _analysisErrors.Add(error);
+            foreach (var error in result.Scan.Roots.SelectMany(item => item.Errors))
+            {
+                _analysisErrors.Add(error);
+            }
+
             AnalysisStatusText = FormatAnalysisSummary("完了", summaries);
         }
         catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
@@ -207,7 +228,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     public void CancelAnalysis()
     {
-        if (!CanCancelAnalysis || _analysisCancellation is null) return;
+        if (!CanCancelAnalysis || _analysisCancellation is null)
+        {
+            return;
+        }
+
         IsCancellingAnalysis = true; AnalysisStatusText = "キャンセル中..."; _analysisCancellation.Cancel();
     }
 
@@ -219,8 +244,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>現在のレビューを削除し、候補を未レビューへ戻す。</summary>
     public async Task ClearReviewAsync()
     {
-        var selected = SelectedCandidate; if (selected is null || !CanClearReview) return;
-        var library = SelectedLibrary; if (library is null) return;
+        var selected = SelectedCandidate; if (selected is null || !CanClearReview)
+        {
+            return;
+        }
+
+        var library = SelectedLibrary; if (library is null)
+        {
+            return;
+        }
+
         StopPlayback(); IsLoading = true;
         try
         {
@@ -273,7 +306,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true; _analysisCancellation?.Cancel(); _analysisCancellation?.Dispose(); Playback.Dispose();
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true; _analysisCancellation?.Cancel(); _analysisCancellation?.Dispose(); Playback.Dispose();
     }
 
     private IEnumerable<CandidateReviewItemViewModel> ReviewTargetCandidates
@@ -306,19 +344,46 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             CandidateReviewListMode.ReReviewRecommended => item.IsReReviewRecommended,
             _ => true,
         }).ToArray();
-        if (previous is not null && !visible.Any(item => SameCandidate(item, previous))) StopPlayback();
-        Candidates.Clear(); foreach (var item in visible) Candidates.Add(item);
+        if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
+        {
+            StopPlayback();
+        }
+
+        Candidates.Clear(); foreach (var item in visible)
+        {
+            Candidates.Add(item);
+        }
+
         CandidateReviewItemViewModel? selection = null;
-        if (library is not null && _sessionSelections.TryGetValue(library.Id, out var remembered)) selection = Candidates.FirstOrDefault(item => item.TrackIdA == remembered.TrackIdA && item.TrackIdB == remembered.TrackIdB);
-        if (selection is null && previous is not null) selection = Candidates.FirstOrDefault(item => SameCandidate(item, previous));
+        if (library is not null && _sessionSelections.TryGetValue(library.Id, out var remembered))
+        {
+            selection = Candidates.FirstOrDefault(item => item.TrackIdA == remembered.TrackIdA && item.TrackIdB == remembered.TrackIdB);
+        }
+
+        if (selection is null && previous is not null)
+        {
+            selection = Candidates.FirstOrDefault(item => SameCandidate(item, previous));
+        }
+
         SelectedCandidate = selection ?? Candidates.FirstOrDefault();
-        if (library is not null) StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {UnreviewedCount}件";
+        if (library is not null)
+        {
+            StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {UnreviewedCount}件";
+        }
     }
 
     private async Task SaveReviewAsync(CandidateReviewDecision decision, long? keepTrackId)
     {
-        var selected = SelectedCandidate; if (selected is null || !CanReview) return;
-        var library = SelectedLibrary; if (library is null) return;
+        var selected = SelectedCandidate; if (selected is null || !CanReview)
+        {
+            return;
+        }
+
+        var library = SelectedLibrary; if (library is null)
+        {
+            return;
+        }
+
         StopPlayback(); IsLoading = true;
         try
         {
@@ -338,7 +403,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private async Task ReloadCandidatesPreservingPairAsync(long trackIdA, long trackIdB)
     {
-        var library = SelectedLibrary; if (library is null) return;
+        var library = SelectedLibrary; if (library is null)
+        {
+            return;
+        }
+
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(library.Id);
         _allCandidates.Clear(); _allCandidates.AddRange(rows.Select(row => new CandidateReviewItemViewModel(row)));
@@ -356,7 +425,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private async Task SaveSettingsSafeAsync()
     {
-        if (!_settingsLoaded) return;
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
         _settings = new TrackMatchAppSettings(SelectedLibrary?.Id, SimilarityDisplayLowerBoundPercent, string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot);
         try { await _settingsStore.SaveAsync(_settings); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { StatusText = $"設定保存失敗: {exception.Message}"; }
@@ -385,7 +458,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void RememberCurrentCandidate()
     {
-        if (_selectedLibrary is not null && _selectedCandidate is not null) _sessionSelections[_selectedLibrary.Id] = (_selectedCandidate.TrackIdA, _selectedCandidate.TrackIdB);
+        if (_selectedLibrary is not null && _selectedCandidate is not null)
+        {
+            _sessionSelections[_selectedLibrary.Id] = (_selectedCandidate.TrackIdA, _selectedCandidate.TrackIdB);
+        }
     }
 
     private void NotifyCommandStateChanged()
@@ -395,7 +471,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return false; field = value; OnPropertyChanged(propertyName); return true;
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value; OnPropertyChanged(propertyName); return true;
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Duplicates;
+﻿namespace TrackMatch.Core.Duplicates;
 
 /// <summary>
 /// Global ConfirmedDuplicate Graphの連結成分を、指定Libraryへ投影した重複グループを表す。

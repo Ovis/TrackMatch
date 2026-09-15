@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Quality;
+﻿namespace TrackMatch.Core.Quality;
 
 /// <summary>
 /// Track単体解析とCandidate相対比較から、品質の優劣を断定せず確認ポイントだけを抽出する。

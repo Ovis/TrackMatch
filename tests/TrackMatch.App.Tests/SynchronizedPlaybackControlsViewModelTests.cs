@@ -1,5 +1,4 @@
-using TrackMatch.App;
-using TrackMatch.App.Playback;
+﻿using TrackMatch.App.Playback;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Playback;
 using Xunit;

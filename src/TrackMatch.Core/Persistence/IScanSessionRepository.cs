@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Persistence;
+﻿namespace TrackMatch.Core.Persistence;
 
 /// <summary>
 /// ライブラリ走査セッションの永続化境界を定義する。

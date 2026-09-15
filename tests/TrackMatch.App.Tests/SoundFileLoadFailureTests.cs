@@ -1,5 +1,4 @@
-using NAudio.SoundFile;
-using TrackMatch.App;
+﻿using NAudio.SoundFile;
 using TrackMatch.App.Playback;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Playback;

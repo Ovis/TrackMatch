@@ -1,4 +1,4 @@
-namespace TrackMatch.App.Settings;
+﻿namespace TrackMatch.App.Settings;
 
 /// <summary>
 /// TrackMatchのユーザーUI設定を保持する。

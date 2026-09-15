@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Candidates;
+﻿namespace TrackMatch.Core.Candidates;
 
 /// <summary>
 /// Chromaprintのchromaprint_hash_fingerprintと同じ多数決方式の32-bit SimHashを計算する。

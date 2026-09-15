@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -49,8 +49,15 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
     public DuplicateGroupDetailsWindow(string databasePath, long libraryId, long groupId, string trashRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        if (libraryId <= 0) throw new ArgumentOutOfRangeException(nameof(libraryId));
-        if (groupId <= 0) throw new ArgumentOutOfRangeException(nameof(groupId));
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        if (groupId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(groupId));
+        }
 
         _databasePath = databasePath;
         _libraryId = libraryId;
@@ -68,7 +75,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         get => _groupTitle;
         private set
         {
-            if (_groupTitle == value) return;
+            if (_groupTitle == value)
+            {
+                return;
+            }
+
             _groupTitle = value;
             OnPropertyChanged();
         }
@@ -79,7 +90,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         get => _fileCountText;
         private set
         {
-            if (_fileCountText == value) return;
+            if (_fileCountText == value)
+            {
+                return;
+            }
+
             _fileCountText = value;
             OnPropertyChanged();
         }
@@ -90,7 +105,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         get => _keepStateText;
         private set
         {
-            if (_keepStateText == value) return;
+            if (_keepStateText == value)
+            {
+                return;
+            }
+
             _keepStateText = value;
             OnPropertyChanged();
         }
@@ -101,7 +120,11 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         get => _selectedTrack;
         set
         {
-            if (ReferenceEquals(_selectedTrack, value)) return;
+            if (ReferenceEquals(_selectedTrack, value))
+            {
+                return;
+            }
+
             _previewPlayer.Stop();
             _selectedTrack = value;
             OnPropertyChanged();

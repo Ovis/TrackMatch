@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Trash;
+﻿namespace TrackMatch.Core.Trash;
 
 /// <summary>
 /// Library固有Keepから算出したTrash移動結果と、Shared TrackへのGlobal影響を表す。

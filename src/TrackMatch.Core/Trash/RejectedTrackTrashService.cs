@@ -1,4 +1,4 @@
-using TrackMatch.Core.Duplicates;
+﻿using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Trash;

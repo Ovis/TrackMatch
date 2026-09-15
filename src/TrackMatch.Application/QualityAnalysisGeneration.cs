@@ -1,4 +1,4 @@
-namespace TrackMatch.Application;
+﻿namespace TrackMatch.Application;
 
 /// <summary>
 /// 品質解析の非同期世代を識別するため、同一プロセス内で必ず単調増加するUTC時刻を発行する。

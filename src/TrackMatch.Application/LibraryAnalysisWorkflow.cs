@@ -1,5 +1,4 @@
-using TrackMatch.Core.Candidates;
-using TrackMatch.Core.Classification;
+﻿using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;

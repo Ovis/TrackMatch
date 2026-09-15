@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="src/TrackMatch.App/TrackMatch.App.csproj" />
+  <Project Path="src/TrackMatch.Application/TrackMatch.Application.csproj" />
+  <Project Path="src/TrackMatch.Core/TrackMatch.Core.csproj" />
+  <Project Path="src/TrackMatch.Infrastructure/TrackMatch.Infrastructure.csproj" />
+  <Project Path="tests/TrackMatch.App.Tests/TrackMatch.App.Tests.csproj" />
+  <Project Path="tests/TrackMatch.Core.Tests/TrackMatch.Core.Tests.csproj" />
+  <Project Path="tests/TrackMatch.Infrastructure.Tests/TrackMatch.Infrastructure.Tests.csproj" />
+</Solution>

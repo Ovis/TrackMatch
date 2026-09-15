@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Management;
+﻿namespace TrackMatch.Core.Management;
 
 /// <summary>
 /// Global Track管理画面で使用する表示Filterを表す。

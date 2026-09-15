@@ -1,4 +1,4 @@
-using TrackMatch.Core.Playback;
+﻿using TrackMatch.Core.Playback;
 
 namespace TrackMatch.App.Playback;
 

@@ -1,10 +1,10 @@
-using Microsoft.Win32;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using TrackMatch.App.Playback;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
@@ -46,7 +46,9 @@ public partial class MainWindow : Window
             var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
             var dialog = new NewLibraryDialog(service) { Owner = this };
             if (dialog.ShowDialog() == true && dialog.CreatedLibrary is not null)
+            {
                 await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
+            }
         }
     }
 
@@ -59,12 +61,18 @@ public partial class MainWindow : Window
     private void PlaybackTimer_Tick(object? sender, EventArgs e)
     {
         // Slider操作中に50ms周期の再生位置更新を入れるとThumbが旧位置へ戻るため、操作完了まで更新を止める。
-        if (!_isPlaybackSeekPointerActive) _viewModel.Playback.RefreshPosition();
+        if (!_isPlaybackSeekPointerActive)
+        {
+            _viewModel.Playback.RefreshPosition();
+        }
     }
 
     private async void LibraryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LibraryComboBox.SelectedItem is Library library) await _viewModel.SelectLibraryAsync(library);
+        if (LibraryComboBox.SelectedItem is Library library)
+        {
+            await _viewModel.SelectLibraryAsync(library);
+        }
     }
 
     private async void ManageLibraries_Click(object sender, RoutedEventArgs e)
@@ -72,7 +80,8 @@ public partial class MainWindow : Window
         var dialog = new LibraryManagementDialog(
             new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot),
             _viewModel.SelectedLibrary?.Id,
-            _viewModel.TrashRoot) { Owner = this };
+            _viewModel.TrashRoot)
+        { Owner = this };
         dialog.ShowDialog();
         if (!string.Equals(dialog.SelectedTrashRoot, _viewModel.TrashRoot, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(dialog.SelectedTrashRoot))
         {
@@ -99,12 +108,19 @@ public partial class MainWindow : Window
 
     private void ShowAnalysisErrors_Click(object sender, RoutedEventArgs e)
     {
-        if (_viewModel.AnalysisErrors.Count > 0) new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
+        if (_viewModel.AnalysisErrors.Count > 0)
+        {
+            new ScanErrorDialog(_viewModel.AnalysisErrors) { Owner = this }.ShowDialog();
+        }
     }
 
     private void CandidateTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.Source, CandidateTabs)) return;
+        if (!ReferenceEquals(e.Source, CandidateTabs))
+        {
+            return;
+        }
+
         _viewModel.CandidateListMode = CandidateTabs.SelectedIndex switch
         {
             1 => CandidateReviewListMode.Reviewed,
@@ -118,9 +134,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (!await EnsureTrashRootAsync()) return;
+            if (!await EnsureTrashRootAsync())
+            {
+                return;
+            }
+
             var preview = await _viewModel.ProcessTrashAsync(execute: false);
-            if (preview is null) return;
+            if (preview is null)
+            {
+                return;
+            }
 
             if (preview.SharedTrackImpacts.Count > 0)
             {
@@ -175,7 +198,9 @@ public partial class MainWindow : Window
                 collisionDialog.ShowDialog();
 
                 if (collisionDialog.SelectedResult is AppDialogResult.Tertiary or AppDialogResult.None)
+                {
                     return;
+                }
 
                 collisionBehavior = collisionDialog.SelectedResult == AppDialogResult.Primary
                     ? TrashDestinationCollisionBehavior.Rename
@@ -191,7 +216,10 @@ public partial class MainWindow : Window
                 kind: AppDialogKind.Warning)
             { Owner = this };
             confirmation.ShowDialog();
-            if (confirmation.SelectedResult != AppDialogResult.Primary) return;
+            if (confirmation.SelectedResult != AppDialogResult.Primary)
+            {
+                return;
+            }
 
             var result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
             if (result is not null)
@@ -219,9 +247,17 @@ public partial class MainWindow : Window
 
     private async Task<bool> EnsureTrashRootAsync()
     {
-        if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot)) return true;
+        if (!string.IsNullOrWhiteSpace(_viewModel.TrashRoot))
+        {
+            return true;
+        }
+
         var dialog = new OpenFolderDialog { Title = "ごみ箱フォルダを選択", Multiselect = false };
-        if (dialog.ShowDialog(this) != true) return false;
+        if (dialog.ShowDialog(this) != true)
+        {
+            return false;
+        }
+
         await _viewModel.SetTrashRootAsync(dialog.FolderName);
         return true;
     }
@@ -231,13 +267,23 @@ public partial class MainWindow : Window
 
     private void PlaybackSeekSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left) return;
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
         _isPlaybackSeekPointerActive = true;
-        if (IsWithinThumb(e.OriginalSource as DependencyObject)) return;
+        if (IsWithinThumb(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
         // IsMoveToPointEnabledがValueを確定した後、Backgroundの位置更新より先にSeekする。
         Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
         {
-            if (_isPlaybackSeekPointerActive) _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+            if (_isPlaybackSeekPointerActive)
+            {
+                _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+            }
         });
     }
 
@@ -250,13 +296,17 @@ public partial class MainWindow : Window
     private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Left && !PlaybackSeekSlider.IsMouseOver && !PlaybackSeekSlider.IsMouseCaptureWithin)
+        {
             _isPlaybackSeekPointerActive = false;
+        }
     }
 
     private void PlaybackSeekSlider_KeyUp(object sender, KeyEventArgs e)
     {
         if (e.Key is Key.Left or Key.Right or Key.Home or Key.End or Key.PageUp or Key.PageDown)
+        {
             _viewModel.Playback.SeekSeconds(PlaybackSeekSlider.Value);
+        }
     }
 
     private void RelativeOffsetMinus_Click(object sender, RoutedEventArgs e)
@@ -272,7 +322,11 @@ public partial class MainWindow : Window
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is Slider slider) slider.IsMoveToPointEnabled = true;
+            if (child is Slider slider)
+            {
+                slider.IsMoveToPointEnabled = true;
+            }
+
             EnableMoveToPointForSliders(child);
         }
     }
@@ -280,7 +334,13 @@ public partial class MainWindow : Window
     private static bool IsWithinThumb(DependencyObject? source)
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
-            if (current is Thumb) return true;
+        {
+            if (current is Thumb)
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -290,14 +350,22 @@ public partial class MainWindow : Window
     private async void KeepA_Click(object sender, RoutedEventArgs e)
     {
         var selected = _viewModel.SelectedCandidate;
-        if (selected is null) return;
+        if (selected is null)
+        {
+            return;
+        }
+
         await ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync);
     }
 
     private async void KeepB_Click(object sender, RoutedEventArgs e)
     {
         var selected = _viewModel.SelectedCandidate;
-        if (selected is null) return;
+        if (selected is null)
+        {
+            return;
+        }
+
         await ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync);
     }
 
@@ -446,7 +514,10 @@ public partial class MainWindow : Window
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
     {
-        if (!_viewModel.CanClearReview) return;
+        if (!_viewModel.CanClearReview)
+        {
+            return;
+        }
 
         var confirmation = new ConfirmationDialog(
             "レビューを未確定に戻す",
@@ -459,6 +530,8 @@ public partial class MainWindow : Window
         confirmation.ShowDialog();
 
         if (confirmation.SelectedResult == AppDialogResult.Primary)
+        {
             await ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync);
+        }
     }
 }

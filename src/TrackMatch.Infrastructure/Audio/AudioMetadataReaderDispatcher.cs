@@ -1,4 +1,4 @@
-using TrackMatch.Core.Models;
+﻿using TrackMatch.Core.Models;
 using TrackMatch.Core.Scanning;
 
 namespace TrackMatch.Infrastructure.Audio;

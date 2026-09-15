@@ -1,4 +1,4 @@
-namespace TrackMatch.Core.Classification;
+﻿namespace TrackMatch.Core.Classification;
 
 /// <summary>
 /// 音響指標を、校正済みしきい値プロファイルに基づいて分類する。
