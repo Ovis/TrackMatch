@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -495,10 +495,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 主要なレビュー3操作から低頻度操作を分離し、三点リーダーから必要な操作だけ提示する。
+        // レビュー省略Pairは操作不要を基本とし、明示的なGlobal edge化だけを低頻度操作として提示する。
+        var explicitConfirmItem = new MenuItem
+        {
+            Header = "重複として明示確定",
+            IsEnabled = _viewModel.CanExplicitlyConfirmSkippedReview,
+            Visibility = _viewModel.SelectedCandidate?.IsReviewSkipped == true ? Visibility.Visible : Visibility.Collapsed,
+        };
+        explicitConfirmItem.Click += ConfirmSkippedDuplicate_Click;
+
         var clearReviewItem = new MenuItem
         {
-            Header = "レビューを未確定に戻す",
+            Header = "レビュー判定を解除",
             IsEnabled = _viewModel.CanClearReview,
         };
         clearReviewItem.Click += ClearReview_Click;
@@ -508,8 +516,23 @@ public partial class MainWindow : Window
             PlacementTarget = button,
             Placement = PlacementMode.Bottom,
         };
+        if (explicitConfirmItem.Visibility == Visibility.Visible)
+        {
+            menu.Items.Add(explicitConfirmItem);
+        }
         menu.Items.Add(clearReviewItem);
         menu.IsOpen = true;
+    }
+
+    private async void ConfirmSkippedDuplicate_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.CanExplicitlyConfirmSkippedReview)
+        {
+            return;
+        }
+
+        // 明示確定はKeepを変更しない補助操作なので、通常のA/B Keep選択や確認Dialogには流さない。
+        await ExecuteReviewActionAsync(CandidateReviewDecision.ConfirmedDuplicate, _viewModel.ConfirmSkippedDuplicateAsync);
     }
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
@@ -520,10 +543,10 @@ public partial class MainWindow : Window
         }
 
         var confirmation = new ConfirmationDialog(
-            "レビューを未確定に戻す",
-            "この候補を未レビューへ戻しますか？",
-            "現在のレビュー結果を削除します。重複グループは残っているレビューから再計算されます。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
-            "未レビューへ戻す",
+            "レビュー判定を解除",
+            "この候補のレビュー判定を解除しますか？",
+            "現在のHuman Verdictを削除します。重複グループと候補状態は残っている判定から再計算されます。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
+            "レビュー判定を解除",
             "キャンセル",
             kind: AppDialogKind.Warning)
         { Owner = this };
