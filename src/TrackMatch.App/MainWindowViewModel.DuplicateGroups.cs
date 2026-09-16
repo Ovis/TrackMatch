@@ -15,8 +15,20 @@ public sealed partial class MainWindowViewModel
 
     public bool HasDuplicateGroups => DuplicateGroups.Count > 0;
 
-    /// <summary>現在選択中のCandidateに関係する重複グループ表示を再読込する。</summary>
-    public Task RefreshDuplicateGroupsAsync() => LoadDuplicateGroupsForSelectionAsync(SelectedCandidate);
+    /// <summary>
+    /// 重複グループ詳細画面で変更されたKeepをCandidate一覧のレビュー省略状態にも反映して再読込する。
+    /// </summary>
+    public async Task RefreshDuplicateGroupsAsync()
+    {
+        var selected = SelectedCandidate;
+        if (selected is not null)
+        {
+            // レビュー省略はKeepから導出するため、右ペインのGroup表示だけでなくCandidate一覧も同じ最新Projectionから再構築する。
+            await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+        }
+
+        await LoadDuplicateGroupsForSelectionAsync(SelectedCandidate);
+    }
 
     /// <summary>
     /// 指定TrackをKeepにする操作が現在Libraryの既存Keepへ与える影響を確認Dialog向け文面として返す。
