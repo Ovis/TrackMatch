@@ -19,8 +19,11 @@ public sealed record DuplicateGroupTrackViewModel(
     /// <summary>現在のライブラリとの関係を利用者向けに表示する短いラベル。</summary>
     public string ScopeLabel => IsInCurrentLibrary ? "現在のライブラリ" : "現在のライブラリ外";
 
-    /// <summary>一覧上で表示する現在のライブラリでの扱い。</summary>
-    public string DispositionLabel => IsKeep ? "残す" : "未設定";
+    /// <summary>
+    /// 一覧上で表示する現在のライブラリでの扱い。
+    /// Keepが確定しているグループでは非Keepファイルは削除操作の候補になるため、「未設定」ではなく「削除候補」と表示する。
+    /// </summary>
+    public string DispositionLabel => IsKeep ? "残す" : "削除候補";
 
     /// <summary>物理ファイルの存在状態を内部用語を使わず表示する。</summary>
     public string FileStateLabel => IsMissing ? "見つかりません" : "存在";
