@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using TrackMatch.App.Playback;
@@ -87,6 +87,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(CanReview));
             OnPropertyChanged(nameof(CanClearReview));
+            OnPropertyChanged(nameof(CanExplicitlyConfirmSkippedReview));
             RememberCurrentCandidate();
             _ = LoadDuplicateGroupsForSelectionAsync(value);
         }
@@ -124,14 +125,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     }
 
     // タブ件数はDB全体ではなく、現在レビュー対象としている一致度下限を反映する。
-    public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed);
+    // レビュー省略はHuman Verdictではないためレビュー済みに数えず、操作不要なので未レビューにも数えない。
+    public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed && !item.IsReviewSkipped);
     public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed);
-    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReReviewRecommended);
+    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
-    public bool CanReview => HasSelection && !IsAnalyzing;
-    public bool CanClearReview => CanReview && SelectedCandidate?.IsReviewed == true;
+    public bool CanReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewSkipped != true;
+    public bool CanExplicitlyConfirmSkippedReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewSkipped == true;
+    public bool CanClearReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewed == true;
     public bool CanAnalyzeLibrary => SelectedLibrary is not null && !IsLoading && !IsAnalyzing;
     public bool CanCancelAnalysis => IsAnalyzing && !IsCancellingAnalysis;
     public bool CanManageLibraries => !IsLoading && !IsAnalyzing;
@@ -241,7 +244,43 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public Task ConfirmDuplicateKeepAAsync() => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdA);
     public Task ConfirmDuplicateKeepBAsync() => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdB);
 
-    /// <summary>現在のレビューを削除し、候補を未レビューへ戻す。</summary>
+    /// <summary>
+    /// レビュー省略中のPairを、現在のLibrary Keepを変更せず明示的なConfirmedDuplicateとして保存する。
+    /// </summary>
+    public async Task ConfirmSkippedDuplicateAsync()
+    {
+        var selected = SelectedCandidate;
+        var library = SelectedLibrary;
+        if (selected is null || library is null || !CanExplicitlyConfirmSkippedReview)
+        {
+            return;
+        }
+
+        StopPlayback(); IsLoading = true;
+        try
+        {
+            var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+            var reviews = new SqliteCandidateReviewRepository(database);
+            var tracks = new SqliteTrackLookupRepository(database);
+            var groups = new SqliteDuplicateGroupRepository(database);
+            var service = new SkippedPairReviewService(reviews, tracks, groups);
+            try
+            {
+                await service.ConfirmAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
+            }
+            catch
+            {
+                // 表示後にGroup/Keepが変わってCore検証で拒否された場合も、古いレビュー省略表示を残さない。
+                await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+                throw;
+            }
+
+            await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+        }
+        finally { IsLoading = false; }
+    }
+
+    /// <summary>現在のHuman Verdictを解除し、残った判定から候補状態を再計算する。</summary>
     public async Task ClearReviewAsync()
     {
         var selected = SelectedCandidate; if (selected is null || !CanClearReview)
@@ -329,9 +368,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-        var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(library.Id);
-        _allCandidates.AddRange(rows.Select(row => new CandidateReviewItemViewModel(row)));
+        _allCandidates.AddRange(await LoadCandidateItemsAsync(database, library.Id));
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
+    }
+
+    /// <summary>
+    /// Candidate ReportとDuplicate Group Projectionを同じ一覧更新単位で取得し、UI公開前に派生状態を確定する。
+    /// </summary>
+    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsAsync(
+        SqliteDatabase database,
+        long libraryId)
+    {
+        var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId);
+        var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+
+        // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、Library Projectionを一括取得して索引化する。
+        // Group取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
+        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups);
+        return rows
+            .Select(row => new CandidateReviewItemViewModel(
+                row,
+                states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
+            .ToArray();
     }
 
     private void ApplyCandidateFilter()
@@ -339,9 +397,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var library = SelectedLibrary; var previous = SelectedCandidate;
         var visible = ReviewTargetCandidates.Where(item => CandidateListMode switch
         {
-            CandidateReviewListMode.Unreviewed => !item.IsReviewed,
+            CandidateReviewListMode.Unreviewed => !item.IsReviewed && !item.IsReviewSkipped,
             CandidateReviewListMode.Reviewed => item.IsReviewed,
-            CandidateReviewListMode.ReReviewRecommended => item.IsReReviewRecommended,
+            CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && item.IsReReviewRecommended,
             _ => true,
         }).ToArray();
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
@@ -409,8 +467,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-        var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(library.Id);
-        _allCandidates.Clear(); _allCandidates.AddRange(rows.Select(row => new CandidateReviewItemViewModel(row)));
+        var items = await LoadCandidateItemsAsync(database, library.Id);
+        _allCandidates.Clear(); _allCandidates.AddRange(items);
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
         SelectedCandidate = Candidates.FirstOrDefault(item => item.TrackIdA == trackIdA && item.TrackIdB == trackIdB) ?? SelectedCandidate;
     }
@@ -466,7 +524,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void NotifyCommandStateChanged()
     {
-        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
+        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanExplicitlyConfirmSkippedReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
