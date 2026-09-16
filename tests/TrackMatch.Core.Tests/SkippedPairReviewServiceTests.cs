@@ -1,4 +1,4 @@
-using TrackMatch.Core.Candidates;
+﻿using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Persistence;
@@ -31,12 +31,12 @@ public sealed class SkippedPairReviewServiceTests
     public async Task ConfirmAsync_PairContainsKeep_RejectsBeforePersisting()
     {
         var reviews = CreateBaseReviews();
-        var groups = new FakeGroupRepository(keepTrackId: 1);
+        var groups = new FakeGroupRepository(keepTrackId: 2);
         var service = new SkippedPairReviewService(reviews, new FakeTrackRepository(), groups);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ConfirmAsync(
             10,
-            CandidatePairKey.Create(1, 2),
+            CandidatePairKey.Create(2, 3),
             TestContext.Current.CancellationToken));
 
         Assert.Equal(2, (await reviews.GetAllAsync(TestContext.Current.CancellationToken)).Count);
