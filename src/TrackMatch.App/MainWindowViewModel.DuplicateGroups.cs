@@ -48,18 +48,19 @@ public sealed partial class MainWindowViewModel
 
         var tracks = new SqliteTrackLookupRepository(database);
         var newKeep = await tracks.GetByIdAsync(keepTrackId);
-        var newKeepTitle = FormatTrackTitle(newKeep, keepTrackId);
+        // 重複候補では曲タイトルが同一であることが多いため、Keep変更確認では識別可能なファイル名を表示する。
+        var newKeepName = FormatTrackFileName(newKeep, keepTrackId);
 
         if (groups.Count == 1)
         {
             var group = groups[0];
             if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
             {
-                return $"この操作により、重複グループ #{group.Id} で残すファイルを「{newKeepTitle}」に設定します。";
+                return $"この操作により、重複グループ #{group.Id} で残すファイルを「{newKeepName}」に設定します。";
             }
 
             var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
-            return $"この操作により、重複グループ #{group.Id} の残すファイルが「{FormatTrackTitle(currentKeep, group.KeepTrackId.Value)}」から「{newKeepTitle}」に変更されます。";
+            return $"この操作により、重複グループ #{group.Id} の残すファイルが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{newKeepName}」に変更されます。";
         }
 
         var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
@@ -158,5 +159,17 @@ public sealed partial class MainWindowViewModel
         return string.IsNullOrWhiteSpace(track.Metadata.Title)
             ? Path.GetFileName(track.Metadata.Path)
             : track.Metadata.Title;
+    }
+
+    /// <summary>Keep変更確認でTrackを一意に識別しやすいファイル名を返す。</summary>
+    private static string FormatTrackFileName(StoredTrack? track, long trackId)
+    {
+        if (track is null)
+        {
+            return $"Track #{trackId}";
+        }
+
+        var fileName = Path.GetFileName(track.Metadata.Path);
+        return string.IsNullOrWhiteSpace(fileName) ? $"Track #{trackId}" : fileName;
     }
 }
