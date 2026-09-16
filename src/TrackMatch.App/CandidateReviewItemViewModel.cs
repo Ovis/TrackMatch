@@ -10,15 +10,21 @@ public sealed partial class CandidateReviewItemViewModel
 {
     private readonly CandidateReviewPresentationState _presentationState;
 
+    /// <summary>Candidate Reportから通常の表示状態でViewModelを生成する。</summary>
+    public CandidateReviewItemViewModel(CandidateReviewReportRow row)
+        : this(row, CandidateReviewPresentationState.Default)
+    {
+    }
+
     /// <summary>
     /// Candidate Reportと現在の派生表示状態からViewModelを生成する。
     /// </summary>
     internal CandidateReviewItemViewModel(
         CandidateReviewReportRow row,
-        CandidateReviewPresentationState? presentationState = null)
+        CandidateReviewPresentationState presentationState)
     {
         Row = row;
-        _presentationState = presentationState ?? CandidateReviewPresentationState.Default;
+        _presentationState = presentationState;
     }
 
     public CandidateReviewReportRow Row { get; }
