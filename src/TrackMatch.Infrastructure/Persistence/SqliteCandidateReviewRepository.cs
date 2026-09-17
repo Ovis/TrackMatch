@@ -20,35 +20,17 @@ public sealed class SqliteCandidateReviewRepository(
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
-            """
-            SELECT TrackIdA, TrackIdB, Decision, Note, SourceLibraryId,
-                   SourceLibraryNameSnapshot, ReviewedAtUtcTicks
-            FROM CandidateReviews
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
-            """,
-            new { review.Pair.TrackIdA, review.Pair.TrackIdB },
-            transaction,
-            cancellationToken: cancellationToken));
+        var existing = await GetCurrentAsync(connection, transaction, review.Pair, cancellationToken);
         if (existing is not null)
         {
-            await ArchiveAsync(
-                connection,
-                transaction,
-                existing,
-                changeKind: "UserChanged",
-                invalidationReason: null,
-                cancellationToken);
+            await ArchiveAsync(connection, transaction, existing, "UserChanged", null, cancellationToken);
         }
 
         string? sourceLibraryNameSnapshot = null;
         if (sourceLibraryId is { } sourceId)
         {
             sourceLibraryNameSnapshot = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
-                "SELECT Name FROM Libraries WHERE Id = @LibraryId;",
-                new { LibraryId = sourceId },
-                transaction,
+                "SELECT Name FROM Libraries WHERE Id = @LibraryId;", new { LibraryId = sourceId }, transaction,
                 cancellationToken: cancellationToken));
             if (sourceLibraryNameSnapshot is null)
             {
@@ -56,38 +38,34 @@ public sealed class SqliteCandidateReviewRepository(
             }
         }
 
-        const string reviewSql = """
+        const string sql = """
             INSERT INTO CandidateReviews (
-                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot, ReviewedAtUtcTicks)
-            VALUES (@TrackIdA, @TrackIdB, @Decision, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot, @ReviewedAtUtcTicks)
+                TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot, ReviewedAtUtcTicks)
+            VALUES (@TrackIdA, @TrackIdB, @Decision, @PreferredTrackId, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot, @ReviewedAtUtcTicks)
             ON CONFLICT(TrackIdA, TrackIdB) DO UPDATE SET
                 Decision = excluded.Decision,
+                PreferredTrackId = excluded.PreferredTrackId,
                 Note = excluded.Note,
                 SourceLibraryId = excluded.SourceLibraryId,
                 SourceLibraryNameSnapshot = excluded.SourceLibraryNameSnapshot,
                 ReviewedAtUtcTicks = excluded.ReviewedAtUtcTicks;
             """;
-
-        var parameters = new
+        await connection.ExecuteAsync(new CommandDefinition(sql, new
         {
             review.Pair.TrackIdA,
             review.Pair.TrackIdB,
             Decision = review.Decision.ToString(),
+            review.PreferredTrackId,
             review.Note,
             SourceLibraryId = sourceLibraryId,
             SourceLibraryNameSnapshot = sourceLibraryNameSnapshot,
             ReviewedAtUtcTicks = DateTime.UtcNow.Ticks,
-        };
-
-        await connection.ExecuteAsync(new CommandDefinition(reviewSql, parameters, transaction, cancellationToken: cancellationToken));
+        }, transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public Task SaveAsync(
-        CandidateReview review,
-        long sourceLibraryId,
-        CancellationToken cancellationToken = default)
+    public Task SaveAsync(CandidateReview review, long sourceLibraryId, CancellationToken cancellationToken = default)
         => new SqliteCandidateReviewRepository(database, sourceLibraryId).SaveAsync(review, cancellationToken);
 
     /// <inheritdoc />
@@ -96,52 +74,30 @@ public sealed class SqliteCandidateReviewRepository(
         ValidateSourceLibraryId();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        var existing = await connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
-            """
-            SELECT TrackIdA, TrackIdB, Decision, Note, SourceLibraryId,
-                   SourceLibraryNameSnapshot, ReviewedAtUtcTicks
-            FROM CandidateReviews
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
-            """,
-            new { pair.TrackIdA, pair.TrackIdB },
-            transaction,
-            cancellationToken: cancellationToken));
+        var existing = await GetCurrentAsync(connection, transaction, pair, cancellationToken);
         if (existing is not null)
         {
-            await ArchiveAsync(
-                connection,
-                transaction,
-                existing,
-                changeKind: "UserCleared",
-                invalidationReason: null,
-                cancellationToken);
+            await ArchiveAsync(connection, transaction, existing, "UserCleared", null, cancellationToken);
         }
 
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateReviews WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
-            new { pair.TrackIdA, pair.TrackIdB },
-            transaction,
-            cancellationToken: cancellationToken));
+            new { pair.TrackIdA, pair.TrackIdB }, transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public Task DeleteAsync(
-        CandidatePairKey pair,
-        long sourceLibraryId,
-        CancellationToken cancellationToken = default)
+    public Task DeleteAsync(CandidatePairKey pair, long sourceLibraryId, CancellationToken cancellationToken = default)
         => new SqliteCandidateReviewRepository(database, sourceLibraryId).DeleteAsync(pair, cancellationToken);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         const string sql = """
-            SELECT TrackIdA, TrackIdB, Decision, Note
+            SELECT TrackIdA, TrackIdB, Decision, PreferredTrackId, Note
             FROM CandidateReviews
             ORDER BY TrackIdA, TrackIdB;
             """;
-
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReviewRow>(new CommandDefinition(sql, cancellationToken: cancellationToken));
         return rows.Select(ToReview).ToArray();
@@ -156,6 +112,20 @@ public sealed class SqliteCandidateReviewRepository(
         return rows.Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)).ToHashSet();
     }
 
+    private static Task<CurrentReviewRow?> GetCurrentAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        CandidatePairKey pair,
+        CancellationToken cancellationToken)
+        => connection.QuerySingleOrDefaultAsync<CurrentReviewRow>(new CommandDefinition(
+            """
+            SELECT TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId,
+                   SourceLibraryNameSnapshot, ReviewedAtUtcTicks
+            FROM CandidateReviews
+            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;
+            """,
+            new { pair.TrackIdA, pair.TrackIdB }, transaction, cancellationToken: cancellationToken));
+
     private static async Task ArchiveAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
@@ -167,10 +137,10 @@ public sealed class SqliteCandidateReviewRepository(
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO CandidateReviewHistory (
-                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot,
+                TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot,
                 ChangedAtUtcTicks, ChangeKind, InvalidationReason)
             VALUES (
-                @TrackIdA, @TrackIdB, @Decision, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot,
+                @TrackIdA, @TrackIdB, @Decision, @PreferredTrackId, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot,
                 @ChangedAtUtcTicks, @ChangeKind, @InvalidationReason);
             """,
             new
@@ -178,15 +148,14 @@ public sealed class SqliteCandidateReviewRepository(
                 current.TrackIdA,
                 current.TrackIdB,
                 current.Decision,
+                current.PreferredTrackId,
                 current.Note,
                 current.SourceLibraryId,
                 current.SourceLibraryNameSnapshot,
                 ChangedAtUtcTicks = DateTime.UtcNow.Ticks,
                 ChangeKind = changeKind,
                 InvalidationReason = invalidationReason,
-            },
-            transaction,
-            cancellationToken: cancellationToken));
+            }, transaction, cancellationToken: cancellationToken));
     }
 
     private void ValidateSourceLibraryId()
@@ -204,17 +173,19 @@ public sealed class SqliteCandidateReviewRepository(
             throw new InvalidDataException($"未知の候補レビュー判定です: {row.Decision}");
         }
 
-        var review = new CandidateReview(CandidatePairKey.Create(row.TrackIdA, row.TrackIdB), decision, row.Note);
+        var review = new CandidateReview(
+            CandidatePairKey.Create(row.TrackIdA, row.TrackIdB), decision, row.PreferredTrackId, row.Note);
         review.Validate();
         return review;
     }
 
     private sealed record ReviewPairRow(long TrackIdA, long TrackIdB);
-    private sealed record ReviewRow(long TrackIdA, long TrackIdB, string Decision, string? Note);
+    private sealed record ReviewRow(long TrackIdA, long TrackIdB, string Decision, long? PreferredTrackId, string? Note);
     private sealed record CurrentReviewRow(
         long TrackIdA,
         long TrackIdB,
         string Decision,
+        long? PreferredTrackId,
         string? Note,
         long? SourceLibraryId,
         string? SourceLibraryNameSnapshot,
