@@ -13,9 +13,7 @@ public sealed class DuplicateGroupPlannerTests
     public void Build_CreatesGlobalGroupFromConfirmedPair()
     {
         var reviews = new[] { Confirmed(1, 2) };
-
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, []));
-
         Assert.Null(group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2 }, group.TrackIds);
     }
@@ -24,31 +22,18 @@ public sealed class DuplicateGroupPlannerTests
     public void Build_AddingTrackRetainsExistingGroupId()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2]);
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(2, 3),
-        };
-
+        var reviews = new[] { Confirmed(1, 2), Confirmed(2, 3) };
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
-
         Assert.Equal(12, group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
     }
 
     [Fact]
-    public void Build_GlobalVerdictTopologyIsIndependentFromLibraryKeepState()
+    public void Build_GlobalVerdictTopologyIsIndependentFromPreferredTrack()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(2, 3),
-            Confirmed(1, 3),
-        };
-
+        var reviews = new[] { Confirmed(1, 2, 1), Confirmed(2, 3, 3), Confirmed(1, 3, 1) };
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, [existing]));
-
         Assert.Equal(12, group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
     }
@@ -56,20 +41,9 @@ public sealed class DuplicateGroupPlannerTests
     [Fact]
     public void Build_MergesExistingGroupsAndReusesLargestOverlapGroupId()
     {
-        var existing = new[]
-        {
-            new GlobalDuplicateGroup(10, [1, 2]),
-            new GlobalDuplicateGroup(20, [3, 4]),
-        };
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(3, 4),
-            Confirmed(2, 3),
-        };
-
+        var existing = new[] { new GlobalDuplicateGroup(10, [1, 2]), new GlobalDuplicateGroup(20, [3, 4]) };
+        var reviews = new[] { Confirmed(1, 2), Confirmed(3, 4), Confirmed(2, 3) };
         var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, existing));
-
         Assert.Equal(10, group.ExistingGroupId);
         Assert.Equal(new long[] { 1, 2, 3, 4 }, group.TrackIds);
     }
@@ -78,14 +52,8 @@ public sealed class DuplicateGroupPlannerTests
     public void Build_RemovingBridgeReusesExistingIdForOnlyOneSplitComponent()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3]);
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(4, 5),
-        };
-
+        var reviews = new[] { Confirmed(1, 2), Confirmed(4, 5) };
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
-
         Assert.Equal(2, groups.Count);
         var first = Assert.Single(groups, group => group.TrackIds.Contains(1));
         Assert.Equal(12, first.ExistingGroupId);
@@ -99,15 +67,8 @@ public sealed class DuplicateGroupPlannerTests
     public void Build_SplitReusesExistingIdForLargestOverlapComponent()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4, 5]);
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(3, 4),
-            Confirmed(4, 5),
-        };
-
+        var reviews = new[] { Confirmed(1, 2), Confirmed(3, 4), Confirmed(4, 5) };
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
-
         var smaller = Assert.Single(groups, group => group.TrackIds.Contains(1));
         Assert.Null(smaller.ExistingGroupId);
         var larger = Assert.Single(groups, group => group.TrackIds.Contains(3));
@@ -119,34 +80,31 @@ public sealed class DuplicateGroupPlannerTests
     public void Build_SplitComponentWithoutReusableOldIdGetsNewGroup()
     {
         var existing = new GlobalDuplicateGroup(12, [1, 2, 3, 4]);
-        var reviews = new[]
-        {
-            Confirmed(1, 2),
-            Confirmed(3, 4),
-        };
-
+        var reviews = new[] { Confirmed(1, 2), Confirmed(3, 4) };
         var groups = DuplicateGroupPlanner.Build(reviews, [existing]);
-
         Assert.Equal(2, groups.Count);
         Assert.Single(groups, group => group.ExistingGroupId == 12);
         Assert.Single(groups, group => group.ExistingGroupId is null);
     }
 
     [Fact]
-    public void Build_RejectsNotDuplicateInsideTransitiveConfirmedComponent()
+    public void Build_KeepsTopologyWhenNotDuplicateConflictsWithTransitiveConfirmedComponent()
     {
         var reviews = new[]
         {
             Confirmed(1, 2),
             Confirmed(2, 3),
-            new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null, null),
         };
 
-        var exception = Assert.Throws<InvalidOperationException>(() => DuplicateGroupPlanner.Build(reviews, []));
+        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, []));
 
-        Assert.Contains("矛盾", exception.Message);
+        Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
     }
 
-    private static CandidateReview Confirmed(long left, long right)
-        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null);
+    private static CandidateReview Confirmed(long left, long right, long? preferred = null)
+    {
+        var pair = CandidatePairKey.Create(left, right);
+        return new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, preferred ?? pair.TrackIdA, null);
+    }
 }
