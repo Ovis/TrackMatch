@@ -11,75 +11,31 @@ public static class DuplicateGroupPlanner
     /// Current Human Verdict集合からGlobal Duplicate Groupの連結成分を構成する。
     /// </summary>
     /// <remarks>
-    /// KeepはLibrary固有Dispositionなので、このPlannerでは選択しない。既存Group IDは、結合・分割後も
-    /// 一意に引き継げる成分だけへ再利用候補として渡す。
+    /// NotDuplicateとの矛盾はHuman Verdictを拒否せず別のConflict評価で扱う。
+    /// このPlannerは重複Topologyだけを担当し、優劣やKeepを混在させない。
     /// </remarks>
-    public static IReadOnlyList<DuplicateGroupRebuildItem> Build(
-        IReadOnlyCollection<CandidateReview> reviews,
-        IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
+    public static IReadOnlyList<DuplicateGroupRebuildItem> Build(IReadOnlyCollection<CandidateReview> reviews, IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
     {
         ArgumentNullException.ThrowIfNull(reviews);
         ArgumentNullException.ThrowIfNull(existingGroups);
-
-        var confirmed = reviews
-            .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
-            .ToArray();
         var adjacency = new Dictionary<long, HashSet<long>>();
-
-        foreach (var review in confirmed)
+        foreach (var review in reviews.Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate))
         {
             review.Validate();
             AddEdge(adjacency, review.Pair.TrackIdA, review.Pair.TrackIdB);
         }
 
-        var components = BuildComponents(adjacency)
-            .Where(component => component.Count >= 2)
-            .OrderBy(component => component.Min())
-            .ToArray();
-        var componentByTrack = new Dictionary<long, int>();
-        for (var index = 0; index < components.Length; index++)
-        {
-            foreach (var trackId in components[index])
-            {
-                componentByTrack[trackId] = index;
-            }
-        }
-
-        // ConfirmedDuplicateを推移的な同一音源関係として扱うため、同じ連結成分内のNotDuplicateは矛盾する。
-        foreach (var review in reviews.Where(review => review.Decision == CandidateReviewDecision.NotDuplicate))
-        {
-            if (componentByTrack.TryGetValue(review.Pair.TrackIdA, out var componentA)
-                && componentByTrack.TryGetValue(review.Pair.TrackIdB, out var componentB)
-                && componentA == componentB)
-            {
-                throw new InvalidOperationException(
-                    $"Track {review.Pair.TrackIdA} と {review.Pair.TrackIdB} は、別の重複確認を経由すると同じ重複グループになります。既存レビューとの矛盾を解消してください。");
-            }
-        }
-
-        // Split/Merge時のGroup IDは、旧Groupと新ComponentのOverlapが最大になる組合せから優先して割り当てる。
-        // Componentの処理順だけで小さい側へ旧IDが渡るとHistory追跡が不安定になるため、割当を先に全体で決める。
+        var components = BuildComponents(adjacency).Where(component => component.Count >= 2).OrderBy(component => component.Min()).ToArray();
         var assignments = new Dictionary<int, long>();
         var usedGroupIds = new HashSet<long>();
         foreach (var candidate in existingGroups
-                     .SelectMany(group => components.Select((component, index) => new
-                     {
-                         GroupId = group.Id,
-                         ComponentIndex = index,
-                         Overlap = group.TrackIds.Count(component.Contains),
-                         ComponentMin = component.Min(),
-                     }))
+                     .SelectMany(group => components.Select((component, index) => new { GroupId = group.Id, ComponentIndex = index, Overlap = group.TrackIds.Count(component.Contains), ComponentMin = component.Min() }))
                      .Where(candidate => candidate.Overlap > 0)
                      .OrderByDescending(candidate => candidate.Overlap)
                      .ThenBy(candidate => candidate.GroupId)
                      .ThenBy(candidate => candidate.ComponentMin))
         {
-            if (usedGroupIds.Contains(candidate.GroupId)
-                || assignments.ContainsKey(candidate.ComponentIndex))
-            {
-                continue;
-            }
-
+            if (usedGroupIds.Contains(candidate.GroupId) || assignments.ContainsKey(candidate.ComponentIndex)) continue;
             usedGroupIds.Add(candidate.GroupId);
             assignments[candidate.ComponentIndex] = candidate.GroupId;
         }
@@ -88,9 +44,7 @@ public static class DuplicateGroupPlanner
         for (var index = 0; index < components.Length; index++)
         {
             var component = components[index];
-            result.Add(new DuplicateGroupRebuildItem(
-                assignments.GetValueOrDefault(index) is { } groupId && groupId > 0 ? groupId : null,
-                component.Order().ToArray()));
+            result.Add(new DuplicateGroupRebuildItem(assignments.GetValueOrDefault(index) is { } groupId && groupId > 0 ? groupId : null, component.Order().ToArray()));
         }
 
         return result;
@@ -100,28 +54,18 @@ public static class DuplicateGroupPlanner
     {
         var visited = new HashSet<long>();
         var components = new List<HashSet<long>>();
-
         foreach (var start in adjacency.Keys.Order())
         {
-            if (!visited.Add(start))
-            {
-                continue;
-            }
-
+            if (!visited.Add(start)) continue;
             var component = new HashSet<long> { start };
             var queue = new Queue<long>();
             queue.Enqueue(start);
-
             while (queue.Count > 0)
             {
                 var current = queue.Dequeue();
                 foreach (var next in adjacency[current])
                 {
-                    if (!visited.Add(next))
-                    {
-                        continue;
-                    }
-
+                    if (!visited.Add(next)) continue;
                     component.Add(next);
                     queue.Enqueue(next);
                 }
@@ -135,18 +79,8 @@ public static class DuplicateGroupPlanner
 
     private static void AddEdge(IDictionary<long, HashSet<long>> adjacency, long left, long right)
     {
-        if (!adjacency.TryGetValue(left, out var leftEdges))
-        {
-            leftEdges = [];
-            adjacency[left] = leftEdges;
-        }
-
-        if (!adjacency.TryGetValue(right, out var rightEdges))
-        {
-            rightEdges = [];
-            adjacency[right] = rightEdges;
-        }
-
+        if (!adjacency.TryGetValue(left, out var leftEdges)) adjacency[left] = leftEdges = [];
+        if (!adjacency.TryGetValue(right, out var rightEdges)) adjacency[right] = rightEdges = [];
         leftEdges.Add(right);
         rightEdges.Add(left);
     }
