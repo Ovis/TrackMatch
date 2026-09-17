@@ -173,7 +173,7 @@ public partial class MainWindow
             return;
         }
 
-        var action = keep == _viewModel.SelectedCandidate.TrackIdA
+        Func<Task> action = keep == _viewModel.SelectedCandidate.TrackIdA
             ? _viewModel.ConfirmDuplicateKeepAAsync
             : _viewModel.ConfirmDuplicateKeepBAsync;
         await _viewModel.ExecuteReviewWithUndoAsync(() => ConfirmDuplicateWithImpactAsync(keep, action));
