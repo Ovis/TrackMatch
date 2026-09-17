@@ -87,7 +87,19 @@ public sealed class DuplicateGroupService(
     {
         var group = await groupRepository.GetByTrackIdAsync(trackId, libraryId, cancellationToken);
         if (group is null) return;
-        var activeTrackIds = group.ActiveTrackIds.Count > 0 ? group.ActiveTrackIds : group.TrackIds;
+
+        // ProjectionのTrackIdsにはMissing Trackも残り得るため、Keep候補は実際に利用可能なTrackだけから導出する。
+        // Library外のPreferred TrackもGlobal Groupの優劣関係には参加するので、対象集合自体はGlobalTrackIdsを使う。
+        var activeTrackIds = new List<long>(group.GlobalTrackIds.Count);
+        foreach (var groupTrackId in group.GlobalTrackIds)
+        {
+            var track = await trackLookupRepository.GetByIdAsync(groupTrackId, cancellationToken);
+            if (track is not null && !track.IsMissing)
+            {
+                activeTrackIds.Add(groupTrackId);
+            }
+        }
+
         var candidates = PreferenceGraphEvaluator.GetKeepCandidates(reviews, activeTrackIds);
         if (candidates.Count == 1 && group.KeepTrackId != candidates[0])
         {
