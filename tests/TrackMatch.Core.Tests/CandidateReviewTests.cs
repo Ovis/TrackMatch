@@ -13,17 +13,66 @@ public sealed class CandidateReviewTests
         Assert.Equal(new CandidatePairKey(1, 2), CandidatePairKey.Create(2, 1));
     }
 
-    [Theory]
-    [InlineData(CandidateReviewDecision.NotDuplicate)]
-    [InlineData(CandidateReviewDecision.ConfirmedDuplicate)]
-    public void GlobalVerdict_ValidDecisionsDoNotRequireKeepTrack(CandidateReviewDecision decision)
+    [Fact]
+    public void GlobalVerdict_NotDuplicateDoesNotRequirePreferredTrack()
     {
         var review = new CandidateReview(
             CandidatePairKey.Create(1, 2),
-            decision,
+            CandidateReviewDecision.NotDuplicate,
+            null,
             null);
 
         review.Validate();
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void GlobalVerdict_ConfirmedDuplicateRequiresPairMemberAsPreferredTrack(long preferredTrackId)
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            preferredTrackId,
+            null);
+
+        review.Validate();
+    }
+
+    [Fact]
+    public void GlobalVerdict_ConfirmedDuplicateWithoutPreferredTrackIsRejected()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            null,
+            null);
+
+        Assert.Throws<InvalidOperationException>(review.Validate);
+    }
+
+    [Fact]
+    public void GlobalVerdict_ConfirmedDuplicateWithUnrelatedPreferredTrackIsRejected()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            3,
+            null);
+
+        Assert.Throws<InvalidOperationException>(review.Validate);
+    }
+
+    [Fact]
+    public void GlobalVerdict_NotDuplicateWithPreferredTrackIsRejected()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.NotDuplicate,
+            1,
+            null);
+
+        Assert.Throws<InvalidOperationException>(review.Validate);
     }
 
     [Fact]
@@ -32,6 +81,7 @@ public sealed class CandidateReviewTests
         var review = new CandidateReview(
             CandidatePairKey.Create(1, 2),
             (CandidateReviewDecision)999,
+            null,
             null);
 
         Assert.Throws<ArgumentOutOfRangeException>(review.Validate);
