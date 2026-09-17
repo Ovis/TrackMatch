@@ -1,0 +1,33 @@
+﻿using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Duplicates;
+using Xunit;
+
+namespace TrackMatch.Core.Tests;
+
+public sealed class PreferenceGraphEvaluatorTests
+{
+    [Fact]
+    public void GetKeepCandidates_RemovesDirectAndTransitiveInferiors()
+    {
+        var reviews = new[] { Confirmed(1, 2, 1), Confirmed(2, 3, 2) };
+        Assert.Equal([1L], PreferenceGraphEvaluator.GetKeepCandidates(reviews, [1, 2, 3]));
+        Assert.True(PreferenceGraphEvaluator.IsPreferredTransitively(reviews, 1, 3));
+    }
+
+    [Fact]
+    public void GetKeepCandidates_AllowsMultipleTopCandidates()
+    {
+        var reviews = new[] { Confirmed(1, 2, 1), Confirmed(3, 2, 3) };
+        Assert.Equal([1L, 3L], PreferenceGraphEvaluator.GetKeepCandidates(reviews, [1, 2, 3]));
+    }
+
+    [Fact]
+    public void EnsureAcyclic_RejectsTransitiveCycle()
+    {
+        var reviews = new[] { Confirmed(1, 2, 1), Confirmed(2, 3, 2), Confirmed(1, 3, 3) };
+        Assert.Throws<InvalidOperationException>(() => PreferenceGraphEvaluator.EnsureAcyclic(reviews));
+    }
+
+    private static CandidateReview Confirmed(long left, long right, long preferred)
+        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, preferred, null);
+}
