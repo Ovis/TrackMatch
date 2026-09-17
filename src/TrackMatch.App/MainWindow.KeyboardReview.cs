@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Media;
 using TrackMatch.Core.Candidates;
 
 namespace TrackMatch.App;
@@ -26,10 +25,6 @@ public partial class MainWindow
             ButtonBase.ClickEvent,
             new RoutedEventHandler(MainWindow_ReviewButtonClick),
             handledEventsToo: true);
-        EventManager.RegisterClassHandler(
-            typeof(MainWindow),
-            FrameworkElement.LoadedEvent,
-            new RoutedEventHandler(MainWindow_ReviewShortcutLoaded));
     }
 
     private static async void MainWindow_ReviewPreviewKeyDown(object sender, KeyEventArgs e)
@@ -129,31 +124,6 @@ public partial class MainWindow
         }
     }
 
-    private static void MainWindow_ReviewShortcutLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MainWindow window || !ReferenceEquals(e.Source, window))
-        {
-            return;
-        }
-
-        // 操作を覚えなくても発見できるよう、既存ボタンの文言へショートカットだけを追記する。
-        foreach (var button in EnumerateVisualChildren<Button>(window))
-        {
-            if (button.Content is not string label || label.Contains("Ctrl+", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            button.Content = label switch
-            {
-                "重複ではない" => "重複ではない  [Ctrl+1]",
-                "重複 / Aを残す" => "重複 / Aを残す  [Ctrl+2]",
-                "重複 / Bを残す" => "重複 / Bを残す  [Ctrl+3]",
-                _ => button.Content,
-            };
-        }
-    }
-
     private async Task ExecuteKeyboardReviewAsync(CandidateReviewDecision decision, long? keepTrackId)
     {
         if (!_viewModel.CanReview || _viewModel.SelectedCandidate is null)
@@ -212,23 +182,5 @@ public partial class MainWindow
             or Slider
             or ButtonBase
             or MenuItem;
-    }
-
-    private static IEnumerable<T> EnumerateVisualChildren<T>(DependencyObject root)
-        where T : DependencyObject
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-        {
-            var child = VisualTreeHelper.GetChild(root, index);
-            if (child is T match)
-            {
-                yield return match;
-            }
-
-            foreach (var descendant in EnumerateVisualChildren<T>(child))
-            {
-                yield return descendant;
-            }
-        }
     }
 }
