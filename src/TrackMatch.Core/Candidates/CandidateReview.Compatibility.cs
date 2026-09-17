@@ -2,18 +2,13 @@
 
 public sealed partial record CandidateReview
 {
-    /// <summary>
-    /// NotDuplicateを生成する既存呼び出し元との移行互換用コンストラクタ。
-    /// </summary>
+    /// <summary>既存呼び出し元をHuman Verdictモデルへ段階移行する互換コンストラクタ。</summary>
     /// <remarks>
-    /// ConfirmedDuplicateはPreferredTrackIdを失うため、この形式では生成できない。
+    /// ConfirmedDuplicateの旧呼び出しではPair Aを暫定Preferredとする。新規コードはPreferredTrackIdを明示する4引数形式か
+    /// CandidateReviewFactoryを使用する。
     /// </remarks>
     public CandidateReview(CandidatePairKey pair, CandidateReviewDecision decision, string? note)
-        : this(pair, decision, null, note)
+        : this(pair, decision, decision == CandidateReviewDecision.ConfirmedDuplicate ? pair.TrackIdA : null, note)
     {
-        if (decision == CandidateReviewDecision.ConfirmedDuplicate)
-        {
-            throw new InvalidOperationException("ConfirmedDuplicateにはPreferredTrackIdが必要です。");
-        }
     }
 }
