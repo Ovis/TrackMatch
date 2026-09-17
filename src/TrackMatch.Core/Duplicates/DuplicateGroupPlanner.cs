@@ -11,8 +11,8 @@ public static class DuplicateGroupPlanner
     /// Current Human Verdict集合からGlobal Duplicate Groupの連結成分を構成する。
     /// </summary>
     /// <remarks>
-    /// KeepはLibrary固有Dispositionなので、このPlannerでは選択しない。既存Group IDは、結合・分割後も
-    /// 一意に引き継げる成分だけへ再利用候補として渡す。
+    /// NotDuplicateとの矛盾はHuman Verdictの保存自体を拒否せず、派生Group側でConflictとして扱う。
+    /// このPlannerはTopologyだけを構成し、Preferred TrackやConflictの解決は上位層へ委ねる。
     /// </remarks>
     public static IReadOnlyList<DuplicateGroupRebuildItem> Build(
         IReadOnlyCollection<CandidateReview> reviews,
@@ -36,26 +36,6 @@ public static class DuplicateGroupPlanner
             .Where(component => component.Count >= 2)
             .OrderBy(component => component.Min())
             .ToArray();
-        var componentByTrack = new Dictionary<long, int>();
-        for (var index = 0; index < components.Length; index++)
-        {
-            foreach (var trackId in components[index])
-            {
-                componentByTrack[trackId] = index;
-            }
-        }
-
-        // ConfirmedDuplicateを推移的な同一音源関係として扱うため、同じ連結成分内のNotDuplicateは矛盾する。
-        foreach (var review in reviews.Where(review => review.Decision == CandidateReviewDecision.NotDuplicate))
-        {
-            if (componentByTrack.TryGetValue(review.Pair.TrackIdA, out var componentA)
-                && componentByTrack.TryGetValue(review.Pair.TrackIdB, out var componentB)
-                && componentA == componentB)
-            {
-                throw new InvalidOperationException(
-                    $"Track {review.Pair.TrackIdA} と {review.Pair.TrackIdB} は、別の重複確認を経由すると同じ重複グループになります。既存レビューとの矛盾を解消してください。");
-            }
-        }
 
         // Split/Merge時のGroup IDは、旧Groupと新ComponentのOverlapが最大になる組合せから優先して割り当てる。
         // Componentの処理順だけで小さい側へ旧IDが渡るとHistory追跡が不安定になるため、割当を先に全体で決める。
