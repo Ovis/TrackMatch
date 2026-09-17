@@ -71,14 +71,17 @@ public sealed partial class MainWindowViewModel
             {
                 await service.DeleteReviewAsync(snapshot.LibraryId, snapshot.Pair);
             }
+            else if (snapshot.Review.Decision == CandidateReviewDecision.ConfirmedDuplicate
+                && snapshot.KeepTrackId is { } keepTrackId)
+            {
+                await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review, keepTrackId);
+            }
             else if (snapshot.Review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
             {
-                if (snapshot.KeepTrackId is not { } keepTrackId)
-                {
-                    throw new InvalidOperationException("Undo対象の重複判定に操作前Keepが存在しません。");
-                }
-
-                await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review, keepTrackId);
+                // Conflict/UnselectedだったGroupには選ぶべきKeepがない。Global Verdictだけを戻して再同期し、
+                // RepositoryのMerge/Split継承規則にLibrary固有Keep Stateの復元を任せる。
+                await reviews.SaveAsync(snapshot.Review, snapshot.LibraryId);
+                await service.SynchronizeGlobalAsync();
             }
             else
             {
