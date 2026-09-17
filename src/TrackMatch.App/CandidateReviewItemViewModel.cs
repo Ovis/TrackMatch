@@ -6,12 +6,33 @@ namespace TrackMatch.App;
 /// <summary>
 /// 候補一覧と詳細表示に必要な値をUI向けに整形する。
 /// </summary>
-public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRow row)
+public sealed partial class CandidateReviewItemViewModel
 {
-    public CandidateReviewReportRow Row { get; } = row;
+    private readonly CandidateReviewPresentationState _presentationState;
+
+    /// <summary>Candidate Reportから通常の表示状態でViewModelを生成する。</summary>
+    public CandidateReviewItemViewModel(CandidateReviewReportRow row)
+        : this(row, CandidateReviewPresentationState.Default)
+    {
+    }
+
+    /// <summary>
+    /// Candidate Reportと現在の派生表示状態からViewModelを生成する。
+    /// </summary>
+    internal CandidateReviewItemViewModel(
+        CandidateReviewReportRow row,
+        CandidateReviewPresentationState presentationState)
+    {
+        Row = row;
+        _presentationState = presentationState;
+    }
+
+    public CandidateReviewReportRow Row { get; }
     public long TrackIdA => Row.TrackIdA;
     public long TrackIdB => Row.TrackIdB;
     public bool IsReviewed => Row.ReviewDecision is not null;
+    public bool IsReviewSkipped => !IsReviewed && _presentationState.IsReviewSkipped;
+    public string? ReviewSkipReason => IsReviewSkipped ? _presentationState.ReviewSkipReason : null;
     public bool IsReReviewRecommended => Row.ReReviewRecommended;
 
     public string Kind => Row.Kind switch
@@ -28,14 +49,17 @@ public sealed partial class CandidateReviewItemViewModel(CandidateReviewReportRo
         CandidateReviewDecision.NotDuplicate => AppendReReview("重複ではない"),
         // Human VerdictはGlobalだが、どのTrackを残すかはLibrary固有DispositionなのでGlobal Verdict表示には含めない。
         CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複として確認済"),
+        _ when IsReviewSkipped => "レビュー省略",
         _ => "未レビュー",
     };
 
-    public string ReviewOriginText => Row.ReviewDecision is null
-        ? string.Empty
-        : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
-            ? "判定元: 不明"
-            : $"判定元: {Row.ReviewSourceLibraryName}";
+    public string ReviewOriginText => IsReviewSkipped
+        ? ReviewSkipReason ?? string.Empty
+        : Row.ReviewDecision is null
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
+                ? "判定元: 不明"
+                : $"判定元: {Row.ReviewSourceLibraryName}";
 
     public string Reason => Row.Reason ?? "自動判定は未実施";
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);
