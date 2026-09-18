@@ -405,7 +405,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
 
         // Content Changed確定後だけ、対象Trackに直接関係するVerdictとContent依存解析を同一Transactionで無効化する。
-        await ArchiveAndInvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
+        await InvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
             "UPDATE Tracks SET ContentVerificationStatus = 'ReevaluationPending' WHERE Id = @TrackId;",
             new { TrackId = trackId },
@@ -528,27 +528,12 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static async Task ArchiveAndInvalidateTrackContentAsync(
+    private static async Task InvalidateTrackContentAsync(
         SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
         long trackId,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow.Ticks;
-        await connection.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO CandidateReviewHistory (
-                TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot,
-                ChangedAtUtcTicks, ChangeKind, InvalidationReason)
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.PreferredTrackId, r.Note, r.SourceLibraryId, r.SourceLibraryNameSnapshot,
-                   @ChangedAtUtcTicks, 'ContentChanged', 'FileSizeOrLastWriteTimeChanged'
-            FROM CandidateReviews r
-            WHERE r.TrackIdA = @TrackId OR r.TrackIdB = @TrackId;
-            """,
-            new { TrackId = trackId, ChangedAtUtcTicks = now },
-            transaction,
-            cancellationToken: cancellationToken));
-
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateReviews WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
             new { TrackId = trackId },
