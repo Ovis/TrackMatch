@@ -65,6 +65,21 @@ public sealed class ReviewNecessityEvaluatorTests
         Assert.Equal(CandidatePairKey.Create(1, 2), pair);
     }
 
+    [Fact]
+    public void FindSupplementalPair_NotDuplicateOnSupplementalPair_StopsGenerationAndLeavesConflict()
+    {
+        var reviews = new[]
+        {
+            Confirmed(1, 3, 1),
+            Confirmed(2, 3, 2),
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.NotDuplicate, null, null),
+        };
+
+        // 補完PairをNotDuplicateとした結果はHuman Verdictとして保持し、同じPairを再生成してレビューを要求し続けない。
+        Assert.Null(ReviewNecessityEvaluator.FindSupplementalPair([1, 2, 3], reviews, []));
+        Assert.Single(DuplicateGroupConflictEvaluator.FindConflicts(reviews));
+    }
+
     private static CandidateReview Confirmed(long a, long b, long preferred)
         => new(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, preferred, null);
 }
