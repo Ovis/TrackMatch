@@ -58,7 +58,7 @@ public sealed partial class CandidateReviewItemViewModel
     };
 
     public string ReviewOriginText => IsHumanVerdictSuspended
-        ? "解析失敗により判定を一時利用停止中"
+        ? $"解析失敗により判定を一時利用停止中{(string.IsNullOrWhiteSpace(Row.HumanVerdictSuspensionReason) ? string.Empty : $": {Row.HumanVerdictSuspensionReason}")}"
         : IsReviewSkipped
             ? ReviewSkipReason ?? string.Empty
             : Row.ReviewDecision is null
