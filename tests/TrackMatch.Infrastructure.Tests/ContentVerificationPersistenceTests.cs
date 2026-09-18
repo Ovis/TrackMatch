@@ -46,7 +46,12 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
         var a = await AddTrackAsync(tracks, "pending-a.flac");
         var b = await AddTrackAsync(tracks, "pending-b.flac");
         var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
-        await reviews.SaveAsync(
+        var groupService = new DuplicateGroupService(
+            reviews,
+            lookup,
+            new SqliteDuplicateGroupRepository(_database));
+        await groupService.SaveReviewAsync(
+            _libraryId,
             new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
 
