@@ -30,14 +30,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             transaction,
             cancellationToken: cancellationToken));
 
-        if (existing is not null
-            && (existing.FileSize != metadata.FileSize
-                || existing.LastWriteTimeUtcTicks != metadata.LastWriteTimeUtc.Ticks))
-        {
-            // Path Identityは維持する一方、Content Versionが変わったTrackについては古い機械解析と
-            // Human Verdictを再利用できない。VerdictだけはHistoryへ退避してからCurrentを無効化する。
-            await ArchiveAndInvalidateTrackContentAsync(connection, transaction, existing.Id, cancellationToken);
-        }
+        // FileSize/LastWriteTimeの変化だけでは音声内容変更と断定しない。
+        // Human Verdictの無効化は追加解析後にConfirmContentChangedAsyncから明示的に行う。
 
         var parameters = new
         {
@@ -354,6 +348,64 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         return row is null
             ? null
             : new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), DecodeFingerprint(row.ValuesBlob));
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        await SetContentVerificationStatusAsync(trackId, "VerificationFailed", cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        await SetContentVerificationStatusAsync(trackId, "Verified", cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // Content Changed確定後だけ、対象Trackに直接関係するVerdictとContent依存解析を同一Transactionで無効化する。
+        await ArchiveAndInvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET ContentVerificationStatus = 'ReevaluationPending' WHERE Id = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// TrackのContent Verification状態だけを更新する。
+    /// Human Verdict自体へ機械状態を混在させず、利用可否はTrack状態から導出する。
+    /// </summary>
+    private async Task SetContentVerificationStatusAsync(
+        long trackId,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var updated = await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET ContentVerificationStatus = @Status WHERE Id = @TrackId;",
+            new { TrackId = trackId, Status = status },
+            cancellationToken: cancellationToken));
+        if (updated == 0)
+        {
+            throw new InvalidOperationException("Content Verification対象のTrackが見つかりません。");
+        }
     }
 
     private static async Task ArchiveAndInvalidateTrackContentAsync(
