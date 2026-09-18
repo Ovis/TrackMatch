@@ -220,7 +220,6 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
         var globalMemberIds = group.GlobalTrackIds.ToHashSet();
         var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
-        var trackLookup = new SqliteTrackLookupRepository(database);
         var usableByTrackId = new Dictionary<long, bool>();
         var groupReviews = new List<CandidateReview>();
         foreach (var review in reviews.Where(review => globalMemberIds.Contains(review.Pair.TrackIdA)
