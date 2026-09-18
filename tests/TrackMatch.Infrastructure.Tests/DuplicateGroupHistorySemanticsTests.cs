@@ -108,9 +108,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetDerivedKeepStateAsync(_libraryId, originalGroup.Id, a, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
 
         // KeepではないCだけがMissingになってGroupが縮退するケースでも、単なるGroupRebuildではなく原因を履歴化する。
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
@@ -147,7 +144,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestoreAfterKeepChange_StillRequiresReviewBeforeOldTrashDispositionCanApply()
+    public async Task RestoreAfterTemporaryDerivedKeepChange_RecomputesOriginalPreference()
     {
         var tracks = new SqliteTrackRepository(_database);
         var a = await CreateTrackAsync(tracks, "a.flac");
@@ -158,17 +155,13 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
 
-        // 手動Keepは旧仕様の状態を再現するために残すが、復帰後の正本はHuman Verdictであり派生Keepへ上書きされる。
-        await groups.SetDerivedKeepStateAsync(_libraryId, reduced.Id, b, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
+        // CがMissingの間はA>BのPreferenceからAが引き続きKeepとなる。復帰後も正本はHuman Verdictである。
+        Assert.Equal(a, reduced.KeepTrackId);
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(c, restoredId);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -202,9 +195,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -238,16 +228,15 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         var service = CreateService();
         var groups = new SqliteDuplicateGroupRepository(_database);
 
-        // A-B-C-D-Eの一本鎖を作り、KeepをEにする。
-        // CがMissingになるとA-BとD-Eへ2:2でSplitし、旧Group IDは小さいTrack側A-Bへ継承される。
-        // Keep=Eは新しいGroup IDのD-Eへ移るため、Restore判定をGroup IDだけへ結び付けると復帰を見失う。
+        // A側とE側に最大候補を持つ連結成分を作る。
+        // CがMissingになるとA-BとD-EへSplitして各成分のKeepが一意になり、復帰すると再び候補が競合する。
+        // 復帰判定を旧Group IDだけへ結び付けると、D-E側の状態変化を見失う。
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         await SaveConfirmedAsync(service, c, d, d);
         await SaveConfirmedAsync(service, d, e, e);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, e, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, original.KeepStatus);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -268,8 +257,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         // Split後は複数の旧Component Current Stateが同じ復帰Topologyへ合流するため、
-        // TrackRestored履歴自体は複数行になり得る。旧Keep=Eを保持していたSelected Stateが
-        // 復帰として履歴化されたことを確認すれば、Q64の安全条件を直接検証できる。
+        // TrackRestored履歴自体は複数行になり得る。Missing中にD-E成分から導出されたKeep=EのSelected Stateが
+        // 復帰として履歴化されたことを確認し、Topology変化の追跡が失われていないことを検証する。
         var selectedRestoreCount = await connection.ExecuteScalarAsync<long>(
             """
             SELECT COUNT(*)
@@ -294,9 +283,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetDerivedKeepStateAsync(_libraryId, originalGroup.Id, a, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
