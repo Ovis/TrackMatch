@@ -2,6 +2,7 @@
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Models;
+using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
 
@@ -46,7 +47,12 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
         var b = await AddTrackAsync(tracks, "b.flac");
         var pair = CandidatePairKey.Create(a, b);
         var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
-        await reviews.SaveAsync(
+        var groupService = new DuplicateGroupService(
+            reviews,
+            lookup,
+            new SqliteDuplicateGroupRepository(_database));
+        await groupService.SaveReviewAsync(
+            _libraryId,
             new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
 
