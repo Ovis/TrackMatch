@@ -2,9 +2,6 @@ name: Format
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/review-preference-redesign
 
 permissions:
   contents: write
