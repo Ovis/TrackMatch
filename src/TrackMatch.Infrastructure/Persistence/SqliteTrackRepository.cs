@@ -372,6 +372,25 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task<int> ConfirmContentChangedAndGetInvalidatedReviewCountAsync(
+        long trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM CandidateReviews WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        await ConfirmContentChangedAsync(trackId, cancellationToken);
+        return checked((int)count);
+    }
+
+    /// <inheritdoc />
     public async Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
     {
         if (trackId <= 0)
