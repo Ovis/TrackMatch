@@ -30,6 +30,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.Path AS PathA, b.Path AS PathB,
                    a.ContentVerificationStatus AS ContentVerificationStatusA,
                    b.ContentVerificationStatus AS ContentVerificationStatusB,
+                   a.ContentVerificationError AS ContentVerificationErrorA,
+                   b.ContentVerificationError AS ContentVerificationErrorB,
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
                    a.Album AS AlbumA, b.Album AS AlbumB,
@@ -136,7 +138,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 row.ClassifiedAtUtcTicks,
                 row.ReviewedAtUtcTicks),
             row.PreferredTrackId,
-            isHumanVerdictSuspended);
+            isHumanVerdictSuspended,
+            isHumanVerdictSuspended ? row.ContentVerificationErrorA ?? row.ContentVerificationErrorB : null);
     }
 
     /// <summary>
@@ -186,6 +189,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
         long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks, long? ClassifiedAtUtcTicks,
         string PathA, string PathB, string ContentVerificationStatusA, string ContentVerificationStatusB,
+        string? ContentVerificationErrorA, string? ContentVerificationErrorB,
         string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
