@@ -197,7 +197,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
         public RecordingGroupRepository(GlobalDuplicateGroup? initialGroup = null) => _group = initialGroup;
 
         public List<bool> ReplaceCancellationStates { get; } = [];
-        public List<bool> SetKeepCancellationStates { get; } = [];
+        public List<bool> SetDerivedKeepCancellationStates { get; } = [];
         public long? SelectedKeepTrackId { get; private set; }
 
         public Task<IReadOnlyList<GlobalDuplicateGroup>> GetAllGlobalAsync(CancellationToken cancellationToken = default)
@@ -222,10 +222,16 @@ public sealed class DuplicateGroupServiceConsistencyTests
             return Task.CompletedTask;
         }
 
-        public Task SetKeepAsync(long libraryId, long groupId, long keepTrackId, string changeKind, CancellationToken cancellationToken = default)
+        public Task SetDerivedKeepStateAsync(
+            long libraryId,
+            long groupId,
+            long? keepTrackId,
+            DuplicateGroupKeepStatus status,
+            string changeKind,
+            CancellationToken cancellationToken = default)
         {
-            SetKeepCancellationStates.Add(cancellationToken.IsCancellationRequested);
-            SelectedKeepTrackId = keepTrackId;
+            SetDerivedKeepCancellationStates.Add(cancellationToken.IsCancellationRequested);
+            SelectedKeepTrackId = status == DuplicateGroupKeepStatus.Selected ? keepTrackId : null;
             return Task.CompletedTask;
         }
 
