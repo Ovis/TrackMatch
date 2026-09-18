@@ -222,6 +222,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             AnalysisStatusText = FormatAnalysisSummary("完了", summaries);
+            var contentChanges = result.Scan.Roots
+                .SelectMany(item => item.ContentChanges ?? [])
+                .ToArray();
+            if (contentChanges.Length != 0)
+            {
+                var invalidatedReviews = contentChanges.Sum(item => item.InvalidatedReviewCount);
+                AnalysisStatusText += contentChanges.Length == 1
+                    ? $" — 音声内容変更: {Path.GetFileName(contentChanges[0].Path)} / Human Verdict解除 {invalidatedReviews}件"
+                    : $" — 音声内容変更 {contentChanges.Length}ファイル / Human Verdict解除 {invalidatedReviews}件";
+            }
         }
         catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException) { AnalysisStatusText = $"分析失敗: {exception.Message}"; }
