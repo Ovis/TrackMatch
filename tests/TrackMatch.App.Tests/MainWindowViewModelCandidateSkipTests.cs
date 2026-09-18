@@ -29,14 +29,14 @@ public sealed class MainWindowViewModelCandidateSkipTests
         viewModel.CandidateListMode = CandidateReviewListMode.All;
 
         Assert.Equal(4, viewModel.TotalCandidateCount);
-        Assert.Equal(2, viewModel.UnreviewedCount);
+        Assert.Equal(0, viewModel.UnreviewedCount);
         Assert.Equal(1, viewModel.ReviewedCount);
         Assert.Equal(4, viewModel.Candidates.Count);
         Assert.Contains(viewModel.Candidates, item => item.TrackIdA == 2 && item.TrackIdB == 3 && item.IsReviewSkipped);
 
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
 
-        Assert.Equal(2, viewModel.Candidates.Count);
+        Assert.Empty(viewModel.Candidates);
         Assert.DoesNotContain(viewModel.Candidates, item => item.IsReviewSkipped);
 
         viewModel.CandidateListMode = CandidateReviewListMode.Reviewed;
@@ -48,7 +48,7 @@ public sealed class MainWindowViewModelCandidateSkipTests
     }
 
     [Fact]
-    public void CandidateFilters_WhenKeepChanges_SkippedPairMovesToCurrentNonKeepPair()
+    public void CandidateFilters_WhenKeepIsUnique_AllRemainingPairsStaySkipped()
     {
         using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
         var rows = new[]
@@ -71,8 +71,7 @@ public sealed class MainWindowViewModelCandidateSkipTests
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
         viewModel.CandidateListMode = CandidateReviewListMode.All;
 
-        Assert.False(viewModel.Candidates.Single(item => item.TrackIdA == 2 && item.TrackIdB == 3).IsReviewSkipped);
-        Assert.True(viewModel.Candidates.Single(item => item.TrackIdA == 1 && item.TrackIdB == 3).IsReviewSkipped);
+        Assert.All(viewModel.Candidates, item => Assert.True(item.IsReviewSkipped));
     }
 
     private static IReadOnlyList<CandidateReviewItemViewModel> CreateItems(
