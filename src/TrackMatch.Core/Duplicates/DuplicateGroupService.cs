@@ -133,12 +133,7 @@ public sealed class DuplicateGroupService(
             return;
         }
 
-        var activeTrackIdSet = activeTrackIds.ToHashSet();
-        var localReviews = groupReviews
-            .Where(review => activeTrackIdSet.Contains(review.Pair.TrackIdA)
-                && activeTrackIdSet.Contains(review.Pair.TrackIdB))
-            .ToArray();
-        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(localReviews, activeTrackIds);
+        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, activeTrackIds);
         await groupRepository.SetDerivedKeepStateAsync(
             libraryId,
             group.Id,
