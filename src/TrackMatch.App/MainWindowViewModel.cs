@@ -495,7 +495,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// </summary>
     public async Task NavigateToCandidateAsync(CandidatePairKey pair)
     {
-        ReviewListMode = CandidateReviewListMode.All;
+        CandidateListMode = CandidateReviewListMode.All;
         await ReloadCandidatesPreservingPairAsync(pair.TrackIdA, pair.TrackIdB);
         SelectedCandidate = Candidates.FirstOrDefault(item =>
             CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair);
