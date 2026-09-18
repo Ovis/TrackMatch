@@ -353,13 +353,22 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     /// <inheritdoc />
     public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
     {
-        await SetContentVerificationStatusAsync(trackId, "VerificationFailed", cancellationToken);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET ContentVerificationStatus = 'VerificationFailed' WHERE Id = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
     {
         await SetContentVerificationStatusAsync(trackId, "Verified", cancellationToken);
+        await ClearFileOrganizationBlockAsync(trackId, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -373,6 +382,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        // Groupが一時分断された後に安全範囲を復元できないため、無効化前のGroup構成を整理禁止範囲として保存する。
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+
         // Content Changed確定後だけ、対象Trackに直接関係するVerdictとContent依存解析を同一Transactionで無効化する。
         await ArchiveAndInvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
@@ -381,6 +393,38 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             transaction,
             cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task CaptureFileOrganizationBlockAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        long trackId,
+        CancellationToken cancellationToken)
+    {
+        // Materialized Groupは失敗直前の有効Verdictから構成されているため、ここで影響範囲をSnapshotする。
+        // Group外TrackまでLibrary全体を止めず、該当Groupが無い場合は対象Track自身だけを停止する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT OR IGNORE INTO TrackFileOrganizationBlocks (SourceTrackId, AffectedTrackId)
+            SELECT @TrackId, gt.TrackId
+            FROM DuplicateGroupTracks gt
+            WHERE gt.DuplicateGroupId = (
+                SELECT DuplicateGroupId FROM DuplicateGroupTracks WHERE TrackId = @TrackId)
+            UNION
+            SELECT @TrackId, @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    private async Task ClearFileOrganizationBlockAsync(long trackId, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
     }
 
     /// <summary>
