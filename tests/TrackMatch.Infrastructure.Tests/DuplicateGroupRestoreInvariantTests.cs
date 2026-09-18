@@ -74,7 +74,8 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 
         var current = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(DuplicateGroupKeepStatus.Selected, current.KeepStatus);
-        Assert.Equal(b, current.KeepTrackId);
+        // A>BかつB>Cなので、再確定後の派生Keepは推移的優劣によりAとなる。
+        Assert.Equal(a, current.KeepTrackId);
         Assert.Equal(restoredCountBeforeReconfirm, await GetTrackRestoredHistoryCountAsync());
     }
 
