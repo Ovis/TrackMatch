@@ -481,7 +481,13 @@ public partial class MainWindow : Window
 
         // Main WindowのA/B同期再生と詳細画面の簡易試聴が同時に鳴らないよう、詳細表示前に停止する。
         _viewModel.StopPlayback();
-        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this }.ShowDialog();
+        var details = new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this };
+        details.ShowDialog();
+        if (details.RequestedReviewPair is { } pair)
+        {
+            await _viewModel.NavigateToCandidateAsync(pair);
+        }
+
         await _viewModel.RefreshDuplicateGroupsAsync();
     }
 
