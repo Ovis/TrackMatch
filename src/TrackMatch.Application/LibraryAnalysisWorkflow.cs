@@ -190,6 +190,9 @@ public sealed class LibraryAnalysisWorkflow
 
         try
         {
+            var reevaluationDatabase = await OpenDatabaseAsync(cancellationToken);
+            await new SqliteTrackRepository(reevaluationDatabase).MarkReevaluationStartedAsync(libraryId, cancellationToken);
+
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
             var generationProgress = new Progress<CandidateGenerationProgress>(value =>
                 progress?.Report(new LibraryAnalysisProgress(
