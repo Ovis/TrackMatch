@@ -18,67 +18,72 @@ public sealed class MainWindowViewModelCandidateSkipTests
         using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
         var rows = new[]
         {
-            CreateRow(null, 1, 2),
-            CreateRow(null, 1, 3),
+            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 1, 2, preferredTrackId: 1),
+            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 1, 3, preferredTrackId: 1),
             CreateRow(null, 2, 3),
-            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 4, 5),
+            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 4, 5, preferredTrackId: 4),
         };
-        var group = new DuplicateGroup(10, 1, 1, DuplicateGroupKeepStatus.Selected, [1, 2, 3], [1, 2, 3]);
-        ReplaceAllCandidates(viewModel, CreateItems(rows, [group]));
+        var reviews = new[]
+        {
+            Confirmed(1, 2, 1),
+            Confirmed(1, 3, 1),
+            Confirmed(4, 5, 4),
+        };
+        var groups = new[]
+        {
+            new DuplicateGroup(10, 1, 1, DuplicateGroupKeepStatus.Selected, [1, 2, 3], [1, 2, 3]),
+            new DuplicateGroup(20, 1, 4, DuplicateGroupKeepStatus.Selected, [4, 5], [4, 5]),
+        };
+        ReplaceAllCandidates(viewModel, CreateItems(rows, groups, reviews));
 
         viewModel.CandidateListMode = CandidateReviewListMode.All;
 
         Assert.Equal(4, viewModel.TotalCandidateCount);
         Assert.Equal(0, viewModel.UnreviewedCount);
-        Assert.Equal(1, viewModel.ReviewedCount);
+        Assert.Equal(3, viewModel.ReviewedCount);
         Assert.Equal(4, viewModel.Candidates.Count);
-        Assert.Contains(viewModel.Candidates, item => item.TrackIdA == 2 && item.TrackIdB == 3 && item.IsReviewSkipped);
+        Assert.True(viewModel.Candidates.Single(item => item.TrackIdA == 2 && item.TrackIdB == 3).IsReviewSkipped);
 
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
-
         Assert.Empty(viewModel.Candidates);
-        Assert.DoesNotContain(viewModel.Candidates, item => item.IsReviewSkipped);
 
         viewModel.CandidateListMode = CandidateReviewListMode.Reviewed;
-        Assert.Single(viewModel.Candidates);
+        Assert.Equal(3, viewModel.Candidates.Count);
         Assert.All(viewModel.Candidates, item => Assert.True(item.IsReviewed));
-
-        viewModel.CandidateListMode = CandidateReviewListMode.ReReviewRecommended;
-        Assert.Empty(viewModel.Candidates);
     }
 
     [Fact]
-    public void CandidateFilters_WhenKeepIsUnique_AllRemainingPairsStaySkipped()
+    public void CandidateFilters_WhenKeepBecomesAmbiguous_RequiredTopPairReturnsToUnreviewed()
     {
         using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
         var rows = new[]
         {
-            CreateRow(null, 1, 2),
+            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 1, 2, preferredTrackId: 1),
             CreateRow(null, 1, 3),
-            CreateRow(null, 2, 3),
+            CreateRow(CandidateReviewDecision.ConfirmedDuplicate, 2, 3, preferredTrackId: 3),
         };
+        var reviews = new[]
+        {
+            Confirmed(1, 2, 1),
+            Confirmed(2, 3, 3),
+        };
+        var group = new DuplicateGroup(10, 1, null, DuplicateGroupKeepStatus.Unselected, [1, 2, 3], [1, 2, 3]);
+        ReplaceAllCandidates(viewModel, CreateItems(rows, [group], reviews));
 
-        ReplaceAllCandidates(
-            viewModel,
-            CreateItems(rows, [new DuplicateGroup(10, 1, 1, DuplicateGroupKeepStatus.Selected, [1, 2, 3], [1, 2, 3])]));
-        viewModel.CandidateListMode = CandidateReviewListMode.All;
-        Assert.True(viewModel.Candidates.Single(item => item.TrackIdA == 2 && item.TrackIdB == 3).IsReviewSkipped);
-
-        // Keep変更後の一覧再読込と同じく、最新Projectionから派生状態を作り直す。
-        ReplaceAllCandidates(
-            viewModel,
-            CreateItems(rows, [new DuplicateGroup(10, 1, 2, DuplicateGroupKeepStatus.Selected, [1, 2, 3], [1, 2, 3])]));
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
-        viewModel.CandidateListMode = CandidateReviewListMode.All;
 
-        Assert.All(viewModel.Candidates, item => Assert.True(item.IsReviewSkipped));
+        // 1と3はいずれもTop候補なので、この比較を省略するとKeepを一意化できない。
+        var required = Assert.Single(viewModel.Candidates);
+        Assert.Equal(CandidatePairKey.Create(1, 3), CandidatePairKey.Create(required.TrackIdA, required.TrackIdB));
+        Assert.False(required.IsReviewSkipped);
     }
 
     private static IReadOnlyList<CandidateReviewItemViewModel> CreateItems(
         IReadOnlyList<CandidateReviewReportRow> rows,
-        IReadOnlyList<DuplicateGroup> groups)
+        IReadOnlyList<DuplicateGroup> groups,
+        IReadOnlyList<CandidateReview> reviews)
     {
-        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, []);
+        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
         return rows.Select(row => new CandidateReviewItemViewModel(
             row,
             states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)])).ToArray();
@@ -95,7 +100,7 @@ public sealed class MainWindowViewModelCandidateSkipTests
         list.AddRange(items);
     }
 
-    private static CandidateReviewReportRow CreateRow(CandidateReviewDecision? decision, long trackIdA, long trackIdB)
+    private static CandidateReviewReportRow CreateRow(CandidateReviewDecision? decision, long trackIdA, long trackIdB, long? preferredTrackId = null)
         => new(
             trackIdA, trackIdB, null, null, 0.99, 1, 1, 1,
             TimeSpan.Zero, TimeSpan.FromMinutes(3),
@@ -103,7 +108,11 @@ public sealed class MainWindowViewModelCandidateSkipTests
             $"Track {trackIdA}", $"Track {trackIdB}", "Album", "Album", [], [],
             TimeSpan.FromMinutes(3), TimeSpan.FromMinutes(3), 100, 100,
             "FLAC", "FLAC", "FLAC", "FLAC", 900, 900, 44100, 44100, 16, 16, 2, 2,
-            decision);
+            decision,
+            PreferredTrackId: preferredTrackId);
+
+    private static CandidateReview Confirmed(long left, long right, long preferredTrackId)
+        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, preferredTrackId, null);
 
     private sealed class FakeSynchronizedPlaybackService : ISynchronizedPlaybackService
     {
