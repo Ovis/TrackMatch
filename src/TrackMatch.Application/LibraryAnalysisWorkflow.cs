@@ -186,7 +186,7 @@ public sealed class LibraryAnalysisWorkflow
                 value.CompletedFiles,
                 value.TotalFiles,
                 $"対象フォルダ {value.RootIndex}/{value.RootCount}")));
-        IncrementalScanResult scan;
+        LibraryRootScanBatchResult scan;
         try
         {
             scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
