@@ -128,6 +128,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed && !item.IsReviewSkipped);
     public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && !item.IsHumanVerdictSuspended);
     public int SuspendedReviewCount => ReviewTargetCandidates.Count(item => item.IsHumanVerdictSuspended);
+    public string ReviewedTabHeader => SuspendedReviewCount == 0
+        ? $"レビュー済み ({ReviewedCount})"
+        : $"レビュー済み {ReviewedCount}（利用停止 {SuspendedReviewCount}）";
     public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
@@ -446,6 +449,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         OnPropertyChanged(nameof(UnreviewedCount));
         OnPropertyChanged(nameof(ReviewedCount));
         OnPropertyChanged(nameof(SuspendedReviewCount));
+        OnPropertyChanged(nameof(ReviewedTabHeader));
         OnPropertyChanged(nameof(ReReviewRecommendedCount));
         OnPropertyChanged(nameof(TotalCandidateCount));
     }
