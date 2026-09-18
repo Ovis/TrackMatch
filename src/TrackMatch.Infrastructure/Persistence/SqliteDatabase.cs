@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 3)
+            VALUES (1, 4)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
@@ -126,12 +126,15 @@ public sealed class SqliteDatabase
                 BitDepth INTEGER NULL,
                 Channels INTEGER NULL,
                 IsMissing INTEGER NOT NULL DEFAULT 0 CHECK (IsMissing IN (0, 1)),
+                ContentVerificationStatus TEXT NOT NULL DEFAULT 'Verified'
+                    CHECK (ContentVerificationStatus IN ('Verified', 'VerificationFailed', 'ReevaluationPending', 'ReevaluationFailed')),
                 UpdatedAtUtcTicks INTEGER NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS IX_Tracks_Path ON Tracks (Path COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks ON Tracks (LastWriteTimeUtcTicks);
             CREATE INDEX IF NOT EXISTS IX_Tracks_IsMissing ON Tracks (IsMissing);
+            CREATE INDEX IF NOT EXISTS IX_Tracks_ContentVerificationStatus ON Tracks (ContentVerificationStatus);
 
             CREATE TABLE IF NOT EXISTS LibraryTracks (
                 LibraryId INTEGER NOT NULL,
