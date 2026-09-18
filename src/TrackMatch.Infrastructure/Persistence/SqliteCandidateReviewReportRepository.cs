@@ -23,7 +23,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         }
 
         const string sql = """
-            SELECT x.TrackIdA, x.TrackIdB, c.Kind, c.Reason,
+            SELECT x.TrackIdA, x.TrackIdB, p.MinimumSegmentHashDistance, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
                    x.BestOffsetTicks, x.MatchedDurationTicks,
                    x.ComparedAtUtcTicks, c.ClassifiedAtUtcTicks,
@@ -52,6 +52,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    rl.Name AS CurrentReviewSourceLibraryName,
                    r.SourceLibraryNameSnapshot AS ReviewSourceLibraryNameSnapshot
             FROM CandidateComparisons x
+            INNER JOIN CandidatePairs p
+                ON p.TrackIdA = x.TrackIdA AND p.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateReviews r
@@ -139,7 +141,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 row.ReviewedAtUtcTicks),
             row.PreferredTrackId,
             isHumanVerdictSuspended,
-            isHumanVerdictSuspended ? row.ContentVerificationErrorA ?? row.ContentVerificationErrorB : null);
+            isHumanVerdictSuspended ? row.ContentVerificationErrorA ?? row.ContentVerificationErrorB : null,
+            row.MinimumSegmentHashDistance < 0);
     }
 
     /// <summary>
@@ -185,7 +188,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
 
     private sealed record ReportRow(
-        long TrackIdA, long TrackIdB, string? Kind, string? Reason,
+        long TrackIdA, long TrackIdB, long MinimumSegmentHashDistance, string? Kind, string? Reason,
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
         long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks, long? ClassifiedAtUtcTicks,
         string PathA, string PathB, string ContentVerificationStatusA, string ContentVerificationStatusB,
