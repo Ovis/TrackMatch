@@ -225,6 +225,16 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
                 && globalMemberIds.Contains(review.Pair.TrackIdB))
             .ToArray();
 
+        if (group.KeepStatus == DuplicateGroupKeepStatus.Selected && group.KeepTrackId is { } keepTrackId)
+        {
+            KeepStateText = $"残すファイル: {trackModels[keepTrackId].Title}";
+        }
+        else if (group.KeepStatus == DuplicateGroupKeepStatus.Unselected)
+        {
+            var keepCandidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, group.TrackIds);
+            KeepStateText = $"残す候補: {string.Join("、", keepCandidates.Select(trackId => trackModels[trackId].Title))}";
+        }
+
         Conflicts.Clear();
         foreach (var conflict in DuplicateGroupConflictEvaluator.FindConflicts(groupReviews))
         {
