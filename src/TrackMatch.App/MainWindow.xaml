@@ -687,7 +687,8 @@
                                TargetType="Button">
                             <Setter Property="Content" Value="{Binding AnalysisErrorCount, StringFormat=解析エラー {0}}" />
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding AnalysisErrorCount}" Value="0">
+                                <DataTrigger Binding="{Binding AnalysisErrorCount}"
+                                             Value="0">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                 </DataTrigger>
                             </Style.Triggers>
@@ -702,7 +703,8 @@
                                TargetType="Button">
                             <Setter Property="Content" Value="{Binding ContentChangeCount, StringFormat=変更詳細 {0}}" />
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding ContentChangeCount}" Value="0">
+                                <DataTrigger Binding="{Binding ContentChangeCount}"
+                                             Value="0">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                 </DataTrigger>
                             </Style.Triggers>
