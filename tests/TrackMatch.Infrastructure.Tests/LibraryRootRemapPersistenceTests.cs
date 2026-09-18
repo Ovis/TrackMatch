@@ -62,6 +62,7 @@ public sealed class LibraryRootRemapPersistenceTests : IAsyncLifetime
             new CandidateReview(
                 CandidatePairKey.Create(trackA, trackB),
                 CandidateReviewDecision.ConfirmedDuplicate,
+                trackA,
                 "confirmed"),
             TestContext.Current.CancellationToken);
 
