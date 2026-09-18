@@ -99,6 +99,47 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
                 transaction: null));
     }
 
+    [Fact]
+    public async Task SharedTrack_RemainsPendingUntilEveryLibraryReevaluationCompletes()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackId = await AddTrackAsync(tracks, "shared.flac");
+        var libraries = new SqliteLibraryRepository(_database);
+        var other = await libraries.CreateAsync("Other Library", [_directory], TestContext.Current.CancellationToken);
+        var otherRoot = Assert.Single(other.Roots);
+        await tracks.EnsureMembershipAsync(
+            other.Id,
+            otherRoot.Id,
+            trackId,
+            "shared.flac",
+            TestContext.Current.CancellationToken);
+
+        await tracks.ConfirmContentChangedAsync(trackId, TestContext.Current.CancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await connection.ExecuteAsync(
+            "UPDATE LibraryTracks SET CandidateGenerationPending = 0 WHERE LibraryId = @LibraryId AND TrackId = @TrackId;",
+            new { LibraryId = _libraryId, TrackId = trackId });
+
+        await tracks.MarkReevaluationCompletedAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "ReevaluationPending",
+            await connection.QuerySingleAsync<string>(
+                "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
+                new { TrackId = trackId }));
+
+        await connection.ExecuteAsync(
+            "UPDATE LibraryTracks SET CandidateGenerationPending = 0 WHERE LibraryId = @LibraryId AND TrackId = @TrackId;",
+            new { LibraryId = other.Id, TrackId = trackId });
+        await tracks.MarkReevaluationCompletedAsync(other.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "Verified",
+            await connection.QuerySingleAsync<string>(
+                "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
+                new { TrackId = trackId }));
+    }
+
     private async Task<long> AddTrackAsync(SqliteTrackRepository tracks, string fileName)
     {
         var id = await tracks.UpsertMetadataAsync(
