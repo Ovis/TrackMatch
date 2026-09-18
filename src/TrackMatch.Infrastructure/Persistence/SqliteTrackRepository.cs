@@ -366,9 +366,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO CandidateReviewHistory (
-                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot,
+                TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot,
                 ChangedAtUtcTicks, ChangeKind, InvalidationReason)
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId, r.SourceLibraryNameSnapshot,
+            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.PreferredTrackId, r.Note, r.SourceLibraryId, r.SourceLibraryNameSnapshot,
                    @ChangedAtUtcTicks, 'ContentChanged', 'FileSizeOrLastWriteTimeChanged'
             FROM CandidateReviews r
             WHERE r.TrackIdA = @TrackId OR r.TrackIdB = @TrackId;
