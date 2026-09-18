@@ -369,18 +369,18 @@ public partial class MainWindow : Window
         await ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync);
     }
 
-    private async Task ConfirmDuplicateWithImpactAsync(long keepTrackId, Func<Task> action)
+    private async Task ConfirmDuplicateWithImpactAsync(long preferredTrackId, Func<Task> action)
     {
         try
         {
-            var impact = await _viewModel.GetKeepChangeImpactAsync(keepTrackId);
+            var impact = await _viewModel.GetKeepChangeImpactAsync(preferredTrackId);
             if (!string.IsNullOrWhiteSpace(impact))
             {
                 var confirmation = new ConfirmationDialog(
-                    "重複グループの残すファイルを変更",
+                    "重複判定によるKeep変更を確認",
                     impact,
-                    "この変更はグループ全体のごみ箱移動対象に反映されます。",
-                    "変更して確定",
+                    "Preferred TrackはGlobal Human Verdictとして保存され、派生Keepとごみ箱移動対象が再計算されます。",
+                    "判定を確定",
                     "キャンセル",
                     kind: AppDialogKind.Warning)
                 { Owner = this };
