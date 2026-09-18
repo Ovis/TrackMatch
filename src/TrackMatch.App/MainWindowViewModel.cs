@@ -126,13 +126,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     // タブ件数はDB全体ではなく、現在レビュー対象としている一致度下限を反映する。
     // レビュー省略はHuman Verdictではないためレビュー済みに数えず、操作不要なので未レビューにも数えない。
     public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed && !item.IsReviewSkipped);
-    public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed);
+    public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && !item.IsHumanVerdictSuspended);
+    public int SuspendedReviewCount => ReviewTargetCandidates.Count(item => item.IsHumanVerdictSuspended);
     public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
     // 省略Candidateもユーザーが直接レビューする場合は通常の3択を使える。
-    public bool CanReview => HasSelection && !IsAnalyzing;
+    public bool CanReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsHumanVerdictSuspended != true;
     public bool CanClearReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewed == true;
     public bool CanAnalyzeLibrary => SelectedLibrary is not null && !IsLoading && !IsAnalyzing;
     public bool CanCancelAnalysis => IsAnalyzing && !IsCancellingAnalysis;
@@ -363,7 +364,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         {
             CandidateReviewListMode.Unreviewed => !item.IsReviewed && !item.IsReviewSkipped,
             CandidateReviewListMode.Reviewed => item.IsReviewed,
-            CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && item.IsReReviewRecommended,
+            CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && !item.IsHumanVerdictSuspended && item.IsReReviewRecommended,
             _ => true,
         }).ToArray();
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
@@ -444,6 +445,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         OnPropertyChanged(nameof(UnreviewedCount));
         OnPropertyChanged(nameof(ReviewedCount));
+        OnPropertyChanged(nameof(SuspendedReviewCount));
         OnPropertyChanged(nameof(ReReviewRecommendedCount));
         OnPropertyChanged(nameof(TotalCandidateCount));
     }
