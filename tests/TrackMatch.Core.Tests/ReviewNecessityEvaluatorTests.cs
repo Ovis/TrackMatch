@@ -24,7 +24,7 @@ public sealed class ReviewNecessityEvaluatorTests
     }
 
     [Fact]
-    public void FindSupplementalPair_ExistingUnreviewedTopPair_DoesNotCreateAnother()
+    public void FindSupplementalPair_ExistingUnreviewedTopPair_ReturnsExistingPair()
     {
         var reviews = new[]
         {
@@ -33,7 +33,9 @@ public sealed class ReviewNecessityEvaluatorTests
         };
         var pairs = new[] { new CandidatePair(1, 3, 0) };
 
-        Assert.Null(ReviewNecessityEvaluator.FindSupplementalPair([1, 2, 3], reviews, pairs));
+        Assert.Equal(
+            CandidatePairKey.Create(1, 3),
+            ReviewNecessityEvaluator.FindSupplementalPair([1, 2, 3], reviews, pairs));
     }
 
     [Fact]
