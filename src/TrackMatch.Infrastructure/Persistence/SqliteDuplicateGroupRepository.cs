@@ -425,23 +425,22 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             throw new InvalidOperationException("Keepを設定するLibraryが存在しません。");
         }
 
-        // Library外TrackをKeepにすること自体は許可するが、そのLibraryがGroupへ全く関与していない状態では
-        // Library固有Dispositionを作成できない。Projectionと同じく、少なくとも1件のActive Membershipを要求する。
-        var libraryHasGroupMembership = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+        // Library固有Keepは「そのLibrary内で最終的に残すTrack」であるため、
+        // Global Groupに含まれていても現在LibraryのActive Membership外TrackはSelectedへ保存しない。
+        var keepTrackIsInLibrary = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             """
             SELECT COUNT(*)
-            FROM DuplicateGroupTracks gt
-            INNER JOIN LibraryTracks lt ON lt.TrackId = gt.TrackId
+            FROM LibraryTracks lt
             INNER JOIN Tracks t ON t.Id = lt.TrackId AND t.IsMissing = 0
-            WHERE gt.DuplicateGroupId = @GroupId
-              AND lt.LibraryId = @LibraryId;
+            WHERE lt.LibraryId = @LibraryId
+              AND lt.TrackId = @KeepTrackId;
             """,
-            new { LibraryId = libraryId, GroupId = groupId },
+            new { LibraryId = libraryId, KeepTrackId = keepTrackId },
             transaction,
             cancellationToken: cancellationToken));
-        if (libraryHasGroupMembership == 0)
+        if (keepTrackIsInLibrary == 0)
         {
-            throw new InvalidOperationException("現在LibraryがActive Membershipを持たないGlobal Duplicate GroupへKeepを設定できません。");
+            throw new InvalidOperationException("Library固有Keepは現在Library内のActive Trackである必要があります。");
         }
 
         var current = await connection.QuerySingleOrDefaultAsync<KeepStateRow>(new CommandDefinition(
