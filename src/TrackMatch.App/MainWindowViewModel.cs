@@ -22,6 +22,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private readonly JsonAppSettingsStore _settingsStore = new();
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
     private readonly List<IncrementalScanError> _analysisErrors = [];
+    private readonly List<ContentChangeNotice> _contentChanges = [];
     private readonly List<CandidateReviewItemViewModel> _allCandidates = [];
     private readonly string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CancellationTokenSource? _analysisCancellation;
@@ -150,6 +151,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public bool IsCancellingAnalysis { get => _isCancellingAnalysis; private set { if (SetField(ref _isCancellingAnalysis, value)) { OnPropertyChanged(nameof(CanCancelAnalysis)); } } }
     public int AnalysisErrorCount => _analysisErrors.Count;
     public IReadOnlyList<IncrementalScanError> AnalysisErrors => _analysisErrors;
+    public int ContentChangeCount => _contentChanges.Count;
+    public IReadOnlyList<ContentChangeNotice> ContentChanges => _contentChanges;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
@@ -207,7 +210,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         var library = SelectedLibrary;
         if (library is null || !CanAnalyzeLibrary) { AnalysisStatusText = "ライブラリを選択してください。"; return; }
-        _analysisErrors.Clear(); OnPropertyChanged(nameof(AnalysisErrorCount)); IsAnalyzing = true; IsCancellingAnalysis = false;
+        _analysisErrors.Clear(); _contentChanges.Clear();
+        OnPropertyChanged(nameof(AnalysisErrorCount)); OnPropertyChanged(nameof(ContentChangeCount)); IsAnalyzing = true; IsCancellingAnalysis = false;
         _analysisCancellation = new CancellationTokenSource();
         try
         {
@@ -222,15 +226,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             AnalysisStatusText = FormatAnalysisSummary("完了", summaries);
-            var contentChanges = result.Scan.Roots
-                .SelectMany(item => item.ContentChanges ?? [])
-                .ToArray();
-            if (contentChanges.Length != 0)
+            _contentChanges.AddRange(result.Scan.Roots.SelectMany(item => item.ContentChanges ?? []));
+            OnPropertyChanged(nameof(ContentChangeCount));
+            if (_contentChanges.Count != 0)
             {
-                var invalidatedReviews = contentChanges.Sum(item => item.InvalidatedReviewCount);
-                AnalysisStatusText += contentChanges.Length == 1
-                    ? $" — 音声内容変更: {Path.GetFileName(contentChanges[0].Path)} / Human Verdict解除 {invalidatedReviews}件"
-                    : $" — 音声内容変更 {contentChanges.Length}ファイル / Human Verdict解除 {invalidatedReviews}件";
+                var invalidatedReviews = _contentChanges.Sum(item => item.InvalidatedReviewCount);
+                AnalysisStatusText += _contentChanges.Count == 1
+                    ? $" — 音声内容変更: {Path.GetFileName(_contentChanges[0].Path)} / Human Verdict解除 {invalidatedReviews}件"
+                    : $" — 音声内容変更 {_contentChanges.Count}ファイル / Human Verdict解除 {invalidatedReviews}件";
             }
         }
         catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
