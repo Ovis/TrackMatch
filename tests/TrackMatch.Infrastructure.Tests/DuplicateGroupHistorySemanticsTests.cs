@@ -327,8 +327,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     {
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
-            keepTrackId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, keepTrackId, null),
             TestContext.Current.CancellationToken);
     }
 
