@@ -203,7 +203,7 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
             [CreateComparison(_a1, _a2, 0.99)],
             TestContext.Current.CancellationToken);
         await new SqliteCandidateReviewRepository(_database, _libraryAId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         // Generation Version更新などで新GeneratorがこのPairを候補に返さなくても、
