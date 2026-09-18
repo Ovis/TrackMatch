@@ -109,7 +109,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, originalGroup.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, originalGroup.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         // KeepではないCだけがMissingになってGroupが縮退するケースでも、単なるGroupRebuildではなく原因を履歴化する。
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
@@ -158,14 +159,16 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
 
         // 手動Keepは旧仕様の状態を再現するために残すが、復帰後の正本はHuman Verdictであり派生Keepへ上書きされる。
-        await groups.SetKeepAsync(_libraryId, reduced.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, reduced.Id, b, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(c, restoredId);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -200,7 +203,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -242,7 +246,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         await SaveConfirmedAsync(service, c, d, d);
         await SaveConfirmedAsync(service, d, e, e);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, e, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, e, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -290,7 +295,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, originalGroup.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, originalGroup.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
