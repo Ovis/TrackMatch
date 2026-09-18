@@ -14,18 +14,6 @@ public sealed record CandidateReview(
     string? Note)
 {
     /// <summary>
-    /// Preferred Trackを持たない既存の呼び出しからHuman Verdictを生成する。
-    /// </summary>
-    /// <remarks>
-    /// NotDuplicateは従来どおり生成できる。ConfirmedDuplicateはValidateで拒否し、
-    /// 新仕様で必須となった優劣関係を暗黙に補完しない。
-    /// </remarks>
-    public CandidateReview(CandidatePairKey pair, CandidateReviewDecision decision, string? note)
-        : this(pair, decision, null, note)
-    {
-    }
-
-    /// <summary>
     /// 永続化前にHuman Verdictとして有効な値であることを検証する。
     /// </summary>
     public void Validate()
