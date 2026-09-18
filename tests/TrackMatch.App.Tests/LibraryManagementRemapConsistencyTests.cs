@@ -114,11 +114,12 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
         var groupRepository = new SqliteDuplicateGroupRepository(_database);
         var parentProjection = Assert.Single(await groupRepository.GetByLibraryIdAsync(parentLibrary.Id, TestContext.Current.CancellationToken));
-        await groupRepository.SetKeepAsync(
+        await groupRepository.SetDerivedKeepStateAsync(
             parentLibrary.Id,
             parentProjection.Id,
             b,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken);
 
         await new LibraryManagementService(_databasePath).RemapRootAsync(
