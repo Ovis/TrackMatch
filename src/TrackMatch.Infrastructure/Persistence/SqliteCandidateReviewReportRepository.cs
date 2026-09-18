@@ -42,6 +42,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
                    a.Channels AS ChannelsA, b.Channels AS ChannelsB,
                    r.Decision AS ReviewDecision,
+                   r.PreferredTrackId,
                    r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
                    rl.Name AS CurrentReviewSourceLibraryName,
@@ -128,7 +129,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 kind,
                 row.ComparedAtUtcTicks,
                 row.ClassifiedAtUtcTicks,
-                row.ReviewedAtUtcTicks));
+                row.ReviewedAtUtcTicks),
+            row.PreferredTrackId);
     }
 
     /// <summary>
@@ -185,6 +187,6 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
-        string? ReviewDecision, long? ReviewedAtUtcTicks,
+        string? ReviewDecision, long? PreferredTrackId, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }
