@@ -93,7 +93,6 @@ public sealed class RejectedTrackTrashService(
                 continue;
             }
 
-            // KeepがLibrary外Trackの場合、現在Libraryの構成TrackはすべてReject候補になる。
             var rejectTrackIds = group.TrackIds
                 .Where(trackId => trackId != keepTrackId)
                 .Distinct()
@@ -171,16 +170,6 @@ public sealed class RejectedTrackTrashService(
         {
             throw new InvalidOperationException(
                 "現在のライブラリに所属するファイルは、ライブラリ外ファイル用の明示的なごみ箱操作では移動できません。");
-        }
-
-        // KeepはLibrary外Trackを指すこともできる。Membershipだけで判定すると、現在Libraryが残すよう指定した
-        // 外部ファイルをこのGlobal操作で消せるため、Projection上のKeepも独立してGuardする。
-        var currentGroup = await groupRepository.GetByTrackIdAsync(trackId, currentLibraryId, cancellationToken);
-        if (currentGroup?.KeepStatus == DuplicateGroupKeepStatus.Selected
-            && currentGroup.KeepTrackId == trackId)
-        {
-            throw new InvalidOperationException(
-                "このファイルは現在のライブラリで残すファイルに指定されているため、ごみ箱へ移動できません。");
         }
 
         if (await trackLookupRepository.IsFileOrganizationBlockedAsync(trackId, cancellationToken))
