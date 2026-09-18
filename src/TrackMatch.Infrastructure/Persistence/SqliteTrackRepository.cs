@@ -363,7 +363,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
             new { TrackId = trackId },
             cancellationToken: cancellationToken));
-        return status is "VerificationFailed" or "ReevaluationPending" or "ReevaluationFailed";
+        return status is "VerificationFailed";
     }
 
     /// <inheritdoc />
@@ -485,6 +485,28 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         {
             throw new InvalidOperationException("Content Verification対象のTrackが見つかりません。");
         }
+    }
+
+    /// <summary>
+    /// 前回失敗したCandidate再評価を、今回のWorkflowで再試行する状態へ戻す。
+    /// </summary>
+    public async Task MarkReevaluationStartedAsync(long libraryId, CancellationToken cancellationToken = default)
+    {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'ReevaluationPending'
+            WHERE ContentVerificationStatus = 'ReevaluationFailed'
+              AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
+            """,
+            new { LibraryId = libraryId },
+            cancellationToken: cancellationToken));
     }
 
     /// <summary>
