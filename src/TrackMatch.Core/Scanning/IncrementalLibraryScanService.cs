@@ -108,13 +108,37 @@ public sealed class IncrementalLibraryScanService(
 
                 if (needsFingerprint)
                 {
+                    var previousFingerprint = contentChanged
+                        ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
+                        : null;
                     try
                     {
+                        // FileSize/mtimeだけではタグ変更と音声変更を区別できないため、Fingerprintを追加解析してから
+                        // Human Verdictを維持するか無効化するかを確定する。解析中はSQLite Transactionを保持しない。
                         var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
+                        if (contentChanged)
+                        {
+                            if (previousFingerprint is not null && HasSameAudioContent(previousFingerprint, fingerprint))
+                            {
+                                await trackRepository.MarkContentVerifiedAsync(trackId, cancellationToken);
+                            }
+                            else
+                            {
+                                // 旧Fingerprintが無い場合も内容同一を証明できないため、安全側でContent Changedとする。
+                                await trackRepository.ConfirmContentChangedAsync(trackId, cancellationToken);
+                            }
+                        }
+
                         await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
                     {
+                        if (contentChanged)
+                        {
+                            // Decoder/I/O失敗はContent Changedと断定せず、Human Verdictを保持したまま派生計算だけ停止する。
+                            await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None);
+                        }
+
                         errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
                     }
                 }
@@ -147,6 +171,10 @@ public sealed class IncrementalLibraryScanService(
             throw;
         }
     }
+
+    private static bool HasSameAudioContent(AudioFingerprint previous, AudioFingerprint current)
+        => previous.Duration == current.Duration
+            && previous.Values.SequenceEqual(current.Values);
 
     private static bool HasChanged(StoredTrack stored, Models.AudioTrackMetadata current)
         => stored.Metadata.FileSize != current.FileSize
