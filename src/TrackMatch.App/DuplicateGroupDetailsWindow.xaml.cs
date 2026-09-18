@@ -202,9 +202,9 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         KeepStateText = group.KeepStatus switch
         {
             DuplicateGroupKeepStatus.Selected => "このライブラリで残すファイルは確定済みです。",
-            DuplicateGroupKeepStatus.Conflict => "以前の指定が競合しています。残すファイルを再確認してください。",
-            DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
-            _ => "残すファイルはまだ選択されていません。",
+            DuplicateGroupKeepStatus.Conflict => "Human Verdictが矛盾しています。関連するレビュー判定を確認してください。",
+            DuplicateGroupKeepStatus.Missing => "Keep候補に必要なファイルが見つかりません。",
+            _ => "残す候補が複数あります。候補同士のレビューが必要です。",
         };
 
         AllTracks.Clear();
@@ -269,46 +269,6 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
 
         OnPropertyChanged(nameof(RelationEmptyText));
-    }
-
-    private async void SetSelectedKeep_Click(object sender, RoutedEventArgs e)
-    {
-        var track = SelectedTrack;
-        if (track is null || !track.CanSelectAsKeep)
-        {
-            return;
-        }
-
-        var detail = track.IsInCurrentLibrary
-            ? "このライブラリの重複グループで、このファイル以外がごみ箱への移動対象になります。"
-            : "このファイルは現在のライブラリ外ですが、この重複グループを構成するファイルなので残すファイルとして選択できます。現在のライブラリへ追加されることはありません。";
-        var confirmation = new ConfirmationDialog(
-            "残すファイルを変更",
-            $"「{track.Title}」をこのライブラリで残すファイルに設定しますか？",
-            detail,
-            "このファイルを残す",
-            "キャンセル",
-            kind: AppDialogKind.Warning)
-        { Owner = this };
-        confirmation.ShowDialog();
-        if (confirmation.SelectedResult != AppDialogResult.Primary)
-        {
-            return;
-        }
-
-        try
-        {
-            _previewPlayer.Stop();
-            var database = new SqliteDatabase(_databasePath);
-            await database.InitializeAsync();
-            var groups = new SqliteDuplicateGroupRepository(database);
-            await groups.SetKeepAsync(_libraryId, _groupId, track.TrackId, "UserSelected");
-            await LoadGroupAsync();
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
-        {
-            ShowError("残すファイル変更失敗", "残すファイルを変更できませんでした", exception.Message);
-        }
     }
 
     private async void TrashSelectedTrack_Click(object sender, RoutedEventArgs e)
