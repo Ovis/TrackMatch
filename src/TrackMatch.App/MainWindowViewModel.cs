@@ -349,6 +349,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+        // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
+        await EnsureSupplementalCandidatesAsync(database, library.Id);
         _allCandidates.AddRange(await LoadCandidateItemsAsync(database, library.Id));
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
     }
