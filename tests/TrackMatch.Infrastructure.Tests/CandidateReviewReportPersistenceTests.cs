@@ -192,7 +192,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         // Source Library削除後に別LibraryからVerdictを変更しても、旧判定の出所名SnapshotをHistoryへそのまま退避する。
         await new SqliteCandidateReviewRepository(_database, viewer.Id).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, trackA, null),
             TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
