@@ -62,7 +62,7 @@ public sealed partial class CandidateReviewItemViewModel
         : IsReviewSkipped
             ? ReviewSkipReason ?? string.Empty
             : Row.ReviewDecision is null
-            ? string.Empty
+                ? Row.IsSupplementalCandidate ? "Keep候補を決定するための補完Candidate" : string.Empty
             : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
                 ? "判定元: 不明"
                 : $"判定元: {Row.ReviewSourceLibraryName}";
