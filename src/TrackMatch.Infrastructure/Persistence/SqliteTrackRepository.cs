@@ -408,6 +408,44 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
     }
 
+    /// <summary>
+    /// LibraryのCandidate再評価が最後まで成功したTrackを通常利用可能へ戻す。
+    /// </summary>
+    public async Task MarkReevaluationCompletedAsync(long libraryId, CancellationToken cancellationToken = default)
+    {
+        await SetReevaluationStatusForLibraryAsync(libraryId, "Verified", cancellationToken);
+    }
+
+    /// <summary>
+    /// LibraryのCandidate再評価が失敗したTrackを永続的な失敗状態へ遷移させる。
+    /// </summary>
+    public async Task MarkReevaluationFailedAsync(long libraryId, CancellationToken cancellationToken = default)
+    {
+        await SetReevaluationStatusForLibraryAsync(libraryId, "ReevaluationFailed", cancellationToken);
+    }
+
+    private async Task SetReevaluationStatusForLibraryAsync(
+        long libraryId,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = @Status
+            WHERE ContentVerificationStatus = 'ReevaluationPending'
+              AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
+            """,
+            new { LibraryId = libraryId, Status = status },
+            cancellationToken: cancellationToken));
+    }
+
     private static async Task ArchiveAndInvalidateTrackContentAsync(
         SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
