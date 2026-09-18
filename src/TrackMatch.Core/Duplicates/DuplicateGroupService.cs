@@ -160,7 +160,13 @@ public sealed class DuplicateGroupService(
         {
             var a = await GetTrackCachedAsync(review.Pair.TrackIdA, cache, cancellationToken);
             var b = await GetTrackCachedAsync(review.Pair.TrackIdB, cache, cancellationToken);
-            if (a is not null && b is not null && !a.IsMissing && !b.IsMissing) result.Add(review);
+            if (a is not null && b is not null
+                && !a.IsMissing && !b.IsMissing
+                && await trackLookupRepository.IsHumanVerdictUsableAsync(review.Pair.TrackIdA, cancellationToken)
+                && await trackLookupRepository.IsHumanVerdictUsableAsync(review.Pair.TrackIdB, cancellationToken))
+            {
+                result.Add(review);
+            }
         }
         return result;
     }
