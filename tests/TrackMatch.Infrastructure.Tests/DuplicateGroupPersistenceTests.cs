@@ -86,7 +86,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         var reviews = await new SqliteCandidateReviewRepository(_database)
