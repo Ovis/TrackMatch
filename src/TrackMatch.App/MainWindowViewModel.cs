@@ -349,6 +349,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+
+        // Human Verdict保存後の派生状態更新中にプロセスが終了しても、Current Human Verdictを正本として起動時に自己修復する。
+        // Materialized Group/Keepをそのまま信頼して表示やファイル整理へ進まない。
+        await new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(database),
+            new SqliteTrackLookupRepository(database),
+            new SqliteDuplicateGroupRepository(database))
+            .SynchronizeGlobalAsync();
+
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
         await EnsureSupplementalCandidatesAsync(database, library.Id);
         _allCandidates.AddRange(await LoadCandidateItemsAsync(database, library.Id));
