@@ -100,7 +100,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetDerivedKeepStateAsync_AllowsGlobalGroupTrackOutsideCurrentLibrary()
+    public async Task SetDerivedKeepStateAsync_RejectsGlobalGroupTrackOutsideCurrentLibrary()
     {
         var libraries = new SqliteLibraryRepository(_database);
         var secondRoot = Path.Combine(_directory, "second");
@@ -135,17 +135,17 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         Assert.DoesNotContain(c, firstProjection.TrackIds);
         Assert.Contains(c, firstProjection.GlobalTrackIds);
 
-        await repository.SetDerivedKeepStateAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             firstProjection.Id,
             c,
             DuplicateGroupKeepStatus.Selected,
             "DerivedPreference",
-            TestContext.Current.CancellationToken);
+            TestContext.Current.CancellationToken));
 
+        // Global Preferenceは共有しても、Library固有Keepは現在Library内のTrackだけから導出する。
         var updated = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        Assert.Equal(DuplicateGroupKeepStatus.Selected, updated.KeepStatus);
-        Assert.Equal(c, updated.KeepTrackId);
+        Assert.Equal(a, updated.KeepTrackId);
         Assert.DoesNotContain(c, updated.TrackIds);
     }
 
