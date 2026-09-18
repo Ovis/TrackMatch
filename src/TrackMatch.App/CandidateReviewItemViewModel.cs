@@ -64,8 +64,8 @@ public sealed partial class CandidateReviewItemViewModel
             if (IsHumanVerdictSuspended)
             {
                 return string.IsNullOrWhiteSpace(Row.HumanVerdictSuspensionReason)
-                    ? "解析失敗により判定を一時利用停止中"
-                    : $"解析失敗により判定を一時利用停止中: {Row.HumanVerdictSuspensionReason}";
+                    ? "音声内容の確認が完了していないため判定を一時利用停止中"
+                    : $"音声内容の確認が完了していないため判定を一時利用停止中: {Row.HumanVerdictSuspensionReason}";
             }
 
             if (IsReviewSkipped)
