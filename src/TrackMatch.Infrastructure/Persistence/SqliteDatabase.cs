@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 5)
+            VALUES (1, 6)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
@@ -127,7 +127,7 @@ public sealed class SqliteDatabase
                 Channels INTEGER NULL,
                 IsMissing INTEGER NOT NULL DEFAULT 0 CHECK (IsMissing IN (0, 1)),
                 ContentVerificationStatus TEXT NOT NULL DEFAULT 'Verified'
-                    CHECK (ContentVerificationStatus IN ('Verified', 'VerificationFailed', 'ReevaluationPending', 'ReevaluationFailed')),
+                    CHECK (ContentVerificationStatus IN ('Verified', 'VerificationPending', 'VerificationFailed', 'ReevaluationPending', 'ReevaluationFailed')),
                 ContentVerificationError TEXT NULL,
                 UpdatedAtUtcTicks INTEGER NOT NULL
             );
