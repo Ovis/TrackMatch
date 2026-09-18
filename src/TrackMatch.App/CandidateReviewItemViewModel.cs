@@ -57,15 +57,32 @@ public sealed partial class CandidateReviewItemViewModel
         _ => "未レビュー",
     };
 
-    public string ReviewOriginText => IsHumanVerdictSuspended
-        ? $"解析失敗により判定を一時利用停止中{(string.IsNullOrWhiteSpace(Row.HumanVerdictSuspensionReason) ? string.Empty : $": {Row.HumanVerdictSuspensionReason}")}"
-        : IsReviewSkipped
-            ? ReviewSkipReason ?? string.Empty
-            : Row.ReviewDecision is null
-                ? Row.IsSupplementalCandidate ? "Keep候補を決定するための補完Candidate" : string.Empty
-            : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
+    public string ReviewOriginText
+    {
+        get
+        {
+            if (IsHumanVerdictSuspended)
+            {
+                return string.IsNullOrWhiteSpace(Row.HumanVerdictSuspensionReason)
+                    ? "解析失敗により判定を一時利用停止中"
+                    : $"解析失敗により判定を一時利用停止中: {Row.HumanVerdictSuspensionReason}";
+            }
+
+            if (IsReviewSkipped)
+            {
+                return ReviewSkipReason ?? string.Empty;
+            }
+
+            if (Row.ReviewDecision is null)
+            {
+                return Row.IsSupplementalCandidate ? "Keep候補を決定するための補完Candidate" : string.Empty;
+            }
+
+            return string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
                 ? "判定元: 不明"
                 : $"判定元: {Row.ReviewSourceLibraryName}";
+        }
+    }
 
     public string Reason => Row.Reason ?? "自動判定は未実施";
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);
