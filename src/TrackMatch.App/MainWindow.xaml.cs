@@ -429,11 +429,8 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // 同じVerdictでKeepだけを変更する操作はLibrary固有Dispositionだけが変わるため、Global変更警告は不要。
-        if (selected.Row.ReviewDecision == targetDecision)
-        {
-            return true;
-        }
+        // ConfirmedDuplicateのPreferred Track変更もGlobal Human Verdictの変更である。
+        // Decision種別だけが同じでも別Library由来なら警告対象から除外しない。
 
         var sourceLibraryId = selected.Row.ReviewSourceLibraryId;
         var sourceNameSnapshot = selected.Row.ReviewSourceLibraryName;
@@ -495,15 +492,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        // レビュー省略Pairは操作不要を基本とし、明示的なGlobal edge化だけを低頻度操作として提示する。
-        var explicitConfirmItem = new MenuItem
-        {
-            Header = "重複として明示確定",
-            IsEnabled = _viewModel.CanExplicitlyConfirmSkippedReview,
-            Visibility = _viewModel.SelectedCandidate?.IsReviewSkipped == true ? Visibility.Visible : Visibility.Collapsed,
-        };
-        explicitConfirmItem.Click += ConfirmSkippedDuplicate_Click;
-
         var clearReviewItem = new MenuItem
         {
             Header = "レビュー判定を解除",
@@ -516,23 +504,8 @@ public partial class MainWindow : Window
             PlacementTarget = button,
             Placement = PlacementMode.Bottom,
         };
-        if (explicitConfirmItem.Visibility == Visibility.Visible)
-        {
-            menu.Items.Add(explicitConfirmItem);
-        }
         menu.Items.Add(clearReviewItem);
         menu.IsOpen = true;
-    }
-
-    private async void ConfirmSkippedDuplicate_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_viewModel.CanExplicitlyConfirmSkippedReview)
-        {
-            return;
-        }
-
-        // 明示確定はKeepを変更しない補助操作なので、通常のA/B Keep選択や確認Dialogには流さない。
-        await ExecuteReviewActionAsync(CandidateReviewDecision.ConfirmedDuplicate, _viewModel.ConfirmSkippedDuplicateAsync);
     }
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)
