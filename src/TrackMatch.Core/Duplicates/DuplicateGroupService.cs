@@ -102,10 +102,10 @@ public sealed class DuplicateGroupService(
         var group = await groupRepository.GetByIdAsync(groupId, libraryId, cancellationToken);
         if (group is null) return;
 
-        // ProjectionのTrackIdsにはMissing Trackも残り得るため、Keep候補は実際に利用可能なTrackだけから導出する。
-        // Library外のPreferred TrackもGlobal Groupの優劣関係には参加するので、対象集合自体はGlobalTrackIdsを使う。
-        var activeTrackIds = new List<long>(group.GlobalTrackIds.Count);
-        foreach (var groupTrackId in group.GlobalTrackIds)
+        // KeepはLibrary固有なので、現在LibraryのMembershipに存在するTrackだけを候補にする。
+        // Global Group外部のPreferred Trackを理由に、現在Libraryで実際に残せるTrackを候補から落としてはならない。
+        var activeTrackIds = new List<long>(group.TrackIds.Count);
+        foreach (var groupTrackId in group.TrackIds)
         {
             var track = await trackLookupRepository.GetByIdAsync(groupTrackId, cancellationToken);
             if (track is not null && !track.IsMissing)
@@ -133,7 +133,12 @@ public sealed class DuplicateGroupService(
             return;
         }
 
-        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, activeTrackIds);
+        var activeTrackIdSet = activeTrackIds.ToHashSet();
+        var localReviews = groupReviews
+            .Where(review => activeTrackIdSet.Contains(review.Pair.TrackIdA)
+                && activeTrackIdSet.Contains(review.Pair.TrackIdB))
+            .ToArray();
+        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(localReviews, activeTrackIds);
         await groupRepository.SetDerivedKeepStateAsync(
             libraryId,
             group.Id,
