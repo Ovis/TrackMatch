@@ -28,7 +28,8 @@ public sealed class DuplicateGroupService(
         try
         {
             if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepForAllLibrariesAsync(proposed, CancellationToken.None);
+            await ApplyDerivedKeepForLibraryAsync(libraryId, proposed, CancellationToken.None);
+            await ApplyDerivedKeepForAllLibrariesAsync(proposed, libraryId, CancellationToken.None);
         }
         catch
         {
@@ -49,7 +50,8 @@ public sealed class DuplicateGroupService(
         try
         {
             if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepForAllLibrariesAsync(proposed, CancellationToken.None);
+            await ApplyDerivedKeepForLibraryAsync(libraryId, proposed, CancellationToken.None);
+            await ApplyDerivedKeepForAllLibrariesAsync(proposed, libraryId, CancellationToken.None);
         }
         catch
         {
@@ -66,20 +68,32 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
         if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
-        await ApplyDerivedKeepForAllLibrariesAsync(reviews, cancellationToken);
+        await ApplyDerivedKeepForAllLibrariesAsync(reviews, excludedLibraryId: null, cancellationToken);
     }
 
     private async Task ApplyDerivedKeepForAllLibrariesAsync(
         IReadOnlyCollection<CandidateReview> reviews,
+        long? excludedLibraryId,
         CancellationToken cancellationToken)
     {
         foreach (var libraryId in await groupRepository.GetLibraryIdsAsync(cancellationToken))
         {
-            var groups = await groupRepository.GetByLibraryIdAsync(libraryId, cancellationToken);
-            foreach (var group in groups)
+            if (libraryId != excludedLibraryId)
             {
-                await ApplyDerivedKeepAsync(libraryId, group.Id, reviews, cancellationToken);
+                await ApplyDerivedKeepForLibraryAsync(libraryId, reviews, cancellationToken);
             }
+        }
+    }
+
+    private async Task ApplyDerivedKeepForLibraryAsync(
+        long libraryId,
+        IReadOnlyCollection<CandidateReview> reviews,
+        CancellationToken cancellationToken)
+    {
+        var groups = await groupRepository.GetByLibraryIdAsync(libraryId, cancellationToken);
+        foreach (var group in groups)
+        {
+            await ApplyDerivedKeepAsync(libraryId, group.Id, reviews, cancellationToken);
         }
     }
 
