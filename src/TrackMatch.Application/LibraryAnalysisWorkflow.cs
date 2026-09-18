@@ -186,7 +186,23 @@ public sealed class LibraryAnalysisWorkflow
                 value.CompletedFiles,
                 value.TotalFiles,
                 $"対象フォルダ {value.RootIndex}/{value.RootCount}")));
-        var scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
+        IncrementalScanResult scan;
+        try
+        {
+            scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
+
+            // Content Changed確定でHuman Verdictが削除された時点から旧Groupを表示・利用し続けない。
+            // Candidate再評価は長時間化し得るため、その完了を待たず残存Verdictだけで派生状態を更新する。
+            var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+            await SynchronizeDuplicateGroupsAsync(scanDatabase, CancellationToken.None);
+        }
+        catch
+        {
+            // Scan途中でキャンセルやDB障害が起きても、それ以前に確定済みのContent Changeだけは派生Groupへ反映する。
+            var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+            await TrySynchronizeDuplicateGroupsAsync(scanDatabase);
+            throw;
+        }
 
         try
         {
