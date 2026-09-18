@@ -116,7 +116,8 @@ public sealed class SqliteCandidatePairRepository(
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
-                WHERE (
+                WHERE MinimumSegmentHashDistance >= 0
+                  AND (
                         EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
                      OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
                   AND EXISTS (
@@ -141,7 +142,8 @@ public sealed class SqliteCandidatePairRepository(
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
-                WHERE (
+                WHERE MinimumSegmentHashDistance >= 0
+                  AND (
                         EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
                      OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
                   AND EXISTS (
