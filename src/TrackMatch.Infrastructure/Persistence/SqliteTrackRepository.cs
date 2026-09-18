@@ -479,6 +479,23 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        if (string.Equals(status, "Verified", StringComparison.Ordinal))
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM TrackFileOrganizationBlocks
+                WHERE SourceTrackId IN (
+                    SELECT t.Id
+                    FROM Tracks t
+                    WHERE t.ContentVerificationStatus = 'ReevaluationPending'
+                      AND t.Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId));
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE Tracks
@@ -487,7 +504,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
               AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
             """,
             new { LibraryId = libraryId, Status = status },
+            transaction,
             cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static async Task ArchiveAndInvalidateTrackContentAsync(
