@@ -39,7 +39,7 @@ public sealed class CandidateReviewItemViewModelTests
         Assert.True(viewModel.IsReviewSkipped);
         Assert.False(viewModel.IsReviewed);
         Assert.Equal("レビュー省略", viewModel.ReviewResult);
-        Assert.Contains("削除候補同士", viewModel.ReviewOriginText);
+        Assert.Contains("Keep決定に不要", viewModel.ReviewOriginText);
     }
 
     [Theory]
