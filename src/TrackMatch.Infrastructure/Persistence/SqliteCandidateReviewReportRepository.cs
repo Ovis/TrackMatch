@@ -28,6 +28,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    x.BestOffsetTicks, x.MatchedDurationTicks,
                    x.ComparedAtUtcTicks, c.ClassifiedAtUtcTicks,
                    a.Path AS PathA, b.Path AS PathB,
+                   a.ContentVerificationStatus AS ContentVerificationStatusA,
+                   b.ContentVerificationStatus AS ContentVerificationStatusB,
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
                    a.Album AS AlbumA, b.Album AS AlbumB,
@@ -110,6 +112,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         }
 
         var reviewSourceLibraryName = row.CurrentReviewSourceLibraryName ?? row.ReviewSourceLibraryNameSnapshot;
+        var isHumanVerdictSuspended = reviewDecision is not null
+            && (!string.Equals(row.ContentVerificationStatusA, "Verified", StringComparison.Ordinal)
+                || !string.Equals(row.ContentVerificationStatusB, "Verified", StringComparison.Ordinal));
         return new CandidateReviewReportRow(
             row.TrackIdA, row.TrackIdB, kind, row.Reason,
             row.Similarity, row.CoverageA, row.CoverageB, row.DurationRatio,
@@ -130,7 +135,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 row.ComparedAtUtcTicks,
                 row.ClassifiedAtUtcTicks,
                 row.ReviewedAtUtcTicks),
-            row.PreferredTrackId);
+            row.PreferredTrackId,
+            isHumanVerdictSuspended);
     }
 
     /// <summary>
@@ -179,7 +185,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         long TrackIdA, long TrackIdB, string? Kind, string? Reason,
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
         long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks, long? ClassifiedAtUtcTicks,
-        string PathA, string PathB, string ArtistsJsonA, string ArtistsJsonB,
+        string PathA, string PathB, string ContentVerificationStatusA, string ContentVerificationStatusB,
+        string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
         long? YearA, long? YearB,
