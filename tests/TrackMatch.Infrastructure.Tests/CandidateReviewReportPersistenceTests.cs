@@ -220,6 +220,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         await tracks.UpsertMetadataAsync(
             CreateMetadata("content-a.flac", fileSize: 2048),
             TestContext.Current.CancellationToken);
+        await tracks.ConfirmContentChangedAsync(trackA, TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var history = await connection.QuerySingleAsync<(string? SourceLibraryNameSnapshot, string ChangeKind)>(
