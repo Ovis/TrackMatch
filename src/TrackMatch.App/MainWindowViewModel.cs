@@ -339,7 +339,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         get
         {
             var minimum = SimilarityDisplayLowerBoundPercent / 100d;
-            return _allCandidates.Where(item => item.Row.Similarity >= minimum);
+            return _allCandidates.Where(item => item.Row.IsSupplementalCandidate || item.Row.Similarity >= minimum);
         }
     }
 
