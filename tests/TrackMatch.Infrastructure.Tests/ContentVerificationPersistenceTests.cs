@@ -70,6 +70,46 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerificationFailure_TemporarilySplitsGroupAndVerifiedRejoinsIt()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var lookup = new SqliteTrackLookupRepository(_database);
+        var groups = new SqliteDuplicateGroupRepository(_database);
+        var a = await AddTrackAsync(tracks, "split-a.flac");
+        var b = await AddTrackAsync(tracks, "split-b.flac");
+        var c = await AddTrackAsync(tracks, "split-c.flac");
+        var service = new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(_database, _libraryId),
+            lookup,
+            groups);
+
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
+            TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(CandidatePairKey.Create(b, c), CandidateReviewDecision.ConfirmedDuplicate, b, null),
+            TestContext.Current.CancellationToken);
+        Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+
+        await tracks.MarkContentVerificationFailedAsync(b, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        // bに直接関係するVerdictは保持するが派生計算から外れるため、現在利用可能なGroupは一時的に消える。
+        Assert.Empty(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal(2, (await new SqliteCandidateReviewRepository(_database).GetAllAsync(TestContext.Current.CancellationToken)).Count);
+
+        await tracks.MarkContentVerifiedAsync(b, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+        Assert.Equal([a, b, c], restored.GlobalTrackIds.Order().ToArray());
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
+    }
+
+    [Fact]
     public async Task ContentChanged_DeletesOnlyDirectVerdictsWithoutHistory()
     {
         var tracks = new SqliteTrackRepository(_database);
