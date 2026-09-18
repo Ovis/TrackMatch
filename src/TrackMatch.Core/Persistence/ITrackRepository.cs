@@ -75,7 +75,10 @@ public interface ITrackRepository
         => Task.FromResult(false);
 
     /// <summary>追加解析失敗により対象TrackのHuman Verdictを一時利用停止する。</summary>
-    Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
+    Task MarkContentVerificationFailedAsync(
+        long trackId,
+        CancellationToken cancellationToken = default,
+        string? error = null)
         => Task.CompletedTask;
 
     /// <summary>音声内容変更が確定したTrackのContent依存状態を無効化する。</summary>
