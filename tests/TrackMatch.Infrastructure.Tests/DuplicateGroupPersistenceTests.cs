@@ -225,7 +225,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreButRequiresKeepReviewAfterRestore()
+    public async Task SynchronizeGlobalAsync_RecordsMissingAndReusesVerdictAfterRestore()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
@@ -257,7 +257,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
             "SELECT ChangeKind FROM LibraryDuplicateGroupKeepHistory ORDER BY Id;"))
             .ToArray();
         Assert.Contains("KeepMissing", changeKinds);
-        Assert.Contains("KeepRestored", changeKinds);
+        Assert.Contains("HumanVerdict", changeKinds);
     }
 
     [Fact]
