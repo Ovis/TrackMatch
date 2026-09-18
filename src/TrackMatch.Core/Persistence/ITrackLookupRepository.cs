@@ -11,6 +11,15 @@ public interface ITrackLookupRepository
     Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 対象Trackに関係するHuman Verdictを現在の派生計算へ利用できるか確認する。
+    /// </summary>
+    async Task<bool> IsHumanVerdictUsableAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        var track = await GetByIdAsync(trackId, cancellationToken);
+        return track is not null && !track.IsMissing;
+    }
+
+    /// <summary>
     /// 指定TrackがLibraryのMembershipに含まれるか確認する。
     /// </summary>
     Task<bool> IsInLibraryAsync(long trackId, long libraryId, CancellationToken cancellationToken = default);
