@@ -47,4 +47,5 @@ public sealed record CandidateReviewReportRow(
     uint? YearB = null,
     long? ReviewSourceLibraryId = null,
     string? ReviewSourceLibraryName = null,
-    bool ReReviewRecommended = false);
+    bool ReReviewRecommended = false,
+    long? PreferredTrackId = null);
