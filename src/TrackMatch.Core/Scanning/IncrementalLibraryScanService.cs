@@ -140,7 +140,7 @@ public sealed class IncrementalLibraryScanService(
                         if (contentChanged || verificationPending)
                         {
                             // Decoder/I/O失敗はContent Changedと断定せず、Human Verdictを保持したまま派生計算だけ停止する。
-                            await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None);
+                            await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None, exception.Message);
                         }
 
                         errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
