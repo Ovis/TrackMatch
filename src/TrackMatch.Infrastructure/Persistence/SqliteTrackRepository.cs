@@ -367,14 +367,19 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
-    public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
+    public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default, string? error = null)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
-            "UPDATE Tracks SET ContentVerificationStatus = 'VerificationFailed' WHERE Id = @TrackId;",
-            new { TrackId = trackId },
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'VerificationFailed',
+                ContentVerificationError = @Error
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId, Error = error },
             transaction,
             cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
@@ -384,6 +389,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     public async Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
     {
         await SetContentVerificationStatusAsync(trackId, "Verified", cancellationToken);
+        await ClearContentVerificationErrorAsync(trackId, cancellationToken);
         await ClearFileOrganizationBlockAsync(trackId, cancellationToken);
     }
 
@@ -423,7 +429,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         // Content Changed確定後だけ、対象Trackに直接関係するVerdictとContent依存解析を同一Transactionで無効化する。
         await InvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition(
-            "UPDATE Tracks SET ContentVerificationStatus = 'ReevaluationPending' WHERE Id = @TrackId;",
+            "UPDATE Tracks SET ContentVerificationStatus = 'ReevaluationPending', ContentVerificationError = NULL WHERE Id = @TrackId;",
             new { TrackId = trackId },
             transaction,
             cancellationToken: cancellationToken));
@@ -450,6 +456,15 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             """,
             new { TrackId = trackId },
             transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    private async Task ClearContentVerificationErrorAsync(long trackId, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET ContentVerificationError = NULL WHERE Id = @TrackId;",
+            new { TrackId = trackId },
             cancellationToken: cancellationToken));
     }
 
@@ -501,7 +516,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE Tracks
-            SET ContentVerificationStatus = 'ReevaluationPending'
+            SET ContentVerificationStatus = 'ReevaluationPending',
+                ContentVerificationError = NULL
             WHERE ContentVerificationStatus = 'ReevaluationFailed'
               AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
             """,
@@ -520,15 +536,19 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     /// <summary>
     /// LibraryのCandidate再評価が失敗したTrackを永続的な失敗状態へ遷移させる。
     /// </summary>
-    public async Task MarkReevaluationFailedAsync(long libraryId, CancellationToken cancellationToken = default)
+    public async Task MarkReevaluationFailedAsync(
+        long libraryId,
+        string? error,
+        CancellationToken cancellationToken = default)
     {
-        await SetReevaluationStatusForLibraryAsync(libraryId, "ReevaluationFailed", cancellationToken);
+        await SetReevaluationStatusForLibraryAsync(libraryId, "ReevaluationFailed", cancellationToken, error);
     }
 
     private async Task SetReevaluationStatusForLibraryAsync(
         long libraryId,
         string status,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? error = null)
     {
         if (libraryId <= 0)
         {
@@ -556,11 +576,12 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE Tracks
-            SET ContentVerificationStatus = @Status
+            SET ContentVerificationStatus = @Status,
+                ContentVerificationError = @Error
             WHERE ContentVerificationStatus = 'ReevaluationPending'
               AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
             """,
-            new { LibraryId = libraryId, Status = status },
+            new { LibraryId = libraryId, Status = status, Error = error },
             transaction,
             cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
