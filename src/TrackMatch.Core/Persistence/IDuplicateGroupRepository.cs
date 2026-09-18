@@ -48,19 +48,5 @@ public interface IDuplicateGroupRepository
         long? keepTrackId,
         DuplicateGroupKeepStatus status,
         string changeKind,
-        CancellationToken cancellationToken = default)
-        => status == DuplicateGroupKeepStatus.Selected && keepTrackId is { } selected
-            ? SetKeepAsync(libraryId, groupId, selected, changeKind, cancellationToken)
-            : Task.CompletedTask;
-
-    /// <summary>
-    /// 指定LibraryのGroup Keepを設定する。
-    /// Library外TrackもGlobal Group構成TrackであればKeepにできる。
-    /// </summary>
-    Task SetKeepAsync(
-        long libraryId,
-        long groupId,
-        long keepTrackId,
-        string changeKind,
         CancellationToken cancellationToken = default);
 }
