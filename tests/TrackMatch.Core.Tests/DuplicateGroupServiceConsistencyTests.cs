@@ -27,7 +27,7 @@ public sealed class DuplicateGroupServiceConsistencyTests
 
         Assert.True(cancellation.IsCancellationRequested);
         Assert.Equal([false], groups.ReplaceCancellationStates);
-        Assert.Equal([false], groups.SetKeepCancellationStates);
+        Assert.Equal([false], groups.SetDerivedKeepCancellationStates);
         Assert.Equal(1, groups.SelectedKeepTrackId);
     }
 
