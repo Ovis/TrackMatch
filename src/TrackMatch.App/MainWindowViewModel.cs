@@ -364,7 +364,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
-        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var reviews = await GetUsableReviewsAsync(database);
 
         // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、派生計算に必要なCurrent Stateを一括取得する。
         // 取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
@@ -452,7 +452,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// </summary>
     private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId)
     {
-        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var reviews = await GetUsableReviewsAsync(database);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var pairs = new SqliteCandidatePairRepository(database, libraryId);
         var existingPairs = await pairs.GetAllAsync();
@@ -493,6 +493,39 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
         await workflow.AnalyzeCandidatesAsync(libraryId);
         await workflow.ClassifyCandidatesAsync(libraryId);
+    }
+
+    /// <summary>
+    /// Content Verification中のTrackに関係するVerdictを除き、現在の派生計算へ利用可能なHuman Verdictだけを取得する。
+    /// </summary>
+    private static async Task<IReadOnlyList<CandidateReview>> GetUsableReviewsAsync(SqliteDatabase database)
+    {
+        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var tracks = new SqliteTrackLookupRepository(database);
+        var result = new List<CandidateReview>(reviews.Count);
+        var usableByTrackId = new Dictionary<long, bool>();
+
+        foreach (var review in reviews)
+        {
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdA, out var usableA))
+            {
+                usableA = await tracks.IsHumanVerdictUsableAsync(review.Pair.TrackIdA);
+                usableByTrackId.Add(review.Pair.TrackIdA, usableA);
+            }
+
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdB, out var usableB))
+            {
+                usableB = await tracks.IsHumanVerdictUsableAsync(review.Pair.TrackIdB);
+                usableByTrackId.Add(review.Pair.TrackIdB, usableB);
+            }
+
+            if (usableA && usableB)
+            {
+                result.Add(review);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
