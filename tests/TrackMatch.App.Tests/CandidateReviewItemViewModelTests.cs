@@ -31,7 +31,7 @@ public sealed class CandidateReviewItemViewModelTests
             [1, 2, 3],
             [1, 2, 3]);
 
-        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group]);
+        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group], []);
         var viewModel = new CandidateReviewItemViewModel(
             row,
             states[CandidatePairKey.Create(2, 3)]);
@@ -51,13 +51,13 @@ public sealed class CandidateReviewItemViewModelTests
         var row = CreateRow(decision: null, trackIdA: 2, trackIdB: 3);
         var group = new DuplicateGroup(10, 1, null, keepStatus, [1, 2, 3], [1, 2, 3]);
 
-        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group]);
+        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group], []);
 
         Assert.False(states[CandidatePairKey.Create(2, 3)].IsReviewSkipped);
     }
 
     [Fact]
-    public void Resolve_PairContainsKeep_DoesNotSkip()
+    public void Resolve_UniqueKeep_AllRemainingPairsCanSkip()
     {
         var row = CreateRow(decision: null, trackIdA: 1, trackIdB: 2);
         var group = new DuplicateGroup(
@@ -68,9 +68,9 @@ public sealed class CandidateReviewItemViewModelTests
             [1, 2, 3],
             [1, 2, 3]);
 
-        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group]);
+        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group], []);
 
-        Assert.False(states[CandidatePairKey.Create(1, 2)].IsReviewSkipped);
+        Assert.True(states[CandidatePairKey.Create(1, 2)].IsReviewSkipped);
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public sealed class CandidateReviewItemViewModelTests
             [1, 2, 3],
             [1, 2, 3]);
 
-        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group]);
+        var states = CandidateReviewPresentationStateResolver.Resolve([row], [group], []);
 
         Assert.False(states[CandidatePairKey.Create(2, 3)].IsReviewSkipped);
     }
