@@ -222,12 +222,22 @@ public sealed class LibraryAnalysisWorkflow
             await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
             return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
         }
-        catch
+        catch (OperationCanceledException)
+        {
+            // キャンセルは解析障害とは区別する。ReevaluationPendingを維持し、次回Workflowでそのまま再試行する。
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await TrySynchronizeDuplicateGroupsAsync(database);
+            throw;
+        }
+        catch (Exception exception)
         {
             // Content Changed確定後の再評価が途中で失敗した場合は、次回通常Workflowで再試行できるよう状態を残す。
             // 失敗TrackをKeepやTrash判断へ戻さないため、派生Groupも失敗状態を反映して再同期する。
             var database = await OpenDatabaseAsync(CancellationToken.None);
-            await new SqliteTrackRepository(database).MarkReevaluationFailedAsync(libraryId, CancellationToken.None);
+            await new SqliteTrackRepository(database).MarkReevaluationFailedAsync(
+                libraryId,
+                exception.Message,
+                CancellationToken.None);
             await TrySynchronizeDuplicateGroupsAsync(database);
             throw;
         }
