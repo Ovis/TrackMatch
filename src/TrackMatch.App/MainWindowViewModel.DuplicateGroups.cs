@@ -31,7 +31,7 @@ public sealed partial class MainWindowViewModel
     }
 
     /// <summary>
-    /// 指定TrackをKeepにする操作が現在Libraryの既存Keepへ与える影響を確認Dialog向け文面として返す。
+    /// 指定TrackをPreferredとするHuman Verdictが派生Keepへ与える影響を確認Dialog向け文面として返す。
     /// </summary>
     public async Task<string?> GetKeepChangeImpactAsync(long keepTrackId)
     {
@@ -68,15 +68,15 @@ public sealed partial class MainWindowViewModel
             var group = groups[0];
             if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
             {
-                return $"この操作により、重複グループ #{group.Id} で残すファイルを「{newKeepName}」に設定します。";
+                return $"この優劣判定により、重複グループ #{group.Id} の残すファイルが「{newKeepName}」に一意化されます。";
             }
 
             var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
-            return $"この操作により、重複グループ #{group.Id} の残すファイルが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{newKeepName}」に変更されます。";
+            return $"この優劣判定により、重複グループ #{group.Id} の派生Keepが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{newKeepName}」へ変わる可能性があります。";
         }
 
         var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
-        return $"この操作により重複グループ {groupIds} が結合されます。既存Keepが複数ある場合、結合後は自動選択せず要確認になります。";
+        return $"このHuman Verdictにより重複グループ {groupIds} が結合されます。結合後のKeepは全優劣関係から再計算されます。";
     }
 
     private async Task LoadDuplicateGroupsForSelectionAsync(CandidateReviewItemViewModel? selected)
