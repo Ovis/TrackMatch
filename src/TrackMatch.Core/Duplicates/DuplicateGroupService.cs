@@ -28,7 +28,7 @@ public sealed class DuplicateGroupService(
         try
         {
             if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepAsync(libraryId, review.Pair.TrackIdA, proposed, CancellationToken.None);
+            await ApplyDerivedKeepForAllLibrariesAsync(proposed, CancellationToken.None);
         }
         catch
         {
@@ -49,7 +49,7 @@ public sealed class DuplicateGroupService(
         try
         {
             if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepAsync(libraryId, pair.TrackIdA, proposed, CancellationToken.None);
+            await ApplyDerivedKeepForAllLibrariesAsync(proposed, CancellationToken.None);
         }
         catch
         {
@@ -66,11 +66,26 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
         if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        await ApplyDerivedKeepForAllLibrariesAsync(reviews, cancellationToken);
     }
 
-    private async Task ApplyDerivedKeepAsync(long libraryId, long trackId, IReadOnlyCollection<CandidateReview> reviews, CancellationToken cancellationToken)
+    private async Task ApplyDerivedKeepForAllLibrariesAsync(
+        IReadOnlyCollection<CandidateReview> reviews,
+        CancellationToken cancellationToken)
     {
-        var group = await groupRepository.GetByTrackIdAsync(trackId, libraryId, cancellationToken);
+        foreach (var libraryId in await groupRepository.GetLibraryIdsAsync(cancellationToken))
+        {
+            var groups = await groupRepository.GetByLibraryIdAsync(libraryId, cancellationToken);
+            foreach (var group in groups)
+            {
+                await ApplyDerivedKeepAsync(libraryId, group.Id, reviews, cancellationToken);
+            }
+        }
+    }
+
+    private async Task ApplyDerivedKeepAsync(long libraryId, long groupId, IReadOnlyCollection<CandidateReview> reviews, CancellationToken cancellationToken)
+    {
+        var group = await groupRepository.GetByIdAsync(groupId, libraryId, cancellationToken);
         if (group is null) return;
 
         // ProjectionのTrackIdsにはMissing Trackも残り得るため、Keep候補は実際に利用可能なTrackだけから導出する。
@@ -85,11 +100,33 @@ public sealed class DuplicateGroupService(
             }
         }
 
-        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(reviews, activeTrackIds);
-        if (candidates.Count == 1 && group.KeepTrackId != candidates[0])
+        var groupTrackIds = group.GlobalTrackIds.ToHashSet();
+        var groupReviews = reviews
+            .Where(review => groupTrackIds.Contains(review.Pair.TrackIdA)
+                && groupTrackIds.Contains(review.Pair.TrackIdB))
+            .ToArray();
+        var hasConflict = DuplicateGroupConflictEvaluator.FindConflicts(groupReviews).Count != 0;
+        if (hasConflict)
         {
-            await groupRepository.SetKeepAsync(libraryId, group.Id, candidates[0], "HumanVerdict", cancellationToken);
+            // NotDuplicateとの矛盾はHuman Verdictを破棄せず正常なConflict状態として投影し、Trashを安全側で停止する。
+            await groupRepository.SetDerivedKeepStateAsync(
+                libraryId,
+                group.Id,
+                null,
+                DuplicateGroupKeepStatus.Conflict,
+                "HumanVerdict",
+                cancellationToken);
+            return;
         }
+
+        var candidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, activeTrackIds);
+        await groupRepository.SetDerivedKeepStateAsync(
+            libraryId,
+            group.Id,
+            candidates.Count == 1 ? candidates[0] : null,
+            candidates.Count == 1 ? DuplicateGroupKeepStatus.Selected : DuplicateGroupKeepStatus.Unselected,
+            "HumanVerdict",
+            cancellationToken);
     }
 
     private async Task TryRepairGlobalTopologyAsync()
