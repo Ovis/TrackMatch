@@ -35,7 +35,7 @@ public partial class MainWindow
             if (modifiers == ModifierKeys.Control && e.Key == Key.D1)
             {
                 e.Handled = true;
-                await window.ExecuteKeyboardReviewAsync(CandidateReviewDecision.NotDuplicate, keepTrackId: null);
+                await window.ExecuteKeyboardReviewAsync(CandidateReviewDecision.NotDuplicate, preferredTrackId: null);
                 return;
             }
 
