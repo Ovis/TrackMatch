@@ -207,6 +207,7 @@ public sealed class LibraryAnalysisWorkflow
             }
             catch
             {
+                // 元のScan例外を呼び出し元へ返すことを優先する。
             }
 
             throw;
