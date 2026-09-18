@@ -220,10 +220,29 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
         var globalMemberIds = group.GlobalTrackIds.ToHashSet();
         var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
-        var groupReviews = reviews
-            .Where(review => globalMemberIds.Contains(review.Pair.TrackIdA)
-                && globalMemberIds.Contains(review.Pair.TrackIdB))
-            .ToArray();
+        var trackLookup = new SqliteTrackLookupRepository(database);
+        var usableByTrackId = new Dictionary<long, bool>();
+        var groupReviews = new List<CandidateReview>();
+        foreach (var review in reviews.Where(review => globalMemberIds.Contains(review.Pair.TrackIdA)
+            && globalMemberIds.Contains(review.Pair.TrackIdB)))
+        {
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdA, out var usableA))
+            {
+                usableA = await trackLookup.IsHumanVerdictUsableAsync(review.Pair.TrackIdA);
+                usableByTrackId.Add(review.Pair.TrackIdA, usableA);
+            }
+
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdB, out var usableB))
+            {
+                usableB = await trackLookup.IsHumanVerdictUsableAsync(review.Pair.TrackIdB);
+                usableByTrackId.Add(review.Pair.TrackIdB, usableB);
+            }
+
+            if (usableA && usableB)
+            {
+                groupReviews.Add(review);
+            }
+        }
 
         if (group.KeepStatus == DuplicateGroupKeepStatus.Selected && group.KeepTrackId is { } keepTrackId)
         {
