@@ -60,6 +60,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
             new CandidateReview(
                 CandidatePairKey.Create(trackA, trackB),
                 CandidateReviewDecision.NotDuplicate,
+                null,
                 null),
             TestContext.Current.CancellationToken);
 
@@ -107,7 +108,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         }
 
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         var report = new SqliteCandidateReviewReportRepository(_database);
@@ -180,7 +181,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         var pair = CandidatePairKey.Create(trackA, trackB);
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         await libraries.DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
@@ -210,7 +211,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         var trackB = await AddTrackAsync(tracks, "content-b.flac");
         var pair = CandidatePairKey.Create(trackA, trackB);
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         await new SqliteLibraryRepository(_database).DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
