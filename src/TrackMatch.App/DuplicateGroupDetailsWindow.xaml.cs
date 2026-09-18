@@ -236,14 +236,20 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
 
         Conflicts.Clear();
+        var listedConflictPairs = new HashSet<CandidatePairKey>();
         foreach (var conflict in DuplicateGroupConflictEvaluator.FindConflicts(groupReviews))
         {
-            var a = trackModels[conflict.Pair.TrackIdA];
-            var b = trackModels[conflict.Pair.TrackIdB];
-            Conflicts.Add(new DuplicateGroupConflictViewModel(
-                conflict.Pair,
-                $"{a.Title} ↔ {b.Title}",
-                "NotDuplicateとConfirmedDuplicateの連結関係が矛盾しています"));
+            foreach (var relatedReview in conflict.RelatedReviews.Where(review => listedConflictPairs.Add(review.Pair)))
+            {
+                var a = trackModels[relatedReview.Pair.TrackIdA];
+                var b = trackModels[relatedReview.Pair.TrackIdB];
+                Conflicts.Add(new DuplicateGroupConflictViewModel(
+                    relatedReview.Pair,
+                    $"{a.Title} ↔ {b.Title}",
+                    relatedReview.Decision == CandidateReviewDecision.NotDuplicate
+                        ? "重複ではない判定がConfirmedDuplicateの連結関係と矛盾しています"
+                        : "このConfirmedDuplicate判定が矛盾する連結経路を構成しています"));
+            }
         }
 
         foreach (var review in reviews
