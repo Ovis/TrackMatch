@@ -8,7 +8,7 @@ namespace TrackMatch.Core.Duplicates;
 public static class ReviewNecessityEvaluator
 {
     /// <summary>
-    /// Keep候補同士に既存の未レビューCandidateが無い場合、補完すべきPairを必要最小限の1件だけ返す。
+    /// Keep候補を絞るため次にレビューすべきPairを1件返す。既存Candidateが無ければ、そのPairを補完生成対象とする。
     /// </summary>
     /// <param name="groupTrackIds">対象Duplicate Groupの現在Track</param>
     /// <param name="reviews">現在有効なHuman Verdict</param>
@@ -44,7 +44,7 @@ public static class ReviewNecessityEvaluator
                 var pair = CandidatePairKey.Create(candidates[i], candidates[j]);
                 if (!reviewed.Contains(pair) && existing.Contains(pair))
                 {
-                    return null;
+                    return pair;
                 }
             }
         }
