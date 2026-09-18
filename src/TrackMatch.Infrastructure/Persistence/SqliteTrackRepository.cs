@@ -559,20 +559,61 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         if (string.Equals(status, "Verified", StringComparison.Ordinal))
         {
-            await connection.ExecuteAsync(new CommandDefinition(
-                """
-                DELETE FROM TrackFileOrganizationBlocks
-                WHERE SourceTrackId IN (
-                    SELECT t.Id
-                    FROM Tracks t
-                    WHERE t.ContentVerificationStatus = 'ReevaluationPending'
-                      AND t.Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId));
-                """,
+            // Shared Trackは全Library MembershipのCandidate再評価が終わるまで利用可能へ戻さない。
+            // CandidateGenerationPendingをMembership単位の完了バリアとして使い、一部Libraryだけの成功で整理禁止を解除しない。
+            const string eligibleSql = """
+                SELECT t.Id
+                FROM Tracks t
+                WHERE t.ContentVerificationStatus = 'ReevaluationPending'
+                  AND t.Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId)
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM LibraryTracks pending
+                        WHERE pending.TrackId = t.Id
+                          AND pending.CandidateGenerationPending = 1);
+                """;
+            var completedTrackIds = (await connection.QueryAsync<long>(new CommandDefinition(
+                eligibleSql,
                 new { LibraryId = libraryId },
                 transaction,
-                cancellationToken: cancellationToken));
+                cancellationToken: cancellationToken))).ToArray();
+            if (completedTrackIds.Length != 0)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId IN @TrackIds;",
+                    new { TrackIds = completedTrackIds },
+                    transaction,
+                    cancellationToken: cancellationToken));
+                await connection.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE Tracks
+                    SET ContentVerificationStatus = 'Verified',
+                        ContentVerificationError = NULL
+                    WHERE Id IN @TrackIds;
+                    """,
+                    new { TrackIds = completedTrackIds },
+                    transaction,
+                    cancellationToken: cancellationToken));
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return;
         }
 
+        // Candidate生成後の比較・分類で失敗した場合も、そのLibraryの再評価を次回最初からやり直す。
+        // これによりShared Trackの別Libraryが成功しても、失敗したMembershipが残っている間はVerifiedにならない。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE LibraryTracks
+            SET CandidateGenerationPending = 1,
+                CandidateGenerationVersion = NULL
+            WHERE LibraryId = @LibraryId
+              AND TrackId IN (
+                    SELECT Id FROM Tracks WHERE ContentVerificationStatus = 'ReevaluationPending');
+            """,
+            new { LibraryId = libraryId },
+            transaction,
+            cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE Tracks
