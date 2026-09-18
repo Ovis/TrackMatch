@@ -556,7 +556,8 @@ public partial class MainWindow : Window
 
         if (confirmation.SelectedResult == AppDialogResult.Primary)
         {
-            await ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync);
+            await _viewModel.ExecuteReviewWithUndoAsync(
+                () => ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync));
         }
     }
 }
