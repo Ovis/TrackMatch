@@ -79,7 +79,7 @@ public sealed class MainWindowViewModelCandidateSkipTests
         IReadOnlyList<CandidateReviewReportRow> rows,
         IReadOnlyList<DuplicateGroup> groups)
     {
-        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups);
+        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, []);
         return rows.Select(row => new CandidateReviewItemViewModel(
             row,
             states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)])).ToArray();
