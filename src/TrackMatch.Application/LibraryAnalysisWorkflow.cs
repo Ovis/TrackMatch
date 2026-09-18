@@ -199,8 +199,16 @@ public sealed class LibraryAnalysisWorkflow
         catch
         {
             // Scan途中でキャンセルやDB障害が起きても、それ以前に確定済みのContent Changeだけは派生Groupへ反映する。
-            var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
-            await TrySynchronizeDuplicateGroupsAsync(scanDatabase);
+            // 修復用DB自体を開けない場合は、修復例外で元のScan失敗理由を上書きしない。
+            try
+            {
+                var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+                await TrySynchronizeDuplicateGroupsAsync(scanDatabase);
+            }
+            catch
+            {
+            }
+
             throw;
         }
 
