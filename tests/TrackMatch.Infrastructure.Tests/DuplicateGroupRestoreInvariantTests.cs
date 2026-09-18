@@ -107,8 +107,8 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
     }
 
     private DuplicateGroupService CreateService()
