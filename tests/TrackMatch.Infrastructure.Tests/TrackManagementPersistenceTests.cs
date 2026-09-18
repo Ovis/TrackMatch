@@ -184,8 +184,8 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
 
         var after = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { b, c }.Order().ToArray(), after.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, after.KeepStatus);
-        Assert.Null(after.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, after.KeepStatus);
+        Assert.Equal(b, after.KeepTrackId);
     }
 
     [Fact]
