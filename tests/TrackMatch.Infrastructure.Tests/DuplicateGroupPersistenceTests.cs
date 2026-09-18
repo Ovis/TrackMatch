@@ -48,7 +48,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var group = Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(DuplicateGroupKeepStatus.Selected, group.KeepStatus);
-        Assert.Equal(b, group.KeepTrackId);
+        Assert.Equal(a, group.KeepTrackId);
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.TrackIds);
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.GlobalTrackIds);
     }
@@ -77,22 +77,26 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveReview_ContradictingNotDuplicateIsRejectedBeforePersistence()
+    public async Task SaveReview_ContradictingNotDuplicateIsPreservedAsConflict()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveReviewAsync(
+        await service.SaveReviewAsync(
             _libraryId,
             new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.NotDuplicate, null),
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken);
 
         var reviews = await new SqliteCandidateReviewRepository(_database)
             .GetAllAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(2, reviews.Count);
-        Assert.DoesNotContain(reviews, review => review.Pair == CandidatePairKey.Create(a, c));
+        Assert.Equal(3, reviews.Count);
+        Assert.Contains(reviews, review => review.Pair == CandidatePairKey.Create(a, c)
+            && review.Decision == CandidateReviewDecision.NotDuplicate);
+        Assert.Contains(
+            DuplicateGroupConflictEvaluator.FindConflicts(reviews),
+            conflict => conflict.Pair == CandidatePairKey.Create(a, c));
     }
 
     [Fact]
@@ -324,8 +328,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         await service.SaveReviewAsync(
             libraryId,
-            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
-            keepTrackId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, keepTrackId, null),
             TestContext.Current.CancellationToken);
     }
 
