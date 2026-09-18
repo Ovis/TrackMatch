@@ -70,6 +70,10 @@ public interface ITrackRepository
 
     Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default);
 
+    /// <summary>Content Verificationを後続Scanで再試行する必要があるか確認する。</summary>
+    Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
     /// <summary>追加解析失敗により対象TrackのHuman Verdictを一時利用停止する。</summary>
     Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
