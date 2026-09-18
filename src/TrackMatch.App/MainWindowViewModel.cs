@@ -269,6 +269,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var groups = new SqliteDuplicateGroupRepository(database);
             var groupService = new DuplicateGroupService(reviews, tracks, groups);
             await groupService.DeleteReviewAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
+            await EnsureSupplementalCandidatesAsync(database, library.Id);
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
@@ -425,9 +426,58 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                     decision,
                     decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
                     null));
+            await EnsureSupplementalCandidatesAsync(database, library.Id);
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
+    }
+
+    /// <summary>
+    /// 現在の優劣関係だけではKeepを一意化できないGroupへ、必要最小限の補完Candidateを生成する。
+    /// </summary>
+    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId)
+    {
+        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var pairs = new SqliteCandidatePairRepository(database, libraryId);
+        var existingPairs = await pairs.GetAllAsync();
+        var required = new List<CandidatePairKey>();
+
+        foreach (var group in groups.Where(group => group.KeepStatus == DuplicateGroupKeepStatus.Unselected))
+        {
+            var groupTrackIds = group.GlobalTrackIds.ToHashSet();
+            var groupReviews = reviews
+                .Where(review => groupTrackIds.Contains(review.Pair.TrackIdA)
+                    && groupTrackIds.Contains(review.Pair.TrackIdB))
+                .ToArray();
+            var pair = ReviewNecessityEvaluator.FindSupplementalPair(group.TrackIds, groupReviews, existingPairs);
+            if (pair is { } supplemental)
+            {
+                required.Add(supplemental);
+            }
+        }
+
+        var existingKeys = existingPairs
+            .Select(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB))
+            .ToHashSet();
+        var created = false;
+        foreach (var pair in required.Where(pair => !existingKeys.Contains(pair)))
+        {
+            await pairs.EnsureSupplementalAsync(pair);
+            created = true;
+        }
+
+        await pairs.DeleteObsoleteSupplementalAsync(required);
+        if (!created)
+        {
+            return;
+        }
+
+        // 補完Candidateも通常Candidateと同じ3択レビューに載せるため、raw Fingerprint比較と分類まで通常経路を再利用する。
+        var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
+        var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
+        await workflow.AnalyzeCandidatesAsync(libraryId);
+        await workflow.ClassifyCandidatesAsync(libraryId);
     }
 
     private async Task ReloadCandidatesPreservingPairAsync(long trackIdA, long trackIdB)
