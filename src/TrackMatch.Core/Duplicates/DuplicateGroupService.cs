@@ -20,8 +20,9 @@ public sealed class DuplicateGroupService(
         var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
         if (allReviews.SingleOrDefault(item => item.Pair == review.Pair) == review) return;
         var proposed = allReviews.Where(item => item.Pair != review.Pair).Append(review).ToArray();
+        // 一時利用停止中のVerdictも将来復帰するCurrent Human Verdictであるため、循環不変条件だけは全Current集合で検証する。
+        PreferenceGraphEvaluator.EnsureAcyclic(proposed);
         var active = await GetActiveGlobalReviewsAsync(proposed, cancellationToken);
-        PreferenceGraphEvaluator.EnsureAcyclic(active);
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(active, existingGroups);
         await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
@@ -103,7 +104,7 @@ public sealed class DuplicateGroupService(
         if (group is null) return;
 
         // KeepはLibrary固有なので、現在LibraryのMembershipに存在するTrackだけを候補にする。
-        // Global Group外部のPreferred Trackを理由に、現在Libraryで実際に残せるTrackを候補から落としてはならない。
+        // Library外のPreferred Trackだけを理由に、現在Libraryで実際に残せるTrackを候補から落としてはならない。
         var activeTrackIds = new List<long>(group.TrackIds.Count);
         foreach (var groupTrackId in group.TrackIds)
         {
