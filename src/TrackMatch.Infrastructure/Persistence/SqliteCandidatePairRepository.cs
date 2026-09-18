@@ -52,7 +52,8 @@ public sealed class SqliteCandidatePairRepository(
             .Where(row =>
             {
                 var key = CandidatePairKey.Create(row.TrackIdA, row.TrackIdB);
-                return !incomingByKey.ContainsKey(key) && !reviewedKeys.Contains(key);
+                return row.MinimumSegmentHashDistance >= 0
+                    && !incomingByKey.ContainsKey(key) && !reviewedKeys.Contains(key);
             })
             .ToArray();
         if (obsolete.Length != 0)
@@ -167,6 +168,51 @@ public sealed class SqliteCandidatePairRepository(
 
         await UpsertAsync(connection, transaction, pairs, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Keep確定に必要な補完Candidateを1件追加する。
+    /// </summary>
+    /// <remarks>
+    /// 負の距離は類似度探索由来ではない補完Candidateの内部識別子として使用する。
+    /// 通常GeneratorのReplace処理では未レビューの補完Candidateを勝手に削除しない。
+    /// </remarks>
+    public async Task EnsureSupplementalAsync(
+        CandidatePairKey pair,
+        CancellationToken cancellationToken = default)
+    {
+        var candidate = new CandidatePair(pair.TrackIdA, pair.TrackIdB, -1);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await EnsurePairsInScopeAsync(connection, transaction, [candidate], cancellationToken);
+        await UpsertAsync(connection, transaction, [candidate], cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 未レビューの補完Candidateのうち、現在不要になったPairを削除する。
+    /// </summary>
+    public async Task DeleteObsoleteSupplementalAsync(
+        IReadOnlyCollection<CandidatePairKey> requiredPairs,
+        CancellationToken cancellationToken = default)
+    {
+        var required = requiredPairs.ToHashSet();
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = (await connection.QueryAsync<ReviewPairRow>(new CommandDefinition(
+            """
+            SELECT p.TrackIdA, p.TrackIdB
+            FROM CandidatePairs p
+            WHERE p.MinimumSegmentHashDistance < 0
+              AND NOT EXISTS (
+                    SELECT 1 FROM CandidateReviews r
+                    WHERE r.TrackIdA = p.TrackIdA AND r.TrackIdB = p.TrackIdB);
+            """,
+            cancellationToken: cancellationToken))).ToArray();
+        var obsolete = rows
+            .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
+            .Where(pair => !required.Contains(pair))
+            .ToArray();
+        await DeleteAsync(obsolete, cancellationToken);
     }
 
     public async Task DeleteAsync(
