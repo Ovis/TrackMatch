@@ -363,7 +363,26 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
             new { TrackId = trackId },
             cancellationToken: cancellationToken));
-        return status is "VerificationFailed";
+        return status is "VerificationPending" or "VerificationFailed";
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'VerificationPending',
+                ContentVerificationError = NULL
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
