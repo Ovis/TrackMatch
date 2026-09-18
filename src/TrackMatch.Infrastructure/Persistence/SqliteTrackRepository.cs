@@ -351,6 +351,22 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var status = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        return status is "VerificationFailed" or "ReevaluationPending" or "ReevaluationFailed";
+    }
+
+    /// <inheritdoc />
     public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
