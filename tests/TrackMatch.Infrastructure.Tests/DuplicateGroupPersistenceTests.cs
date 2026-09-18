@@ -241,16 +241,16 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
 
         var missingProjection = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { b, c }.Order().ToArray(), missingProjection.GlobalTrackIds);
-        Assert.Equal(DuplicateGroupKeepStatus.Missing, missingProjection.KeepStatus);
-        Assert.Null(missingProjection.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, missingProjection.KeepStatus);
+        Assert.Equal(b, missingProjection.KeepTrackId);
 
         await tracks.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds);
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var changeKinds = (await connection.QueryAsync<string>(
