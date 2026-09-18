@@ -50,4 +50,5 @@ public sealed record CandidateReviewReportRow(
     bool ReReviewRecommended = false,
     long? PreferredTrackId = null,
     bool IsHumanVerdictSuspended = false,
-    string? HumanVerdictSuspensionReason = null);
+    string? HumanVerdictSuspensionReason = null,
+    bool IsSupplementalCandidate = false);
