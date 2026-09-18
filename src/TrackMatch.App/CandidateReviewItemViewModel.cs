@@ -31,6 +31,7 @@ public sealed partial class CandidateReviewItemViewModel
     public long TrackIdA => Row.TrackIdA;
     public long TrackIdB => Row.TrackIdB;
     public bool IsReviewed => Row.ReviewDecision is not null;
+    public bool IsHumanVerdictSuspended => Row.IsHumanVerdictSuspended;
     public bool IsReviewSkipped => !IsReviewed && _presentationState.IsReviewSkipped;
     public string? ReviewSkipReason => IsReviewSkipped ? _presentationState.ReviewSkipReason : null;
     public bool IsReReviewRecommended => Row.ReReviewRecommended;
@@ -56,9 +57,11 @@ public sealed partial class CandidateReviewItemViewModel
         _ => "未レビュー",
     };
 
-    public string ReviewOriginText => IsReviewSkipped
-        ? ReviewSkipReason ?? string.Empty
-        : Row.ReviewDecision is null
+    public string ReviewOriginText => IsHumanVerdictSuspended
+        ? "解析失敗により判定を一時利用停止中"
+        : IsReviewSkipped
+            ? ReviewSkipReason ?? string.Empty
+            : Row.ReviewDecision is null
             ? string.Empty
             : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
                 ? "判定元: 不明"
