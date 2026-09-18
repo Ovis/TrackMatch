@@ -105,7 +105,13 @@ public sealed class ExplicitGlobalTrashScopeTests
         public Task ReplaceGlobalAsync(IReadOnlyCollection<DuplicateGroupRebuildItem> groups, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task SetKeepAsync(long libraryId, long groupId, long keepTrackId, string changeKind, CancellationToken cancellationToken = default)
+        public Task SetDerivedKeepStateAsync(
+            long libraryId,
+            long groupId,
+            long? keepTrackId,
+            DuplicateGroupKeepStatus status,
+            string changeKind,
+            CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 
