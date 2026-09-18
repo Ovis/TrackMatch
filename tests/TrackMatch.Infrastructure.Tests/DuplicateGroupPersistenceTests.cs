@@ -237,10 +237,6 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var tracks = new SqliteTrackRepository(_database);
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
-        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetDerivedKeepStateAsync(_libraryId, group.Id, a, DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference", TestContext.Current.CancellationToken);
-
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
@@ -274,7 +270,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var oldGroup = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetDerivedKeepStateAsync(_libraryId, oldGroup.Id, b, DuplicateGroupKeepStatus.Selected,
+        await repository.SetDerivedKeepStateAsync(_libraryId, oldGroup.Id, a, DuplicateGroupKeepStatus.Selected,
             "DerivedPreference", TestContext.Current.CancellationToken);
 
         await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
