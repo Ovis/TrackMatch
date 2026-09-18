@@ -54,6 +54,7 @@ public sealed class IncrementalLibraryScanService(
         var updated = 0;
         var removed = 0;
         var errors = new List<IncrementalScanError>();
+        var contentChanges = new List<ContentChangeNotice>();
 
         try
         {
@@ -125,7 +126,9 @@ public sealed class IncrementalLibraryScanService(
                             else
                             {
                                 // 旧Fingerprintが無い場合も内容同一を証明できないため、安全側でContent Changedとする。
-                                await trackRepository.ConfirmContentChangedAsync(trackId, cancellationToken);
+                                var invalidatedReviewCount = await trackRepository
+                                    .ConfirmContentChangedAndGetInvalidatedReviewCountAsync(trackId, cancellationToken);
+                                contentChanges.Add(new ContentChangeNotice(fullPath, invalidatedReviewCount));
                             }
                         }
 
@@ -162,7 +165,7 @@ public sealed class IncrementalLibraryScanService(
 
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
-            return new IncrementalScanResult(sessionId, summary, errors);
+            return new IncrementalScanResult(sessionId, summary, errors, contentChanges);
         }
         catch
         {
