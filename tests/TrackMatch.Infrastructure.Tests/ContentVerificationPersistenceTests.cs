@@ -39,6 +39,26 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerificationPending_PersistsRetryAndSuspendsVerdictBeforeLongAnalysis()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var lookup = new SqliteTrackLookupRepository(_database);
+        var a = await AddTrackAsync(tracks, "pending-a.flac");
+        var b = await AddTrackAsync(tracks, "pending-b.flac");
+        var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
+        await reviews.SaveAsync(
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
+            TestContext.Current.CancellationToken);
+
+        await tracks.MarkContentVerificationPendingAsync(a, TestContext.Current.CancellationToken);
+
+        Assert.True(await tracks.IsContentVerificationPendingAsync(a, TestContext.Current.CancellationToken));
+        Assert.False(await lookup.IsHumanVerdictUsableAsync(a, TestContext.Current.CancellationToken));
+        Assert.True(await lookup.IsFileOrganizationBlockedAsync(b, TestContext.Current.CancellationToken));
+        Assert.Single(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task VerificationFailure_PreservesVerdictAndVerifiedRestoresUse()
     {
         var tracks = new SqliteTrackRepository(_database);
