@@ -100,7 +100,8 @@ public sealed class IncrementalLibraryScanService(
                     updated++;
                 }
 
-                var needsFingerprint = contentChanged || missingFingerprintIds.Contains(trackId);
+                var verificationPending = await trackRepository.IsContentVerificationPendingAsync(trackId, cancellationToken);
+                var needsFingerprint = contentChanged || verificationPending || missingFingerprintIds.Contains(trackId);
                 if (!hasMembership && !needsFingerprint)
                 {
                     // 新Membershipが既知Global Trackを再利用した場合は既存Fingerprintも共有する。
@@ -109,7 +110,7 @@ public sealed class IncrementalLibraryScanService(
 
                 if (needsFingerprint)
                 {
-                    var previousFingerprint = contentChanged
+                    var previousFingerprint = contentChanged || verificationPending
                         ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
                         : null;
                     try
@@ -117,7 +118,7 @@ public sealed class IncrementalLibraryScanService(
                         // FileSize/mtimeだけではタグ変更と音声変更を区別できないため、Fingerprintを追加解析してから
                         // Human Verdictを維持するか無効化するかを確定する。解析中はSQLite Transactionを保持しない。
                         var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
-                        if (contentChanged)
+                        if (contentChanged || verificationPending)
                         {
                             if (previousFingerprint is not null && HasSameAudioContent(previousFingerprint, fingerprint))
                             {
@@ -136,7 +137,7 @@ public sealed class IncrementalLibraryScanService(
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
                     {
-                        if (contentChanged)
+                        if (contentChanged || verificationPending)
                         {
                             // Decoder/I/O失敗はContent Changedと断定せず、Human Verdictを保持したまま派生計算だけ停止する。
                             await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None);
