@@ -165,7 +165,8 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
             var group = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-            await groups.SetKeepAsync(_libraryId, group.Id, keepId, "UserSelected", TestContext.Current.CancellationToken);
+            await groups.SetDerivedKeepStateAsync(_libraryId, group.Id, keepId, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
             var trash = new RejectedTrackTrashService(
                 groups,
