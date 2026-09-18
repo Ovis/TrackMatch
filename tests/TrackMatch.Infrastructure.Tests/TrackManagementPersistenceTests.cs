@@ -106,7 +106,7 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         var trackB = await AddTrackAsync(tracks, "source-b.flac", addMembership: true);
         var pair = CandidatePairKey.Create(trackA, trackB);
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         await new SqliteLibraryRepository(_database).DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
@@ -163,18 +163,15 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         // TriangleにしておくことでKeep=Aを完全削除してもB-CのGlobal VerdictとGroup自体は残る。
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
-            a,
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(b, c), CandidateReviewDecision.ConfirmedDuplicate, null),
-            b,
+            new CandidateReview(CandidatePairKey.Create(b, c), CandidateReviewDecision.ConfirmedDuplicate, b, null),
             TestContext.Current.CancellationToken);
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.ConfirmedDuplicate, null),
-            a,
+            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
 
         var before = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
