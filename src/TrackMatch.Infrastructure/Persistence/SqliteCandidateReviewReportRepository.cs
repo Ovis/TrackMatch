@@ -129,7 +129,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             reviewDecision,
             ToUInt(row.YearA), ToUInt(row.YearB),
             row.ReviewSourceLibraryId, reviewSourceLibraryName,
-            IsReReviewRecommended(
+            isHumanVerdictSuspended ? false : IsReReviewRecommended(
                 reviewDecision,
                 kind,
                 row.ComparedAtUtcTicks,
