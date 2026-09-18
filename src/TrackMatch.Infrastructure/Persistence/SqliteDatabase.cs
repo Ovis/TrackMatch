@@ -136,6 +136,18 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_Tracks_IsMissing ON Tracks (IsMissing);
             CREATE INDEX IF NOT EXISTS IX_Tracks_ContentVerificationStatus ON Tracks (ContentVerificationStatus);
 
+            -- Content Verification/再評価中に、直前のDuplicate Group範囲でファイル整理を停止する。
+            CREATE TABLE IF NOT EXISTS TrackFileOrganizationBlocks (
+                SourceTrackId INTEGER NOT NULL,
+                AffectedTrackId INTEGER NOT NULL,
+                PRIMARY KEY (SourceTrackId, AffectedTrackId),
+                FOREIGN KEY (SourceTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (AffectedTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_TrackFileOrganizationBlocks_Affected
+                ON TrackFileOrganizationBlocks (AffectedTrackId);
+
             CREATE TABLE IF NOT EXISTS LibraryTracks (
                 LibraryId INTEGER NOT NULL,
                 TrackId INTEGER NOT NULL,
