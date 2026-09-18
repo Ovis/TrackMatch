@@ -364,17 +364,6 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_Status ON CandidateQualityComparisons (Status);
             CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_ComparisonVersion ON CandidateQualityComparisons (ComparisonVersion);
 
-            -- Track Contentが変わった場合はTrack Identityを維持したまま重い解析キャッシュを破棄する。
-            -- Human VerdictはRepository側でHistoryへ退避してからCurrentを無効化するため、Triggerでは触らない。
-            CREATE TRIGGER IF NOT EXISTS TR_Tracks_InvalidateQualityCache
-            AFTER UPDATE OF FileSize, LastWriteTimeUtcTicks ON Tracks
-            WHEN OLD.FileSize <> NEW.FileSize
-              OR OLD.LastWriteTimeUtcTicks <> NEW.LastWriteTimeUtcTicks
-            BEGIN
-                DELETE FROM TrackQualityAnalyses WHERE TrackId = NEW.Id;
-                DELETE FROM CandidateQualityComparisons
-                WHERE TrackIdA = NEW.Id OR TrackIdB = NEW.Id;
-            END;
 
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
