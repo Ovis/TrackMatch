@@ -78,11 +78,11 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             await groupService.SaveReviewAsync(
                 _libraryId,
                 new CandidateReview(
-                    CandidatePairKey.Create(keepId, rejectId),
-                    CandidateReviewDecision.ConfirmedDuplicate,
-                    null),
+                CandidatePairKey.Create(keepId, rejectId),
+                CandidateReviewDecision.ConfirmedDuplicate,
                 keepId,
-                TestContext.Current.CancellationToken);
+                null),
+            TestContext.Current.CancellationToken);
 
             var service = new RejectedTrackTrashService(
                 groups,
@@ -157,14 +157,12 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
             await groupService.SaveReviewAsync(
                 otherLibrary.Id,
-                new CandidateReview(CandidatePairKey.Create(keepId, externalId), CandidateReviewDecision.ConfirmedDuplicate, null),
-                keepId,
-                TestContext.Current.CancellationToken);
+                new CandidateReview(CandidatePairKey.Create(keepId, externalId), CandidateReviewDecision.ConfirmedDuplicate, keepId, null),
+            TestContext.Current.CancellationToken);
             await groupService.SaveReviewAsync(
                 otherLibrary.Id,
-                new CandidateReview(CandidatePairKey.Create(keepId, rejectId), CandidateReviewDecision.ConfirmedDuplicate, null),
-                keepId,
-                TestContext.Current.CancellationToken);
+                new CandidateReview(CandidatePairKey.Create(keepId, rejectId), CandidateReviewDecision.ConfirmedDuplicate, keepId, null),
+            TestContext.Current.CancellationToken);
 
             var group = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
             await groups.SetKeepAsync(_libraryId, group.Id, keepId, "UserSelected", TestContext.Current.CancellationToken);
