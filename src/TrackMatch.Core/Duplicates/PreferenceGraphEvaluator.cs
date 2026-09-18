@@ -27,22 +27,28 @@ public static class PreferenceGraphEvaluator
     }
 
     /// <summary>
-    /// 指定Track集合のうち、一度も劣る側になっていないKeep候補を返す。
+    /// 指定Track集合のうち、同じ集合内の別Trackから優劣上支配されていないKeep候補を返す。
     /// </summary>
     public static IReadOnlyList<long> GetKeepCandidates(IEnumerable<CandidateReview> reviews, IEnumerable<long> trackIds)
     {
         ArgumentNullException.ThrowIfNull(reviews);
         ArgumentNullException.ThrowIfNull(trackIds);
-        var candidates = trackIds.Distinct().ToHashSet();
-        foreach (var review in reviews.Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate))
+        var candidateTrackIds = trackIds.Distinct().Order().ToArray();
+        var reviewArray = reviews.ToArray();
+        var candidates = new List<long>(candidateTrackIds.Length);
+        foreach (var candidate in candidateTrackIds)
         {
-            review.Validate();
-            var preferred = review.PreferredTrackId!.Value;
-            var rejected = preferred == review.Pair.TrackIdA ? review.Pair.TrackIdB : review.Pair.TrackIdA;
-            candidates.Remove(rejected);
+            // Library外Trackからの優劣だけでローカル候補を脱落させない。
+            // 一方、ローカル候補同士の優劣が外部Trackを経由して推移的に成立する場合は、その関係を再利用する。
+            var dominatedByLocalCandidate = candidateTrackIds.Any(other =>
+                other != candidate && IsPreferredTransitively(reviewArray, other, candidate));
+            if (!dominatedByLocalCandidate)
+            {
+                candidates.Add(candidate);
+            }
         }
 
-        return candidates.Order().ToArray();
+        return candidates;
     }
 
     /// <summary>
