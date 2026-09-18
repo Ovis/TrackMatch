@@ -188,31 +188,46 @@ public sealed class LibraryAnalysisWorkflow
                 $"対象フォルダ {value.RootIndex}/{value.RootCount}")));
         var scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
-        var generationProgress = new Progress<CandidateGenerationProgress>(value =>
-            progress?.Report(new LibraryAnalysisProgress(
-                LibraryAnalysisStage.GeneratingCandidates,
-                value.CompletedCount,
-                value.TotalCount,
-                value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
-        var generation = await GenerateCandidatesAsync(
-            libraryId,
-            cancellationToken: cancellationToken,
-            progress: generationProgress);
+        try
+        {
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
+            var generationProgress = new Progress<CandidateGenerationProgress>(value =>
+                progress?.Report(new LibraryAnalysisProgress(
+                    LibraryAnalysisStage.GeneratingCandidates,
+                    value.CompletedCount,
+                    value.TotalCount,
+                    value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
+            var generation = await GenerateCandidatesAsync(
+                libraryId,
+                cancellationToken: cancellationToken,
+                progress: generationProgress);
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
-        var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
-            progress?.Report(new LibraryAnalysisProgress(
-                LibraryAnalysisStage.AnalyzingCandidates,
-                value.CompletedPairs,
-                value.TotalPairs,
-                null)));
-        var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
+            var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
+                progress?.Report(new LibraryAnalysisProgress(
+                    LibraryAnalysisStage.AnalyzingCandidates,
+                    value.CompletedPairs,
+                    value.TotalPairs,
+                    null)));
+            var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
-        await ClassifyCandidatesAsync(libraryId, cancellationToken);
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
+            await ClassifyCandidatesAsync(libraryId, cancellationToken);
 
-        return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await new SqliteTrackRepository(database).MarkReevaluationCompletedAsync(libraryId, CancellationToken.None);
+            await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+            return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
+        }
+        catch
+        {
+            // Content Changed確定後の再評価が途中で失敗した場合は、次回通常Workflowで再試行できるよう状態を残す。
+            // 失敗TrackをKeepやTrash判断へ戻さないため、派生Groupも失敗状態を反映して再同期する。
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await new SqliteTrackRepository(database).MarkReevaluationFailedAsync(libraryId, CancellationToken.None);
+            await TrySynchronizeDuplicateGroupsAsync(database);
+            throw;
+        }
     }
 
     private IncrementalLibraryScanService CreateScanService(SqliteDatabase database)
