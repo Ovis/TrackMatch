@@ -134,6 +134,10 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
     public ObservableCollection<DuplicateGroupTrackViewModel> AllTracks { get; } = [];
     public ObservableCollection<DuplicateGroupRelationViewModel> SelectedRelations { get; } = [];
+    public ObservableCollection<DuplicateGroupConflictViewModel> Conflicts { get; } = [];
+
+    /// <summary>Conflict一覧からMain Windowへ戻すレビュー対象Pair。</summary>
+    public CandidatePairKey? RequestedReviewPair { get; private set; }
 
     /// <summary>選択中のファイルに直接つながる確定済み重複がない場合だけ表示する案内。</summary>
     public string RelationEmptyText => SelectedRelations.Count == 0
@@ -216,6 +220,22 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
         var globalMemberIds = group.GlobalTrackIds.ToHashSet();
         var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var groupReviews = reviews
+            .Where(review => globalMemberIds.Contains(review.Pair.TrackIdA)
+                && globalMemberIds.Contains(review.Pair.TrackIdB))
+            .ToArray();
+
+        Conflicts.Clear();
+        foreach (var conflict in DuplicateGroupConflictEvaluator.FindConflicts(groupReviews))
+        {
+            var a = trackModels[conflict.Pair.TrackIdA];
+            var b = trackModels[conflict.Pair.TrackIdB];
+            Conflicts.Add(new DuplicateGroupConflictViewModel(
+                conflict.Pair,
+                $"{a.Title} ↔ {b.Title}",
+                "NotDuplicateとConfirmedDuplicateの連結関係が矛盾しています"));
+        }
+
         foreach (var review in reviews
                      .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
                          && globalMemberIds.Contains(review.Pair.TrackIdA)
@@ -269,6 +289,17 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         }
 
         OnPropertyChanged(nameof(RelationEmptyText));
+    }
+
+    private void ReviewConflict_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: CandidatePairKey pair })
+        {
+            return;
+        }
+
+        RequestedReviewPair = pair;
+        DialogResult = true;
     }
 
     private async void TrashSelectedTrack_Click(object sender, RoutedEventArgs e)
@@ -506,3 +537,11 @@ public sealed record DuplicateGroupRelationViewModel(
     string Title,
     string Path,
     string ScopeLabel);
+
+/// <summary>
+/// Conflict一覧から通常レビューへ移動するための表示モデル。
+/// </summary>
+public sealed record DuplicateGroupConflictViewModel(
+    CandidatePairKey Pair,
+    string Title,
+    string Reason);
