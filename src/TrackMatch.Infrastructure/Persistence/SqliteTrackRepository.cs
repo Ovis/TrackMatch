@@ -502,31 +502,6 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <summary>
-    /// TrackのContent Verification状態だけを更新する。
-    /// Human Verdict自体へ機械状態を混在させず、利用可否はTrack状態から導出する。
-    /// </summary>
-    private async Task SetContentVerificationStatusAsync(
-        long trackId,
-        string status,
-        CancellationToken cancellationToken)
-    {
-        if (trackId <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(trackId));
-        }
-
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var updated = await connection.ExecuteAsync(new CommandDefinition(
-            "UPDATE Tracks SET ContentVerificationStatus = @Status WHERE Id = @TrackId;",
-            new { TrackId = trackId, Status = status },
-            cancellationToken: cancellationToken));
-        if (updated == 0)
-        {
-            throw new InvalidOperationException("Content Verification対象のTrackが見つかりません。");
-        }
-    }
-
-    /// <summary>
     /// 前回失敗したCandidate再評価を、今回のWorkflowで再試行する状態へ戻す。
     /// </summary>
     public async Task MarkReevaluationStartedAsync(long libraryId, CancellationToken cancellationToken = default)
