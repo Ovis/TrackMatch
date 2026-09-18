@@ -147,6 +147,10 @@ public sealed class DuplicateGroupPlannerTests
 
         Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
         Assert.Equal(CandidatePairKey.Create(1, 3), conflict.Pair);
+        Assert.Equal(2, conflict.CauseReviews.Count);
+        Assert.All(
+            conflict.CauseReviews,
+            review => Assert.Equal(CandidateReviewDecision.ConfirmedDuplicate, review.Decision));
     }
 
     private static CandidateReview Confirmed(long left, long right)
