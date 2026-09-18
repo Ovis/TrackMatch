@@ -19,6 +19,10 @@ public interface ITrackLookupRepository
         return track is not null && !track.IsMissing;
     }
 
+    /// <summary>Content Verificationまたは再評価の影響範囲としてファイル整理を停止すべきか確認する。</summary>
+    Task<bool> IsFileOrganizationBlockedAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
     /// <summary>
     /// 指定TrackがLibraryのMembershipに含まれるか確認する。
     /// </summary>
