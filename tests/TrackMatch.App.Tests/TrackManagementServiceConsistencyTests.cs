@@ -105,8 +105,8 @@ public sealed class TrackManagementServiceConsistencyTests : IAsyncLifetime
             new CandidateReview(
                 CandidatePairKey.Create(left, right),
                 CandidateReviewDecision.ConfirmedDuplicate,
+                keepTrackId,
                 null),
-            keepTrackId,
             TestContext.Current.CancellationToken);
     }
 }
