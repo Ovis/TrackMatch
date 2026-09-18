@@ -69,4 +69,16 @@ public interface ITrackRepository
     Task DeleteFingerprintAsync(long trackId, CancellationToken cancellationToken = default);
 
     Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default);
+
+    /// <summary>追加解析失敗により対象TrackのHuman Verdictを一時利用停止する。</summary>
+    Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    /// <summary>音声内容変更が確定したTrackのContent依存状態を無効化する。</summary>
+    Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
+        => DeleteFingerprintAsync(trackId, cancellationToken);
+
+    /// <summary>音声内容同一を確認し、一時利用停止中のHuman Verdictを再有効化する。</summary>
+    Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }
