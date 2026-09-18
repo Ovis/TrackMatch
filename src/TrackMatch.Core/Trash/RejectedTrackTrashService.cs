@@ -42,6 +42,28 @@ public sealed class RejectedTrackTrashService(
             cancellationToken.ThrowIfCancellationRequested();
             group.Validate();
 
+            var organizationBlocked = false;
+            foreach (var trackId in group.GlobalTrackIds)
+            {
+                if (await trackLookupRepository.IsFileOrganizationBlockedAsync(trackId, cancellationToken))
+                {
+                    organizationBlocked = true;
+                    break;
+                }
+            }
+
+            if (organizationBlocked)
+            {
+                await AddBlockedGroupItemsAsync(
+                    group,
+                    libraryId,
+                    fullTrashRoot,
+                    items,
+                    "音声内容の確認または再評価が完了していないため、安全のため移動を中止しました。",
+                    cancellationToken);
+                continue;
+            }
+
             if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
             {
                 await AddBlockedGroupItemsAsync(
@@ -159,6 +181,11 @@ public sealed class RejectedTrackTrashService(
         {
             throw new InvalidOperationException(
                 "このファイルは現在のライブラリで残すファイルに指定されているため、ごみ箱へ移動できません。");
+        }
+
+        if (await trackLookupRepository.IsFileOrganizationBlockedAsync(trackId, cancellationToken))
+        {
+            throw new InvalidOperationException("音声内容の確認または再評価が完了していないため、このファイルはごみ箱へ移動できません。");
         }
 
         var sourcePath = Path.GetFullPath(track.Metadata.Path);
