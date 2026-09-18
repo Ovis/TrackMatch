@@ -100,7 +100,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetKeepAsync_AllowsGlobalGroupTrackOutsideCurrentLibrary()
+    public async Task SetDerivedKeepStateAsync_AllowsGlobalGroupTrackOutsideCurrentLibrary()
     {
         var libraries = new SqliteLibraryRepository(_database);
         var secondRoot = Path.Combine(_directory, "second");
@@ -135,11 +135,12 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         Assert.DoesNotContain(c, firstProjection.TrackIds);
         Assert.Contains(c, firstProjection.GlobalTrackIds);
 
-        await repository.SetKeepAsync(
+        await repository.SetDerivedKeepStateAsync(
             _libraryId,
             firstProjection.Id,
             c,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken);
 
         var updated = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
@@ -149,7 +150,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsLibraryThatHasNoMembershipInGroup()
+    public async Task SetDerivedKeepStateAsync_RejectsLibraryThatHasNoMembershipInGroup()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -165,16 +166,17 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var repository = new SqliteDuplicateGroupRepository(_database);
         var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             unrelatedLibrary.Id,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsLibraryThatHasOnlyMissingMembershipInGroup()
+    public async Task SetDerivedKeepStateAsync_RejectsLibraryThatHasOnlyMissingMembershipInGroup()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -188,16 +190,17 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsMissingKeepWhenOtherGroupMemberIsActive()
+    public async Task SetDerivedKeepStateAsync_RejectsMissingKeepWhenOtherGroupMemberIsActive()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -210,11 +213,12 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         // MissingになったAをSelected Keepとして保存できてしまう。Keep対象自身のActive状態もRepository境界で検証する。
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
 
         var projection = Assert.Single(await repository.GetByLibraryIdAsync(
@@ -234,7 +238,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetKeepAsync(_libraryId, group.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await repository.SetDerivedKeepStateAsync(_libraryId, group.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -269,7 +274,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var oldGroup = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetKeepAsync(_libraryId, oldGroup.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        await repository.SetDerivedKeepStateAsync(_libraryId, oldGroup.Id, b, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
         {
