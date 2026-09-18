@@ -48,4 +48,5 @@ public sealed record CandidateReviewReportRow(
     long? ReviewSourceLibraryId = null,
     string? ReviewSourceLibraryName = null,
     bool ReReviewRecommended = false,
-    long? PreferredTrackId = null);
+    long? PreferredTrackId = null,
+    bool IsHumanVerdictSuspended = false);
