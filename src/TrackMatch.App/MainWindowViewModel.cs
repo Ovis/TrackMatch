@@ -480,6 +480,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         await workflow.ClassifyCandidatesAsync(libraryId);
     }
 
+    /// <summary>
+    /// Conflict一覧など別画面から指定Pairの通常レビュー位置へ移動する。
+    /// </summary>
+    public async Task NavigateToCandidateAsync(CandidatePairKey pair)
+    {
+        ReviewListMode = CandidateReviewListMode.All;
+        await ReloadCandidatesPreservingPairAsync(pair.TrackIdA, pair.TrackIdB);
+        SelectedCandidate = Candidates.FirstOrDefault(item =>
+            CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair);
+    }
+
     private async Task ReloadCandidatesPreservingPairAsync(long trackIdA, long trackIdB)
     {
         var library = SelectedLibrary; if (library is null)
