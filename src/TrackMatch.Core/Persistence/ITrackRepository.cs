@@ -74,6 +74,10 @@ public interface ITrackRepository
     Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 
+    /// <summary>追加解析開始前に対象TrackのHuman Verdictを一時利用停止し、キャンセル後も再試行対象として残す。</summary>
+    Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     /// <summary>追加解析失敗により対象TrackのHuman Verdictを一時利用停止する。</summary>
     Task MarkContentVerificationFailedAsync(
         long trackId,
