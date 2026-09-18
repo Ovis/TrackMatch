@@ -478,6 +478,14 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             transaction,
             cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM TrackQualityAnalyses WHERE TrackId = @TrackId;
+            DELETE FROM CandidateQualityComparisons WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateSegmentSketches WHERE TrackId = @TrackId; DELETE FROM Fingerprints WHERE TrackId = @TrackId;",
             new { TrackId = trackId },
             transaction,
