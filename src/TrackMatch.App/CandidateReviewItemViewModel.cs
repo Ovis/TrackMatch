@@ -47,7 +47,10 @@ public sealed partial class CandidateReviewItemViewModel
     public string ReviewResult => Row.ReviewDecision switch
     {
         CandidateReviewDecision.NotDuplicate => AppendReReview("重複ではない"),
-        // Human VerdictはGlobalだが、どのTrackを残すかはLibrary固有DispositionなのでGlobal Verdict表示には含めない。
+        CandidateReviewDecision.ConfirmedDuplicate when Row.PreferredTrackId == Row.TrackIdA
+            => AppendReReview("重複 / Aを優先"),
+        CandidateReviewDecision.ConfirmedDuplicate when Row.PreferredTrackId == Row.TrackIdB
+            => AppendReReview("重複 / Bを優先"),
         CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複として確認済"),
         _ when IsReviewSkipped => "レビュー省略",
         _ => "未レビュー",
