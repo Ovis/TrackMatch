@@ -106,6 +106,26 @@ public partial class MainWindow : Window
     private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e) => await _viewModel.AnalyzeLibraryAsync();
     private void CancelAnalysis_Click(object sender, RoutedEventArgs e) => _viewModel.CancelAnalysis();
 
+    private void ShowContentChanges_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.ContentChanges.Count == 0)
+        {
+            return;
+        }
+
+        var detail = string.Join(
+            Environment.NewLine,
+            _viewModel.ContentChanges.Select(item =>
+                $"{Path.GetFileName(item.Path)} — Human Verdict解除 {item.InvalidatedReviewCount}件"));
+        new ConfirmationDialog(
+            "音声内容の変更",
+            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました",
+            detail,
+            "閉じる",
+            kind: AppDialogKind.Information)
+        { Owner = this }.ShowDialog();
+    }
+
     private void ShowAnalysisErrors_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.AnalysisErrors.Count > 0)
