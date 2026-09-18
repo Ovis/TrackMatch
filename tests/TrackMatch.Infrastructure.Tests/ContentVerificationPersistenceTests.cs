@@ -1,8 +1,8 @@
 ﻿using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
-using TrackMatch.Core.Models;
 using TrackMatch.Core.Duplicates;
+using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
 
