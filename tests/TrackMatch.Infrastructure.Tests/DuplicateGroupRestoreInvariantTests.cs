@@ -51,7 +51,8 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -92,14 +93,16 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, original.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         // 旧Keep=AをMissingへし、残ったB-Cに対して代替Keep=Bを選ぶ。
         // Keep変更はLibrary固有Dispositionだけなので、Aの物理復帰Guardを解除してはいけない。
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, reduced.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(_libraryId, reduced.Id, b, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("keep-a.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(a, restoredId);
