@@ -267,7 +267,7 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
                 throw new ArgumentException("Selected状態にはKeep Trackが必要です。", nameof(keepTrackId));
             }
 
-            await SetKeepAsync(libraryId, groupId, keepTrackId.Value, changeKind, cancellationToken);
+            await SetSelectedDerivedKeepAsync(libraryId, groupId, keepTrackId.Value, changeKind, cancellationToken);
             return;
         }
 
@@ -366,8 +366,8 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
         await transaction.CommitAsync(cancellationToken);
     }
 
-    /// <inheritdoc />
-    public async Task SetKeepAsync(
+    /// <summary>Human Verdictから一意に導出されたSelected Keepを保存する。</summary>
+    private async Task SetSelectedDerivedKeepAsync(
         long libraryId,
         long groupId,
         long keepTrackId,
