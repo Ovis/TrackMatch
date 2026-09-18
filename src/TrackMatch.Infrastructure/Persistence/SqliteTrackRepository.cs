@@ -407,9 +407,32 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     /// <inheritdoc />
     public async Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
     {
-        await SetContentVerificationStatusAsync(trackId, "Verified", cancellationToken);
-        await ClearContentVerificationErrorAsync(trackId, cancellationToken);
-        await ClearFileOrganizationBlockAsync(trackId, cancellationToken);
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // Metadata-only確認と整理禁止解除を分離すると、途中障害でVerifiedなのに整理禁止だけ残る。
+        // 復帰状態を1つのCurrent Stateとして確定するため同一Transactionで更新する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'Verified',
+                ContentVerificationError = NULL
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -475,24 +498,6 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             """,
             new { TrackId = trackId },
             transaction,
-            cancellationToken: cancellationToken));
-    }
-
-    private async Task ClearContentVerificationErrorAsync(long trackId, CancellationToken cancellationToken)
-    {
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "UPDATE Tracks SET ContentVerificationError = NULL WHERE Id = @TrackId;",
-            new { TrackId = trackId },
-            cancellationToken: cancellationToken));
-    }
-
-    private async Task ClearFileOrganizationBlockAsync(long trackId, CancellationToken cancellationToken)
-    {
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId = @TrackId;",
-            new { TrackId = trackId },
             cancellationToken: cancellationToken));
     }
 
