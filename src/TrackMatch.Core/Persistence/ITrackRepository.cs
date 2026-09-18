@@ -78,6 +78,15 @@ public interface ITrackRepository
     Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
         => DeleteFingerprintAsync(trackId, cancellationToken);
 
+    /// <summary>音声内容変更を確定し、自動解除したHuman Verdict件数を返す。</summary>
+    async Task<int> ConfirmContentChangedAndGetInvalidatedReviewCountAsync(
+        long trackId,
+        CancellationToken cancellationToken = default)
+    {
+        await ConfirmContentChangedAsync(trackId, cancellationToken);
+        return 0;
+    }
+
     /// <summary>音声内容同一を確認し、一時利用停止中のHuman Verdictを再有効化する。</summary>
     Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
