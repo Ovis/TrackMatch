@@ -30,4 +30,27 @@ public sealed class PreferenceGraphEvaluatorTests
 
     private static CandidateReview Confirmed(long left, long right, long preferred)
         => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, preferred, null);
+
+    [Fact]
+    public void GetKeepCandidates_ExternalPreferredTrackDoesNotEliminateOnlyLocalCandidate()
+    {
+        var reviews = new[]
+        {
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+        };
+
+        Assert.Equal([2], PreferenceGraphEvaluator.GetKeepCandidates(reviews, [2]));
+    }
+
+    [Fact]
+    public void GetKeepCandidates_UsesExternalTrackAsTransitivePathBetweenLocalCandidates()
+    {
+        var reviews = new[]
+        {
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            new CandidateReview(CandidatePairKey.Create(2, 3), CandidateReviewDecision.ConfirmedDuplicate, 2, null),
+        };
+
+        Assert.Equal([1], PreferenceGraphEvaluator.GetKeepCandidates(reviews, [1, 3]));
+    }
 }
