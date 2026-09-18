@@ -11,21 +11,6 @@ public sealed class DuplicateGroupService(
     ITrackLookupRepository trackLookupRepository,
     IDuplicateGroupRepository groupRepository)
 {
-    /// <summary>
-    /// 旧UIのKeep引数をHuman VerdictのPreferred Trackへ変換して保存する。
-    /// </summary>
-    /// <remarks>
-    /// 移行期間中もKeepを別状態として保存せず、ConfirmedDuplicateの優劣関係へ一本化する。
-    /// </remarks>
-    public Task SaveReviewAsync(long libraryId, CandidateReview review, long? keepTrackId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(review);
-        var migrated = review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-            ? review with { PreferredTrackId = keepTrackId }
-            : review with { PreferredTrackId = null };
-        return SaveReviewAsync(libraryId, migrated, cancellationToken);
-    }
-
     /// <summary>Human Verdictを保存し、ConfirmedDuplicate Graphから派生Groupを再構成する。</summary>
     public async Task SaveReviewAsync(long libraryId, CandidateReview review, CancellationToken cancellationToken = default)
     {
