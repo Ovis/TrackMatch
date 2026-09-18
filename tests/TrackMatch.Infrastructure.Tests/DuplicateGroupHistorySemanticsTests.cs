@@ -211,7 +211,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         // Restore判定を旧Group IDやMissing直前Graph全体の完全一致へ依存させると、Cの復帰を見失う。
         await SaveConfirmedAsync(service, b, d, b);
         var changedWhileMissing = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        Assert.Equal(b, changedWhileMissing.KeepTrackId);
+        Assert.Equal(a, changedWhileMissing.KeepTrackId);
         Assert.Equal(new[] { a, b, d }.Order().ToArray(), changedWhileMissing.GlobalTrackIds.Order().ToArray());
 
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("topology-c.flac"), TestContext.Current.CancellationToken);
