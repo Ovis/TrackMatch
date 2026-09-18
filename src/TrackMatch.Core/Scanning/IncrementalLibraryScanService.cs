@@ -113,6 +113,13 @@ public sealed class IncrementalLibraryScanService(
                     var previousFingerprint = contentChanged || verificationPending
                         ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
                         : null;
+                    if (contentChanged && !verificationPending)
+                    {
+                        // Metadata更新後に解析がキャンセルされても次回Scanで判定を再開できるよう、
+                        // 長時間Fingerprint解析へ入る前に利用停止と再試行必要状態だけを短いTransactionで確定する。
+                        await trackRepository.MarkContentVerificationPendingAsync(trackId, cancellationToken);
+                    }
+
                     try
                     {
                         // FileSize/mtimeだけではタグ変更と音声変更を区別できないため、Fingerprintを追加解析してから
