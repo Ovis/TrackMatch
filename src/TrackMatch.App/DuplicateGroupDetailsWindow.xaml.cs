@@ -381,7 +381,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             }
             if (impact is not null && impact.KeepLibraries.Count > 0)
             {
-                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのファイルが「残すファイル」に指定されています。移動後は残すファイルを再確認する必要があります。";
+                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのファイルが「残すファイル」として確定しています。移動後は残すファイルを再確認する必要があります。";
             }
 
             var confirmation = new ConfirmationDialog(
