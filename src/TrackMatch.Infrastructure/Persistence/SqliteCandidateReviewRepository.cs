@@ -107,8 +107,8 @@ public sealed class SqliteCandidateReviewRepository(SqliteDatabase database, lon
         // Content Changeによる機械的な無効化はここを通さず、仕様どおり監査履歴を増やさない。
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO CandidateReviewHistory (TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot, ChangedAtUtcTicks, ChangeKind)
-            VALUES (@TrackIdA, @TrackIdB, @Decision, @PreferredTrackId, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot, @ChangedAtUtcTicks, @ChangeKind);
+            INSERT INTO CandidateReviewHistory (TrackIdA, TrackIdB, Decision, PreferredTrackId, Note, SourceLibraryId, SourceLibraryNameSnapshot, ChangedAtUtcTicks, ChangeKind, InvalidationReason)
+            VALUES (@TrackIdA, @TrackIdB, @Decision, @PreferredTrackId, @Note, @SourceLibraryId, @SourceLibraryNameSnapshot, @ChangedAtUtcTicks, @ChangeKind, NULL);
             """,
             new { current.TrackIdA, current.TrackIdB, current.Decision, current.PreferredTrackId, current.Note, current.SourceLibraryId, current.SourceLibraryNameSnapshot, ChangedAtUtcTicks = DateTime.UtcNow.Ticks, ChangeKind = changeKind },
             transaction, cancellationToken: cancellationToken));
