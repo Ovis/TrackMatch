@@ -114,13 +114,9 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
         var groupRepository = new SqliteDuplicateGroupRepository(_database);
         var parentProjection = Assert.Single(await groupRepository.GetByLibraryIdAsync(parentLibrary.Id, TestContext.Current.CancellationToken));
-        await groupRepository.SetDerivedKeepStateAsync(
-            parentLibrary.Id,
-            parentProjection.Id,
-            b,
-            DuplicateGroupKeepStatus.Selected,
-            "DerivedPreference",
-            TestContext.Current.CancellationToken);
+        // Parent LibraryにはAしか存在しないため、Global Preference A>BからLibrary固有Keep=Aが導出される。
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, parentProjection.KeepStatus);
+        Assert.Equal(a, parentProjection.KeepTrackId);
 
         await new LibraryManagementService(_databasePath).RemapRootAsync(
             childLibrary.Id,
@@ -141,7 +137,7 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
                 ORDER BY Id DESC LIMIT 1;
                 """,
                 new { LibraryId = parentLibrary.Id });
-            Assert.Equal(b, history.KeepTrackId);
+            Assert.Equal(a, history.KeepTrackId);
             Assert.Equal(nameof(DuplicateGroupKeepStatus.Selected), history.Status);
             Assert.Equal("ScopeRemoved", history.ChangeKind);
         }
