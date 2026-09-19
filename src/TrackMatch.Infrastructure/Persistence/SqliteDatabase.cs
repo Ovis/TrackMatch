@@ -277,8 +277,7 @@ public sealed class SqliteDatabase
                 SourceLibraryId INTEGER NULL,
                 SourceLibraryNameSnapshot TEXT NULL,
                 ChangedAtUtcTicks INTEGER NOT NULL,
-                ChangeKind TEXT NOT NULL,
-                InvalidationReason TEXT NULL
+                ChangeKind TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateReviewHistory_Pair
