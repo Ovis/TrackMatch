@@ -66,7 +66,7 @@ public sealed class SchemaInitializationTests : IDisposable
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new SqliteDatabase(databasePath).InitializeAsync(TestContext.Current.CancellationToken));
 
-        Assert.Contains("期待値: 7, 実際: 1", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("期待値: 6, 実際: 1", exception.Message, StringComparison.Ordinal);
 
         await using var verifyConnection = new SqliteConnection($"Data Source={databasePath}");
         await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);
