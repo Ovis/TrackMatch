@@ -192,6 +192,47 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidatePairRepository_ObsoleteSupplementalPairIsDeletedWhenOnlyCurrentLibraryUsesIt()
+    {
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.EnsureSupplementalAsync(pair, TestContext.Current.CancellationToken);
+
+        await repository.DeleteObsoleteSupplementalAsync([], TestContext.Current.CancellationToken);
+
+        Assert.Empty(await new SqliteCandidatePairRepository(_database)
+            .GetAllAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_ObsoleteSupplementalPairIsPreservedWhenAnotherLibraryContainsBothTracks()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        await tracks.EnsureMembershipAsync(
+            _libraryBId,
+            _rootBId,
+            _a1,
+            "shared-a1.flac",
+            TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(
+            _libraryBId,
+            _rootBId,
+            _a2,
+            "shared-a2.flac",
+            TestContext.Current.CancellationToken);
+
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.EnsureSupplementalAsync(pair, TestContext.Current.CancellationToken);
+
+        await repository.DeleteObsoleteSupplementalAsync([], TestContext.Current.CancellationToken);
+
+        var remaining = Assert.Single(await new SqliteCandidatePairRepository(_database)
+            .GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(remaining.TrackIdA, remaining.TrackIdB));
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_RegenerationPreservesReviewedPairAndComparison()
     {
         var pair = CandidatePairKey.Create(_a1, _a2);
