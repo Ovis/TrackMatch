@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 6;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -277,7 +277,8 @@ public sealed class SqliteDatabase
                 SourceLibraryId INTEGER NULL,
                 SourceLibraryNameSnapshot TEXT NULL,
                 ChangedAtUtcTicks INTEGER NOT NULL,
-                ChangeKind TEXT NOT NULL
+                ChangeKind TEXT NOT NULL,
+                InvalidationReason TEXT NULL
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateReviewHistory_Pair
