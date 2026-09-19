@@ -64,6 +64,8 @@ public sealed partial class MainWindowViewModel
             .Where(review => review.Pair != pair)
             .Append(new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, preferredTrackId, null))
             .ToArray();
+        PreferenceGraphEvaluator.EnsureAcyclic(proposedReviews);
+
         var globalTrackIds = group.GlobalTrackIds.ToHashSet();
         var groupReviews = proposedReviews
             .Where(review => globalTrackIds.Contains(review.Pair.TrackIdA)
