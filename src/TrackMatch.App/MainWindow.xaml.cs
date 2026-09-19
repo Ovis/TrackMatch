@@ -113,13 +113,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var invalidatedReviewCount = _viewModel.ContentChanges.Sum(item => item.InvalidatedReviewCount);
         var detail = string.Join(
             Environment.NewLine,
             _viewModel.ContentChanges.Select(item =>
                 $"{Path.GetFileName(item.Path)} — Human Verdict解除 {item.InvalidatedReviewCount}件"));
         new ConfirmationDialog(
             "音声内容の変更",
-            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました",
+            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました / Human Verdict解除 {invalidatedReviewCount}件",
             detail,
             "閉じる",
             kind: AppDialogKind.Information)
