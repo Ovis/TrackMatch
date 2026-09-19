@@ -93,6 +93,31 @@ public sealed class DuplicateGroupServiceConsistencyTests
     }
 
     [Fact]
+    public async Task SaveReviewAsync_ChangingPreferredTrackThatCreatesCycleIsRejectedWithoutReplacingOldVerdict()
+    {
+        var targetPair = CandidatePairKey.Create(1, 3);
+        var reviews = new RecordingReviewRepository(
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            new CandidateReview(CandidatePairKey.Create(2, 3), CandidateReviewDecision.ConfirmedDuplicate, 2, null),
+            new CandidateReview(targetPair, CandidateReviewDecision.ConfirmedDuplicate, 1, null));
+        var service = new DuplicateGroupService(
+            reviews,
+            new FakeTrackLookupRepository(),
+            new RecordingGroupRepository(new GlobalDuplicateGroup(1, [1, 2, 3])));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveReviewAsync(
+            10,
+            new CandidateReview(targetPair, CandidateReviewDecision.ConfirmedDuplicate, 3, null),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, reviews.SaveCount);
+        var stored = Assert.Single(
+            (await reviews.GetAllAsync(TestContext.Current.CancellationToken))
+                .Where(review => review.Pair == targetPair));
+        Assert.Equal(1, stored.PreferredTrackId);
+    }
+
+    [Fact]
     public async Task DeleteReviewAsync_AllowsClearingExistingVerdictWhileTrackIsMissing()
     {
         var initial = new CandidateReview(
