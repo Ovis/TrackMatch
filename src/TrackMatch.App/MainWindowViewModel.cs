@@ -132,7 +132,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public string ReviewedTabHeader => SuspendedReviewCount == 0
         ? $"レビュー済み ({ReviewedCount})"
         : $"レビュー済み {ReviewedCount}（利用停止 {SuspendedReviewCount}）";
-    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && item.IsReReviewRecommended);
+    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && !item.IsHumanVerdictSuspended && item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
