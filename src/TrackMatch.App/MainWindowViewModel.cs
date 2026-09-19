@@ -226,7 +226,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             AnalysisStatusText = FormatAnalysisSummary("完了", summaries);
-            _contentChanges.AddRange(result.Scan.Roots.SelectMany(item => item.ContentChanges ?? []));
+            _contentChanges.AddRange(result.Scan.Roots.SelectMany(item => item.ContentChanges));
             OnPropertyChanged(nameof(ContentChangeCount));
             if (_contentChanges.Count != 0)
             {
