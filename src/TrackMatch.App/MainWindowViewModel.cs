@@ -492,7 +492,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         await pairs.DeleteObsoleteSupplementalAsync(required);
-        if (!created)
+
+        // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。
+        // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
+        // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
+        var comparedKeys = (await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync())
+            .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
+            .ToHashSet();
+        var needsAnalysis = created || required.Any(pair => !comparedKeys.Contains(pair));
+        if (!needsAnalysis)
         {
             return;
         }
