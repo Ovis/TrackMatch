@@ -287,10 +287,11 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
 
         const string sql = """
-            INSERT INTO Fingerprints (TrackId, Algorithm, ValuesBlob, ExtractedAtUtcTicks)
-            VALUES (@TrackId, @Algorithm, @ValuesBlob, @ExtractedAtUtcTicks)
+            INSERT INTO Fingerprints (TrackId, Algorithm, DurationTicks, ValuesBlob, ExtractedAtUtcTicks)
+            VALUES (@TrackId, @Algorithm, @DurationTicks, @ValuesBlob, @ExtractedAtUtcTicks)
             ON CONFLICT(TrackId) DO UPDATE SET
                 Algorithm = excluded.Algorithm,
+                DurationTicks = excluded.DurationTicks,
                 ValuesBlob = excluded.ValuesBlob,
                 ExtractedAtUtcTicks = excluded.ExtractedAtUtcTicks;
             """;
@@ -302,6 +303,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             {
                 TrackId = trackId,
                 Algorithm = algorithm,
+                DurationTicks = fingerprint.Duration.Ticks,
                 ValuesBlob = EncodeFingerprint(fingerprint.Values),
                 ExtractedAtUtcTicks = DateTime.UtcNow.Ticks,
             },
@@ -334,7 +336,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
 
         const string sql = """
-            SELECT t.Path, t.DurationTicks, f.ValuesBlob
+            SELECT t.Path, f.DurationTicks, f.ValuesBlob
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE f.TrackId = @TrackId;
