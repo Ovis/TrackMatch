@@ -71,7 +71,7 @@ public sealed class IncrementalLibraryScanServiceTests
         Assert.Equal([1L], repository.VerificationPendingTrackIds);
         Assert.Equal([1L], repository.VerifiedTrackIds);
         Assert.Empty(repository.ContentChangedTrackIds);
-        Assert.Empty(result.ContentChanges);
+        Assert.Empty(result.ContentChanges ?? []);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class IncrementalLibraryScanServiceTests
         Assert.Equal([1L], repository.VerificationPendingTrackIds);
         Assert.Empty(repository.VerifiedTrackIds);
         Assert.Equal([1L], repository.ContentChangedTrackIds);
-        var notice = Assert.Single(result.ContentChanges);
+        var notice = Assert.Single(result.ContentChanges ?? []);
         Assert.Equal(path, notice.Path);
         Assert.Equal(2, notice.InvalidatedReviewCount);
     }
