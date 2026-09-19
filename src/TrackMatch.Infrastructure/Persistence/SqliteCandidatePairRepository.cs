@@ -214,6 +214,43 @@ public sealed class SqliteCandidatePairRepository(
             .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
             .Where(pair => !required.Contains(pair))
             .ToArray();
+
+        if (libraryId is { } currentLibraryId && obsolete.Length != 0)
+        {
+            // CandidatePairsはGlobalなので、現在LibraryだけのKeep状態を理由に
+            // 別Libraryでも両Trackを比較可能な補完Pairを削除してはならない。
+            // 補完Pairは高々必要最小限しか生成しないため、ここはPair単位で安全性を確認する。
+            var deletable = new List<CandidatePairKey>(obsolete.Length);
+            foreach (var pair in obsolete)
+            {
+                var otherLibraryCount = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                    """
+                    SELECT COUNT(*)
+                    FROM Libraries l
+                    WHERE l.Id <> @LibraryId
+                      AND EXISTS (
+                            SELECT 1 FROM LibraryTracks a
+                            WHERE a.LibraryId = l.Id AND a.TrackId = @TrackIdA)
+                      AND EXISTS (
+                            SELECT 1 FROM LibraryTracks b
+                            WHERE b.LibraryId = l.Id AND b.TrackId = @TrackIdB);
+                    """,
+                    new
+                    {
+                        LibraryId = currentLibraryId,
+                        pair.TrackIdA,
+                        pair.TrackIdB,
+                    },
+                    cancellationToken: cancellationToken));
+                if (otherLibraryCount == 0)
+                {
+                    deletable.Add(pair);
+                }
+            }
+
+            obsolete = deletable.ToArray();
+        }
+
         await DeleteAsync(obsolete, cancellationToken);
     }
 
