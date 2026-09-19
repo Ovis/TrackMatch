@@ -184,7 +184,7 @@ public partial class MainWindow : Window
                 var detail = $"影響するLibrary: {string.Join("、", impactedLibraries)}";
                 if (keepLibraries.Length > 0)
                 {
-                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」に指定されています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
+                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」として確定しています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
                 }
 
                 // Shared Trackは1つの物理ファイルを複数Libraryが参照するため、通常のTrash確認とは別に影響範囲を明示する。
