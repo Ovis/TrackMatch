@@ -70,6 +70,8 @@ public sealed class MainWindowViewModelCandidateSkipTests
         var group = new DuplicateGroup(10, 1, null, DuplicateGroupKeepStatus.Unselected, [1, 2, 3], [1, 2, 3]);
         ReplaceAllCandidates(viewModel, CreateItems(rows, [group], reviews));
 
+        // 初期値もUnreviewedなので、一度Allを適用してからFilterを戻し、実際のFilter経路を通す。
+        viewModel.CandidateListMode = CandidateReviewListMode.All;
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
 
         // 1と3はいずれもTop候補なので、この比較を省略するとKeepを一意化できない。
