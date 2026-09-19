@@ -95,6 +95,35 @@ public sealed class ContentVerificationPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerificationFailure_UserClearsVerdict_MetadataOnlyRecoveryDoesNotRestoreIt()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var lookup = new SqliteTrackLookupRepository(_database);
+        var groups = new SqliteDuplicateGroupRepository(_database);
+        var a = await AddTrackAsync(tracks, "clear-a.flac");
+        var b = await AddTrackAsync(tracks, "clear-b.flac");
+        var pair = CandidatePairKey.Create(a, b);
+        var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
+        var service = new DuplicateGroupService(reviews, lookup, groups);
+        await service.SaveReviewAsync(
+            _libraryId,
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, a, null),
+            TestContext.Current.CancellationToken);
+
+        await tracks.MarkContentVerificationFailedAsync(a, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+        await service.DeleteReviewAsync(_libraryId, pair, TestContext.Current.CancellationToken);
+
+        Assert.Empty(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
+
+        await tracks.MarkContentVerifiedAsync(a, TestContext.Current.CancellationToken);
+        await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task VerificationFailure_TemporarilySplitsGroupAndVerifiedRejoinsIt()
     {
         var tracks = new SqliteTrackRepository(_database);
