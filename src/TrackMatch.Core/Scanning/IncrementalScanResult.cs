@@ -9,7 +9,7 @@ public sealed record IncrementalScanResult(
     long SessionId,
     ScanSessionSummary Summary,
     IReadOnlyList<IncrementalScanError> Errors,
-    IReadOnlyList<ContentChangeNotice>? ContentChanges = null);
+    IReadOnlyList<ContentChangeNotice> ContentChanges);
 
 /// <summary>
 /// Audio Content Change確定によって解除されたHuman Verdict件数を通知する。
