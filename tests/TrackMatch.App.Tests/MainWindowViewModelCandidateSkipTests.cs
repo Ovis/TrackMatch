@@ -85,6 +85,35 @@ public sealed class MainWindowViewModelCandidateSkipTests
         Assert.False(required.IsReviewSkipped);
     }
 
+    [Fact]
+    public void CandidateFilters_SuspendedVerdictAppearsInReviewedButNotReReviewRecommended()
+    {
+        using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
+        var rows = new[]
+        {
+            CreateRow(
+                CandidateReviewDecision.ConfirmedDuplicate,
+                1,
+                2,
+                preferredTrackId: 1,
+                reReviewRecommended: true,
+                isHumanVerdictSuspended: true),
+        };
+        ReplaceAllCandidates(viewModel, CreateItems(rows, [], []));
+
+        Assert.Equal(0, viewModel.UnreviewedCount);
+        Assert.Equal(0, viewModel.ReviewedCount);
+        Assert.Equal(1, viewModel.SuspendedReviewCount);
+        Assert.Equal(0, viewModel.ReReviewRecommendedCount);
+        Assert.Equal("レビュー済み 0（利用停止 1）", viewModel.ReviewedTabHeader);
+
+        viewModel.CandidateListMode = CandidateReviewListMode.Reviewed;
+        Assert.Single(viewModel.Candidates);
+
+        viewModel.CandidateListMode = CandidateReviewListMode.ReReviewRecommended;
+        Assert.Empty(viewModel.Candidates);
+    }
+
     private static IReadOnlyList<CandidateReviewItemViewModel> CreateItems(
         IReadOnlyList<CandidateReviewReportRow> rows,
         IReadOnlyList<DuplicateGroup> groups,
@@ -107,7 +136,13 @@ public sealed class MainWindowViewModelCandidateSkipTests
         list.AddRange(items);
     }
 
-    private static CandidateReviewReportRow CreateRow(CandidateReviewDecision? decision, long trackIdA, long trackIdB, long? preferredTrackId = null)
+    private static CandidateReviewReportRow CreateRow(
+        CandidateReviewDecision? decision,
+        long trackIdA,
+        long trackIdB,
+        long? preferredTrackId = null,
+        bool reReviewRecommended = false,
+        bool isHumanVerdictSuspended = false)
         => new(
             trackIdA, trackIdB, null, null, 0.99, 1, 1, 1,
             TimeSpan.Zero, TimeSpan.FromMinutes(3),
@@ -116,7 +151,9 @@ public sealed class MainWindowViewModelCandidateSkipTests
             TimeSpan.FromMinutes(3), TimeSpan.FromMinutes(3), 100, 100,
             "FLAC", "FLAC", "FLAC", "FLAC", 900, 900, 44100, 44100, 16, 16, 2, 2,
             decision,
-            PreferredTrackId: preferredTrackId);
+            ReReviewRecommended: reReviewRecommended,
+            PreferredTrackId: preferredTrackId,
+            IsHumanVerdictSuspended: isHumanVerdictSuspended);
 
     private static CandidateReview Confirmed(long left, long right, long preferredTrackId)
         => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, preferredTrackId, null);
