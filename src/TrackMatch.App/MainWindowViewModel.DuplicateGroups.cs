@@ -16,14 +16,14 @@ public sealed partial class MainWindowViewModel
     public bool HasDuplicateGroups => DuplicateGroups.Count > 0;
 
     /// <summary>
-    /// 重複グループ詳細画面で変更されたKeepをCandidate一覧のレビュー省略状態にも反映して再読込する。
+    /// 重複グループ詳細画面から戻った後、Track状態やHuman Verdict由来の派生状態をCandidate一覧へ反映する。
     /// </summary>
     public async Task RefreshDuplicateGroupsAsync()
     {
         var selected = SelectedCandidate;
         if (selected is not null)
         {
-            // レビュー省略はKeepから導出するため、右ペインのGroup表示だけでなくCandidate一覧も同じ最新Projectionから再構築する。
+            // レビュー省略はHuman Verdictと派生Keepから再計算するため、右ペインだけでなくCandidate一覧も最新Projectionから再構築する。
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
 
