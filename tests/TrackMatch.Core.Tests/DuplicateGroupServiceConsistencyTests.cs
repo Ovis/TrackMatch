@@ -112,8 +112,8 @@ public sealed class DuplicateGroupServiceConsistencyTests
 
         Assert.Equal(0, reviews.SaveCount);
         var stored = Assert.Single(
-            (await reviews.GetAllAsync(TestContext.Current.CancellationToken))
-                .Where(review => review.Pair == targetPair));
+            await reviews.GetAllAsync(TestContext.Current.CancellationToken),
+            review => review.Pair == targetPair);
         Assert.Equal(1, stored.PreferredTrackId);
     }
 
