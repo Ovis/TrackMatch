@@ -4,6 +4,9 @@ using Xunit;
 
 namespace TrackMatch.Core.Tests;
 
+/// <summary>
+/// Human Verdictから導出する優劣推移、Keep候補、循環検出の不変条件を検証する。
+/// </summary>
 public sealed class PreferenceGraphEvaluatorTests
 {
     [Fact]
