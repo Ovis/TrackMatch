@@ -77,6 +77,9 @@ public sealed partial class MainWindowViewModel
                 await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review);
             }
 
+            // UndoでKeep候補が再び複数になった場合も、通常レビュー後と同じく仕分けを完遂できる比較手段を補完する。
+            await EnsureSupplementalCandidatesAsync(database, snapshot.LibraryId);
+
             // Undo自体を再Undoする履歴は持たない。復元に成功してから1段履歴を消費する。
             _lastReviewUndo = null;
             await ReloadCandidatesPreservingPairAsync(snapshot.Pair.TrackIdA, snapshot.Pair.TrackIdB);
