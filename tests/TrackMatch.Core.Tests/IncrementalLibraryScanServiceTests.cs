@@ -127,6 +127,31 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_PreviousVerificationFailure_RetriesEvenWhenFileAttributesNoLongerDiffer()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "retry-verification.flac");
+        var fingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 200, 20))],
+            existingFingerprint: fingerprint,
+            verificationPendingTrackIds: new HashSet<long> { 1 });
+        var extractor = new FakeFingerprintExtractor();
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 200, 20))]),
+            repository,
+            new FakeScanSessionRepository(),
+            extractor,
+            2);
+
+        await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal([path], extractor.Paths);
+        Assert.Equal([1L], repository.VerifiedTrackIds);
+        Assert.Empty(repository.ContentChangedTrackIds);
+    }
+
+    [Fact]
     public async Task ScanAsync_NormalCompletionMarksStoredTrackMissingWhenScannerDidNotFindIt()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -330,7 +355,8 @@ public sealed class IncrementalLibraryScanServiceTests
         IReadOnlySet<long>? missingFingerprintIds = null,
         CancellationTokenSource? cancelDuringMissingBatch = null,
         AudioFingerprint? existingFingerprint = null,
-        int invalidatedReviewCount = 0) : ITrackRepository
+        int invalidatedReviewCount = 0,
+        IReadOnlySet<long>? verificationPendingTrackIds = null) : ITrackRepository
     {
         private long _nextId = 100;
         public List<string> UpsertedPaths { get; } = [];
@@ -411,6 +437,9 @@ public sealed class IncrementalLibraryScanServiceTests
 
         public Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult(existingFingerprint);
+
+        public Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+            => Task.FromResult(verificationPendingTrackIds?.Contains(trackId) == true);
 
         public Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
         {
