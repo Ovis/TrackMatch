@@ -270,10 +270,8 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             }
         }
 
-        foreach (var review in reviews
-                     .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-                         && globalMemberIds.Contains(review.Pair.TrackIdA)
-                         && globalMemberIds.Contains(review.Pair.TrackIdB))
+        foreach (var review in groupReviews
+                     .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
                      .OrderBy(review => review.Pair.TrackIdA)
                      .ThenBy(review => review.Pair.TrackIdB))
         {
