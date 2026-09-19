@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -171,6 +171,7 @@ public sealed class SqliteDatabase
             CREATE TABLE IF NOT EXISTS Fingerprints (
                 TrackId INTEGER PRIMARY KEY,
                 Algorithm INTEGER NOT NULL,
+                DurationTicks INTEGER NOT NULL,
                 ValuesBlob BLOB NOT NULL,
                 ExtractedAtUtcTicks INTEGER NOT NULL,
                 FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
