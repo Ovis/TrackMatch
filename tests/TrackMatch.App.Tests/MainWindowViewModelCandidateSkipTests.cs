@@ -42,7 +42,12 @@ public sealed class MainWindowViewModelCandidateSkipTests
         Assert.Equal(0, viewModel.UnreviewedCount);
         Assert.Equal(3, viewModel.ReviewedCount);
         Assert.Equal(4, viewModel.Candidates.Count);
-        Assert.True(viewModel.Candidates.Single(item => item.TrackIdA == 2 && item.TrackIdB == 3).IsReviewSkipped);
+        var skipped = viewModel.Candidates.Single(item => item.TrackIdA == 2 && item.TrackIdB == 3);
+        Assert.True(skipped.IsReviewSkipped);
+
+        // 省略はHuman Verdictではないため、ユーザーが選択すれば通常の3択で直接レビューできる。
+        viewModel.SelectedCandidate = skipped;
+        Assert.True(viewModel.CanReview);
 
         viewModel.CandidateListMode = CandidateReviewListMode.Unreviewed;
         Assert.Empty(viewModel.Candidates);
