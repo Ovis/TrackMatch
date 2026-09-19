@@ -23,11 +23,15 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         }
 
         const string sql = """
-            SELECT x.TrackIdA, x.TrackIdB, c.Kind, c.Reason,
+            SELECT x.TrackIdA, x.TrackIdB, p.MinimumSegmentHashDistance, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
                    x.BestOffsetTicks, x.MatchedDurationTicks,
                    x.ComparedAtUtcTicks, c.ClassifiedAtUtcTicks,
                    a.Path AS PathA, b.Path AS PathB,
+                   a.ContentVerificationStatus AS ContentVerificationStatusA,
+                   b.ContentVerificationStatus AS ContentVerificationStatusB,
+                   a.ContentVerificationError AS ContentVerificationErrorA,
+                   b.ContentVerificationError AS ContentVerificationErrorB,
                    a.ArtistsJson AS ArtistsJsonA, b.ArtistsJson AS ArtistsJsonB,
                    a.Title AS TitleA, b.Title AS TitleB,
                    a.Album AS AlbumA, b.Album AS AlbumB,
@@ -42,11 +46,14 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    a.BitDepth AS BitDepthA, b.BitDepth AS BitDepthB,
                    a.Channels AS ChannelsA, b.Channels AS ChannelsB,
                    r.Decision AS ReviewDecision,
+                   r.PreferredTrackId,
                    r.ReviewedAtUtcTicks,
                    r.SourceLibraryId AS ReviewSourceLibraryId,
                    rl.Name AS CurrentReviewSourceLibraryName,
                    r.SourceLibraryNameSnapshot AS ReviewSourceLibraryNameSnapshot
             FROM CandidateComparisons x
+            INNER JOIN CandidatePairs p
+                ON p.TrackIdA = x.TrackIdA AND p.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateClassifications c
                 ON c.TrackIdA = x.TrackIdA AND c.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateReviews r
@@ -109,6 +116,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         }
 
         var reviewSourceLibraryName = row.CurrentReviewSourceLibraryName ?? row.ReviewSourceLibraryNameSnapshot;
+        var isHumanVerdictSuspended = reviewDecision is not null
+            && (!string.Equals(row.ContentVerificationStatusA, "Verified", StringComparison.Ordinal)
+                || !string.Equals(row.ContentVerificationStatusB, "Verified", StringComparison.Ordinal));
         return new CandidateReviewReportRow(
             row.TrackIdA, row.TrackIdB, kind, row.Reason,
             row.Similarity, row.CoverageA, row.CoverageB, row.DurationRatio,
@@ -123,12 +133,16 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             reviewDecision,
             ToUInt(row.YearA), ToUInt(row.YearB),
             row.ReviewSourceLibraryId, reviewSourceLibraryName,
-            IsReReviewRecommended(
+            isHumanVerdictSuspended ? false : IsReReviewRecommended(
                 reviewDecision,
                 kind,
                 row.ComparedAtUtcTicks,
                 row.ClassifiedAtUtcTicks,
-                row.ReviewedAtUtcTicks));
+                row.ReviewedAtUtcTicks),
+            row.PreferredTrackId,
+            isHumanVerdictSuspended,
+            isHumanVerdictSuspended ? row.ContentVerificationErrorA ?? row.ContentVerificationErrorB : null,
+            row.MinimumSegmentHashDistance < 0);
     }
 
     /// <summary>
@@ -174,10 +188,12 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
 
     private sealed record ReportRow(
-        long TrackIdA, long TrackIdB, string? Kind, string? Reason,
+        long TrackIdA, long TrackIdB, long MinimumSegmentHashDistance, string? Kind, string? Reason,
         double Similarity, double CoverageA, double CoverageB, double DurationRatio,
         long BestOffsetTicks, long MatchedDurationTicks, long ComparedAtUtcTicks, long? ClassifiedAtUtcTicks,
-        string PathA, string PathB, string ArtistsJsonA, string ArtistsJsonB,
+        string PathA, string PathB, string ContentVerificationStatusA, string ContentVerificationStatusB,
+        string? ContentVerificationErrorA, string? ContentVerificationErrorB,
+        string ArtistsJsonA, string ArtistsJsonB,
         string? TitleA, string? TitleB, string? AlbumA, string? AlbumB,
         string GenresJsonA, string GenresJsonB,
         long? YearA, long? YearB,
@@ -185,6 +201,6 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? FormatA, string? FormatB, string? CodecA, string? CodecB,
         long? BitrateKbpsA, long? BitrateKbpsB, long? SampleRateHzA, long? SampleRateHzB,
         long? BitDepthA, long? BitDepthB, long? ChannelsA, long? ChannelsB,
-        string? ReviewDecision, long? ReviewedAtUtcTicks,
+        string? ReviewDecision, long? PreferredTrackId, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }

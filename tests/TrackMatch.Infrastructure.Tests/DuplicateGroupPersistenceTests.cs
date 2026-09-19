@@ -48,7 +48,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var group = Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(DuplicateGroupKeepStatus.Selected, group.KeepStatus);
-        Assert.Equal(b, group.KeepTrackId);
+        Assert.Equal(a, group.KeepTrackId);
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.TrackIds);
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), group.GlobalTrackIds);
     }
@@ -77,26 +77,30 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveReview_ContradictingNotDuplicateIsRejectedBeforePersistence()
+    public async Task SaveReview_ContradictingNotDuplicateIsPreservedAsConflict()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveReviewAsync(
+        await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.NotDuplicate, null),
-            TestContext.Current.CancellationToken));
+            new CandidateReview(CandidatePairKey.Create(a, c), CandidateReviewDecision.NotDuplicate, null, null),
+            TestContext.Current.CancellationToken);
 
         var reviews = await new SqliteCandidateReviewRepository(_database)
             .GetAllAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(2, reviews.Count);
-        Assert.DoesNotContain(reviews, review => review.Pair == CandidatePairKey.Create(a, c));
+        Assert.Equal(3, reviews.Count);
+        Assert.Contains(reviews, review => review.Pair == CandidatePairKey.Create(a, c)
+            && review.Decision == CandidateReviewDecision.NotDuplicate);
+        Assert.Contains(
+            DuplicateGroupConflictEvaluator.FindConflicts(reviews),
+            conflict => conflict.Pair == CandidatePairKey.Create(a, c));
     }
 
     [Fact]
-    public async Task SetKeepAsync_AllowsGlobalGroupTrackOutsideCurrentLibrary()
+    public async Task SetDerivedKeepStateAsync_RejectsGlobalGroupTrackOutsideCurrentLibrary()
     {
         var libraries = new SqliteLibraryRepository(_database);
         var secondRoot = Path.Combine(_directory, "second");
@@ -131,21 +135,22 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         Assert.DoesNotContain(c, firstProjection.TrackIds);
         Assert.Contains(c, firstProjection.GlobalTrackIds);
 
-        await repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             firstProjection.Id,
             c,
-            "UserSelected",
-            TestContext.Current.CancellationToken);
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
+            TestContext.Current.CancellationToken));
 
+        // Global Preferenceは共有しても、Library固有Keepは現在Library内のTrackだけから導出する。
         var updated = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        Assert.Equal(DuplicateGroupKeepStatus.Selected, updated.KeepStatus);
-        Assert.Equal(c, updated.KeepTrackId);
+        Assert.Equal(a, updated.KeepTrackId);
         Assert.DoesNotContain(c, updated.TrackIds);
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsLibraryThatHasNoMembershipInGroup()
+    public async Task SetDerivedKeepStateAsync_RejectsLibraryThatHasNoMembershipInGroup()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -161,16 +166,17 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var repository = new SqliteDuplicateGroupRepository(_database);
         var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             unrelatedLibrary.Id,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsLibraryThatHasOnlyMissingMembershipInGroup()
+    public async Task SetDerivedKeepStateAsync_RejectsLibraryThatHasOnlyMissingMembershipInGroup()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -184,16 +190,17 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await tracks.MarkMissingAsync(b, TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task SetKeepAsync_RejectsMissingKeepWhenOtherGroupMemberIsActive()
+    public async Task SetDerivedKeepStateAsync_RejectsMissingKeepWhenOtherGroupMemberIsActive()
     {
         var (a, b, _) = await CreateTracksAsync();
         var service = CreateService();
@@ -206,11 +213,12 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         // MissingになったAをSelected Keepとして保存できてしまう。Keep対象自身のActive状態もRepository境界で検証する。
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetKeepAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SetDerivedKeepStateAsync(
             _libraryId,
             group.Id,
             a,
-            "UserSelected",
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
             TestContext.Current.CancellationToken));
 
         var projection = Assert.Single(await repository.GetByLibraryIdAsync(
@@ -221,7 +229,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SynchronizeGlobalAsync_RecordsMissingAndRestoreButRequiresKeepReviewAfterRestore()
+    public async Task SynchronizeGlobalAsync_RecordsMissingAndReusesVerdictAfterRestore()
     {
         var (a, b, c) = await CreateTracksAsync();
         var service = CreateService();
@@ -229,31 +237,28 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         var tracks = new SqliteTrackRepository(_database);
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
-        var group = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetKeepAsync(_libraryId, group.Id, a, "UserSelected", TestContext.Current.CancellationToken);
-
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var missingProjection = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { b, c }.Order().ToArray(), missingProjection.GlobalTrackIds);
-        Assert.Equal(DuplicateGroupKeepStatus.Missing, missingProjection.KeepStatus);
-        Assert.Null(missingProjection.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, missingProjection.KeepStatus);
+        Assert.Equal(b, missingProjection.KeepTrackId);
 
         await tracks.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds);
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var changeKinds = (await connection.QueryAsync<string>(
             "SELECT ChangeKind FROM LibraryDuplicateGroupKeepHistory ORDER BY Id;"))
             .ToArray();
         Assert.Contains("KeepMissing", changeKinds);
-        Assert.Contains("KeepRestored", changeKinds);
+        Assert.Contains("HumanVerdict", changeKinds);
     }
 
     [Fact]
@@ -265,7 +270,8 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
         await SaveConfirmedAsync(service, _libraryId, a, b, a);
         await SaveConfirmedAsync(service, _libraryId, b, c, b);
         var oldGroup = Assert.Single(await repository.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await repository.SetKeepAsync(_libraryId, oldGroup.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        await repository.SetDerivedKeepStateAsync(_libraryId, oldGroup.Id, a, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
         await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
         {
@@ -324,8 +330,7 @@ public sealed class DuplicateGroupPersistenceTests : IAsyncLifetime
     {
         await service.SaveReviewAsync(
             libraryId,
-            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
-            keepTrackId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, keepTrackId, null),
             TestContext.Current.CancellationToken);
     }
 

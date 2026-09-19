@@ -56,8 +56,7 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
         var duplicateGroups = CreateDuplicateGroupService();
         await duplicateGroups.SaveReviewAsync(
             library.Id,
-            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
-            a,
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
         Assert.Single(await new SqliteDuplicateGroupRepository(_database)
             .GetAllGlobalAsync(TestContext.Current.CancellationToken));
@@ -111,17 +110,13 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
         var duplicateGroups = CreateDuplicateGroupService();
         await duplicateGroups.SaveReviewAsync(
             childLibrary.Id,
-            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, null),
-            a,
+            new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
         var groupRepository = new SqliteDuplicateGroupRepository(_database);
         var parentProjection = Assert.Single(await groupRepository.GetByLibraryIdAsync(parentLibrary.Id, TestContext.Current.CancellationToken));
-        await groupRepository.SetKeepAsync(
-            parentLibrary.Id,
-            parentProjection.Id,
-            b,
-            "UserSelected",
-            TestContext.Current.CancellationToken);
+        // Parent LibraryにはAしか存在しないため、Global Preference A>BからLibrary固有Keep=Aが導出される。
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, parentProjection.KeepStatus);
+        Assert.Equal(a, parentProjection.KeepTrackId);
 
         await new LibraryManagementService(_databasePath).RemapRootAsync(
             childLibrary.Id,
@@ -142,7 +137,7 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
                 ORDER BY Id DESC LIMIT 1;
                 """,
                 new { LibraryId = parentLibrary.Id });
-            Assert.Equal(b, history.KeepTrackId);
+            Assert.Equal(a, history.KeepTrackId);
             Assert.Equal(nameof(DuplicateGroupKeepStatus.Selected), history.Status);
             Assert.Equal("ScopeRemoved", history.ChangeKind);
         }

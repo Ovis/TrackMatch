@@ -9,7 +9,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// Missing期間をまたぐHuman Verdict変更とKeep変更が、物理復帰時の安全条件を壊さないことを検証する。
+/// Missing期間をまたぐHuman Verdict変更と派生Keep再計算が、物理復帰時の安全条件を壊さないことを検証する。
 /// </summary>
 public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 {
@@ -50,8 +50,6 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -69,17 +67,18 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
         var restoredCountBeforeReconfirm = await GetTrackRestoredHistoryCountAsync();
 
         // Cが物理復帰した後でB-Cを再度重複と確定するのは、新しいHuman Verdict操作である。
-        // 過去のTrackMissingをRestore理由として再利用し、明示KeepをUnselectedへ落としてはいけない。
+        // 過去のTrackMissingをRestore理由として再利用し、現在のHuman Verdictから導出したKeepを不必要にUnselectedへ落としてはいけない。
         await SaveConfirmedAsync(service, b, c, b);
 
         var current = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(DuplicateGroupKeepStatus.Selected, current.KeepStatus);
-        Assert.Equal(b, current.KeepTrackId);
+        // A>BかつB>Cなので、再確定後の派生Keepは推移的優劣によりAとなる。
+        Assert.Equal(a, current.KeepTrackId);
         Assert.Equal(restoredCountBeforeReconfirm, await GetTrackRestoredHistoryCountAsync());
     }
 
     [Fact]
-    public async Task RestoreOldKeepAfterChoosingAlternativeWhileMissing_RequiresReview()
+    public async Task RestorePreferredTrackAfterTemporaryMissing_RecomputesDerivedKeep()
     {
         var tracks = new SqliteTrackRepository(_database);
         var a = await CreateTrackAsync(tracks, "keep-a.flac");
@@ -90,15 +89,13 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
-        // 旧Keep=AをMissingへし、残ったB-Cに対して代替Keep=Bを選ぶ。
-        // Keep変更はLibrary固有Dispositionだけなので、Aの物理復帰Guardを解除してはいけない。
+        // 最上位AがMissingの間は、残ったB-CのPreferenceからBが一時的なKeepとして導出される。
+        // Aが同Contentで復帰したら、保存済みHuman VerdictからAを再び導出する。
         await tracks.MarkMissingAsync(a, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, reduced.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        Assert.Equal(b, reduced.KeepTrackId);
 
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("keep-a.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(a, restoredId);
@@ -106,8 +103,8 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
     }
 
     private DuplicateGroupService CreateService()
@@ -124,8 +121,7 @@ public sealed class DuplicateGroupRestoreInvariantTests : IAsyncLifetime
     {
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
-            keepTrackId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, keepTrackId, null),
             TestContext.Current.CancellationToken);
     }
 

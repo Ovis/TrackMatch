@@ -22,6 +22,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private readonly JsonAppSettingsStore _settingsStore = new();
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
     private readonly List<IncrementalScanError> _analysisErrors = [];
+    private readonly List<ContentChangeNotice> _contentChanges = [];
     private readonly List<CandidateReviewItemViewModel> _allCandidates = [];
     private readonly string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CancellationTokenSource? _analysisCancellation;
@@ -87,7 +88,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(CanReview));
             OnPropertyChanged(nameof(CanClearReview));
-            OnPropertyChanged(nameof(CanExplicitlyConfirmSkippedReview));
             RememberCurrentCandidate();
             _ = LoadDuplicateGroupsForSelectionAsync(value);
         }
@@ -127,13 +127,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     // タブ件数はDB全体ではなく、現在レビュー対象としている一致度下限を反映する。
     // レビュー省略はHuman Verdictではないためレビュー済みに数えず、操作不要なので未レビューにも数えない。
     public int UnreviewedCount => ReviewTargetCandidates.Count(item => !item.IsReviewed && !item.IsReviewSkipped);
-    public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed);
-    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && item.IsReReviewRecommended);
+    public int ReviewedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && !item.IsHumanVerdictSuspended);
+    public int SuspendedReviewCount => ReviewTargetCandidates.Count(item => item.IsHumanVerdictSuspended);
+    public string ReviewedTabHeader => SuspendedReviewCount == 0
+        ? $"レビュー済み ({ReviewedCount})"
+        : $"レビュー済み {ReviewedCount}（利用停止 {SuspendedReviewCount}）";
+    public int ReReviewRecommendedCount => ReviewTargetCandidates.Count(item => item.IsReviewed && !item.IsHumanVerdictSuspended && item.IsReReviewRecommended);
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
-    public bool CanReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewSkipped != true;
-    public bool CanExplicitlyConfirmSkippedReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewSkipped == true;
+    // 省略Candidateもユーザーが直接レビューする場合は通常の3択を使える。
+    public bool CanReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsHumanVerdictSuspended != true;
     public bool CanClearReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewed == true;
     public bool CanAnalyzeLibrary => SelectedLibrary is not null && !IsLoading && !IsAnalyzing;
     public bool CanCancelAnalysis => IsAnalyzing && !IsCancellingAnalysis;
@@ -147,6 +151,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public bool IsCancellingAnalysis { get => _isCancellingAnalysis; private set { if (SetField(ref _isCancellingAnalysis, value)) { OnPropertyChanged(nameof(CanCancelAnalysis)); } } }
     public int AnalysisErrorCount => _analysisErrors.Count;
     public IReadOnlyList<IncrementalScanError> AnalysisErrors => _analysisErrors;
+    public int ContentChangeCount => _contentChanges.Count;
+    public IReadOnlyList<ContentChangeNotice> ContentChanges => _contentChanges;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
@@ -204,7 +210,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         var library = SelectedLibrary;
         if (library is null || !CanAnalyzeLibrary) { AnalysisStatusText = "ライブラリを選択してください。"; return; }
-        _analysisErrors.Clear(); OnPropertyChanged(nameof(AnalysisErrorCount)); IsAnalyzing = true; IsCancellingAnalysis = false;
+        _analysisErrors.Clear(); _contentChanges.Clear();
+        OnPropertyChanged(nameof(AnalysisErrorCount)); OnPropertyChanged(nameof(ContentChangeCount)); IsAnalyzing = true; IsCancellingAnalysis = false;
         _analysisCancellation = new CancellationTokenSource();
         try
         {
@@ -219,6 +226,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             AnalysisStatusText = FormatAnalysisSummary("完了", summaries);
+            _contentChanges.AddRange(result.Scan.Roots.SelectMany(item => item.ContentChanges));
+            OnPropertyChanged(nameof(ContentChangeCount));
+            if (_contentChanges.Count != 0)
+            {
+                var invalidatedReviews = _contentChanges.Sum(item => item.InvalidatedReviewCount);
+                AnalysisStatusText += _contentChanges.Count == 1
+                    ? $" — 音声内容変更: {Path.GetFileName(_contentChanges[0].Path)} / Human Verdict解除 {invalidatedReviews}件"
+                    : $" — 音声内容変更 {_contentChanges.Count}ファイル / Human Verdict解除 {invalidatedReviews}件";
+            }
         }
         catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException) { AnalysisStatusText = $"分析失敗: {exception.Message}"; }
@@ -244,42 +260,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public Task ConfirmDuplicateKeepAAsync() => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdA);
     public Task ConfirmDuplicateKeepBAsync() => SaveReviewAsync(CandidateReviewDecision.ConfirmedDuplicate, SelectedCandidate?.TrackIdB);
 
-    /// <summary>
-    /// レビュー省略中のPairを、現在のLibrary Keepを変更せず明示的なConfirmedDuplicateとして保存する。
-    /// </summary>
-    public async Task ConfirmSkippedDuplicateAsync()
-    {
-        var selected = SelectedCandidate;
-        var library = SelectedLibrary;
-        if (selected is null || library is null || !CanExplicitlyConfirmSkippedReview)
-        {
-            return;
-        }
-
-        StopPlayback(); IsLoading = true;
-        try
-        {
-            var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            var reviews = new SqliteCandidateReviewRepository(database);
-            var tracks = new SqliteTrackLookupRepository(database);
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var service = new SkippedPairReviewService(reviews, tracks, groups);
-            try
-            {
-                await service.ConfirmAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
-            }
-            catch
-            {
-                // 表示後にGroup/Keepが変わってCore検証で拒否された場合も、古いレビュー省略表示を残さない。
-                await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
-                throw;
-            }
-
-            await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
-        }
-        finally { IsLoading = false; }
-    }
-
     /// <summary>現在のHuman Verdictを解除し、残った判定から候補状態を再計算する。</summary>
     public async Task ClearReviewAsync()
     {
@@ -302,6 +282,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var groups = new SqliteDuplicateGroupRepository(database);
             var groupService = new DuplicateGroupService(reviews, tracks, groups);
             await groupService.DeleteReviewAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
+            await EnsureSupplementalCandidatesAsync(database, library.Id);
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
@@ -358,7 +339,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         get
         {
             var minimum = SimilarityDisplayLowerBoundPercent / 100d;
-            return _allCandidates.Where(item => item.Row.Similarity >= minimum);
+            return _allCandidates.Where(item => item.Row.IsSupplementalCandidate || item.Row.Similarity >= minimum);
         }
     }
 
@@ -368,6 +349,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+
+        // Human Verdict保存後の派生状態更新中にプロセスが終了しても、Current Human Verdictを正本として起動時に自己修復する。
+        // Materialized Group/Keepをそのまま信頼して表示やファイル整理へ進まない。
+        await new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(database),
+            new SqliteTrackLookupRepository(database),
+            new SqliteDuplicateGroupRepository(database))
+            .SynchronizeGlobalAsync();
+
+        // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
+        await EnsureSupplementalCandidatesAsync(database, library.Id);
         _allCandidates.AddRange(await LoadCandidateItemsAsync(database, library.Id));
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
     }
@@ -381,10 +373,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var reviews = await GetUsableReviewsAsync(database);
 
-        // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、Library Projectionを一括取得して索引化する。
-        // Group取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
-        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups);
+        // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、派生計算に必要なCurrent Stateを一括取得する。
+        // 取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
+        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
         return rows
             .Select(row => new CandidateReviewItemViewModel(
                 row,
@@ -399,7 +392,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         {
             CandidateReviewListMode.Unreviewed => !item.IsReviewed && !item.IsReviewSkipped,
             CandidateReviewListMode.Reviewed => item.IsReviewed,
-            CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && item.IsReReviewRecommended,
+            CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && !item.IsHumanVerdictSuspended && item.IsReReviewRecommended,
             _ => true,
         }).ToArray();
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
@@ -430,7 +423,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
     }
 
-    private async Task SaveReviewAsync(CandidateReviewDecision decision, long? keepTrackId)
+    private async Task SaveReviewAsync(CandidateReviewDecision decision, long? preferredTrackId)
     {
         var selected = SelectedCandidate; if (selected is null || !CanReview)
         {
@@ -452,11 +445,115 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var groupService = new DuplicateGroupService(reviews, tracks, groups);
             await groupService.SaveReviewAsync(
                 library.Id,
-                new CandidateReview(CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB), decision, null),
-                keepTrackId);
+                new CandidateReview(
+                    CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB),
+                    decision,
+                    decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
+                    null));
+            await EnsureSupplementalCandidatesAsync(database, library.Id);
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
+    }
+
+    /// <summary>
+    /// 現在の優劣関係だけではKeepを一意化できないGroupへ、必要最小限の補完Candidateを生成する。
+    /// </summary>
+    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId)
+    {
+        var reviews = await GetUsableReviewsAsync(database);
+        var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var pairs = new SqliteCandidatePairRepository(database, libraryId);
+        var existingPairs = await pairs.GetAllAsync();
+        var required = new List<CandidatePairKey>();
+
+        foreach (var group in groups.Where(group => group.KeepStatus == DuplicateGroupKeepStatus.Unselected))
+        {
+            var groupTrackIds = group.GlobalTrackIds.ToHashSet();
+            var groupReviews = reviews
+                .Where(review => groupTrackIds.Contains(review.Pair.TrackIdA)
+                    && groupTrackIds.Contains(review.Pair.TrackIdB))
+                .ToArray();
+            var pair = ReviewNecessityEvaluator.FindSupplementalPair(group.TrackIds, groupReviews, existingPairs);
+            if (pair is { } supplemental)
+            {
+                required.Add(supplemental);
+            }
+        }
+
+        var existingKeys = existingPairs
+            .Select(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB))
+            .ToHashSet();
+        var created = false;
+        foreach (var pair in required.Where(pair => !existingKeys.Contains(pair)))
+        {
+            await pairs.EnsureSupplementalAsync(pair);
+            created = true;
+        }
+
+        await pairs.DeleteObsoleteSupplementalAsync(required);
+
+        // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。
+        // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
+        // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
+        var comparedKeys = (await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync())
+            .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
+            .ToHashSet();
+        var needsAnalysis = created || required.Any(pair => !comparedKeys.Contains(pair));
+        if (!needsAnalysis)
+        {
+            return;
+        }
+
+        // 補完Candidateも通常Candidateと同じ3択レビューに載せるため、raw Fingerprint比較と分類まで通常経路を再利用する。
+        var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
+        var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
+        await workflow.AnalyzeCandidatesAsync(libraryId);
+        await workflow.ClassifyCandidatesAsync(libraryId);
+    }
+
+    /// <summary>
+    /// Content Verification中のTrackに関係するVerdictを除き、現在の派生計算へ利用可能なHuman Verdictだけを取得する。
+    /// </summary>
+    private static async Task<IReadOnlyList<CandidateReview>> GetUsableReviewsAsync(SqliteDatabase database)
+    {
+        var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
+        var tracks = new SqliteTrackLookupRepository(database);
+        var result = new List<CandidateReview>(reviews.Count);
+        var usableByTrackId = new Dictionary<long, bool>();
+
+        foreach (var review in reviews)
+        {
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdA, out var usableA))
+            {
+                usableA = await tracks.IsHumanVerdictUsableAsync(review.Pair.TrackIdA);
+                usableByTrackId.Add(review.Pair.TrackIdA, usableA);
+            }
+
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdB, out var usableB))
+            {
+                usableB = await tracks.IsHumanVerdictUsableAsync(review.Pair.TrackIdB);
+                usableByTrackId.Add(review.Pair.TrackIdB, usableB);
+            }
+
+            if (usableA && usableB)
+            {
+                result.Add(review);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Conflict一覧など別画面から指定Pairの通常レビュー位置へ移動する。
+    /// </summary>
+    public async Task NavigateToCandidateAsync(CandidatePairKey pair)
+    {
+        CandidateListMode = CandidateReviewListMode.All;
+        await ReloadCandidatesPreservingPairAsync(pair.TrackIdA, pair.TrackIdB);
+        SelectedCandidate = Candidates.FirstOrDefault(item =>
+            CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair);
     }
 
     private async Task ReloadCandidatesPreservingPairAsync(long trackIdA, long trackIdB)
@@ -477,6 +574,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         OnPropertyChanged(nameof(UnreviewedCount));
         OnPropertyChanged(nameof(ReviewedCount));
+        OnPropertyChanged(nameof(SuspendedReviewCount));
+        OnPropertyChanged(nameof(ReviewedTabHeader));
         OnPropertyChanged(nameof(ReReviewRecommendedCount));
         OnPropertyChanged(nameof(TotalCandidateCount));
     }
@@ -524,7 +623,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void NotifyCommandStateChanged()
     {
-        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanExplicitlyConfirmSkippedReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
+        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

@@ -133,20 +133,26 @@ public sealed class DuplicateGroupPlannerTests
     }
 
     [Fact]
-    public void Build_RejectsNotDuplicateInsideTransitiveConfirmedComponent()
+    public void Build_PreservesNotDuplicateConflictAndBuildsConfirmedTopology()
     {
         var reviews = new[]
         {
             Confirmed(1, 2),
             Confirmed(2, 3),
-            new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(CandidatePairKey.Create(1, 3), CandidateReviewDecision.NotDuplicate, null, null),
         };
 
-        var exception = Assert.Throws<InvalidOperationException>(() => DuplicateGroupPlanner.Build(reviews, []));
+        var group = Assert.Single(DuplicateGroupPlanner.Build(reviews, []));
+        var conflict = Assert.Single(DuplicateGroupConflictEvaluator.FindConflicts(reviews));
 
-        Assert.Contains("矛盾", exception.Message);
+        Assert.Equal(new long[] { 1, 2, 3 }, group.TrackIds);
+        Assert.Equal(CandidatePairKey.Create(1, 3), conflict.Pair);
+        Assert.Equal(2, conflict.CauseReviews.Count);
+        Assert.All(
+            conflict.CauseReviews,
+            review => Assert.Equal(CandidateReviewDecision.ConfirmedDuplicate, review.Decision));
     }
 
     private static CandidateReview Confirmed(long left, long right)
-        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null);
+        => new(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, left, null);
 }

@@ -57,7 +57,7 @@ public sealed class QualityAnalysisCacheInvalidationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UpdatingFileIdentity_InvalidatesTrackAndCandidateQualityCaches()
+    public async Task ConfirmedContentChange_InvalidatesTrackAndCandidateQualityCaches()
     {
         var trackQuality = new SqliteTrackQualityAnalysisRepository(_database);
         var candidateQuality = new SqliteCandidateQualityComparisonRepository(_database);
@@ -85,6 +85,7 @@ public sealed class QualityAnalysisCacheInvalidationTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
         Assert.Equal(_trackIdA, sameTrackId);
+        await _tracks.ConfirmContentChangedAsync(_trackIdA, TestContext.Current.CancellationToken);
         Assert.Null(await trackQuality.GetAsync(_trackIdA, TestContext.Current.CancellationToken));
         Assert.NotNull(await trackQuality.GetAsync(_trackIdB, TestContext.Current.CancellationToken));
         Assert.Null(await candidateQuality.GetAsync(_trackIdA, _trackIdB, TestContext.Current.CancellationToken));

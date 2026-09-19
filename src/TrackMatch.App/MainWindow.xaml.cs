@@ -106,6 +106,27 @@ public partial class MainWindow : Window
     private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e) => await _viewModel.AnalyzeLibraryAsync();
     private void CancelAnalysis_Click(object sender, RoutedEventArgs e) => _viewModel.CancelAnalysis();
 
+    private void ShowContentChanges_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.ContentChanges.Count == 0)
+        {
+            return;
+        }
+
+        var invalidatedReviewCount = _viewModel.ContentChanges.Sum(item => item.InvalidatedReviewCount);
+        var detail = string.Join(
+            Environment.NewLine,
+            _viewModel.ContentChanges.Select(item =>
+                $"{Path.GetFileName(item.Path)} — Human Verdict解除 {item.InvalidatedReviewCount}件"));
+        new ConfirmationDialog(
+            "音声内容の変更",
+            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました / Human Verdict解除 {invalidatedReviewCount}件",
+            detail,
+            "閉じる",
+            kind: AppDialogKind.Information)
+        { Owner = this }.ShowDialog();
+    }
+
     private void ShowAnalysisErrors_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.AnalysisErrors.Count > 0)
@@ -163,7 +184,7 @@ public partial class MainWindow : Window
                 var detail = $"影響するLibrary: {string.Join("、", impactedLibraries)}";
                 if (keepLibraries.Length > 0)
                 {
-                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」に指定されています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
+                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」として確定しています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
                 }
 
                 // Shared Trackは1つの物理ファイルを複数Libraryが参照するため、通常のTrash確認とは別に影響範囲を明示する。
@@ -345,7 +366,8 @@ public partial class MainWindow : Window
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
-        => await ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync);
+        => await _viewModel.ExecuteReviewWithUndoAsync(
+            () => ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync));
 
     private async void KeepA_Click(object sender, RoutedEventArgs e)
     {
@@ -355,7 +377,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync);
+        await _viewModel.ExecuteReviewWithUndoAsync(
+            () => ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync));
     }
 
     private async void KeepB_Click(object sender, RoutedEventArgs e)
@@ -366,21 +389,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync);
+        await _viewModel.ExecuteReviewWithUndoAsync(
+            () => ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync));
     }
 
-    private async Task ConfirmDuplicateWithImpactAsync(long keepTrackId, Func<Task> action)
+    private async Task ConfirmDuplicateWithImpactAsync(long preferredTrackId, Func<Task> action)
     {
         try
         {
-            var impact = await _viewModel.GetKeepChangeImpactAsync(keepTrackId);
+            var impact = await _viewModel.GetKeepChangeImpactAsync(preferredTrackId);
             if (!string.IsNullOrWhiteSpace(impact))
             {
                 var confirmation = new ConfirmationDialog(
-                    "重複グループの残すファイルを変更",
+                    "重複判定によるKeep変更を確認",
                     impact,
-                    "この変更はグループ全体のごみ箱移動対象に反映されます。",
-                    "変更して確定",
+                    "Preferred TrackはGlobal Human Verdictとして保存され、派生Keepとごみ箱移動対象が再計算されます。",
+                    "判定を確定",
                     "キャンセル",
                     kind: AppDialogKind.Warning)
                 { Owner = this };
@@ -429,11 +453,8 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // 同じVerdictでKeepだけを変更する操作はLibrary固有Dispositionだけが変わるため、Global変更警告は不要。
-        if (selected.Row.ReviewDecision == targetDecision)
-        {
-            return true;
-        }
+        // ConfirmedDuplicateのPreferred Track変更もGlobal Human Verdictの変更である。
+        // Decision種別だけが同じでも別Library由来なら警告対象から除外しない。
 
         var sourceLibraryId = selected.Row.ReviewSourceLibraryId;
         var sourceNameSnapshot = selected.Row.ReviewSourceLibraryName;
@@ -484,7 +505,13 @@ public partial class MainWindow : Window
 
         // Main WindowのA/B同期再生と詳細画面の簡易試聴が同時に鳴らないよう、詳細表示前に停止する。
         _viewModel.StopPlayback();
-        new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this }.ShowDialog();
+        var details = new DuplicateGroupDetailsWindow(_viewModel.DatabasePath, library.Id, groupId) { Owner = this };
+        details.ShowDialog();
+        if (details.RequestedReviewPair is { } pair)
+        {
+            await _viewModel.NavigateToCandidateAsync(pair);
+        }
+
         await _viewModel.RefreshDuplicateGroupsAsync();
     }
 
@@ -494,15 +521,6 @@ public partial class MainWindow : Window
         {
             return;
         }
-
-        // レビュー省略Pairは操作不要を基本とし、明示的なGlobal edge化だけを低頻度操作として提示する。
-        var explicitConfirmItem = new MenuItem
-        {
-            Header = "重複として明示確定",
-            IsEnabled = _viewModel.CanExplicitlyConfirmSkippedReview,
-            Visibility = _viewModel.SelectedCandidate?.IsReviewSkipped == true ? Visibility.Visible : Visibility.Collapsed,
-        };
-        explicitConfirmItem.Click += ConfirmSkippedDuplicate_Click;
 
         var clearReviewItem = new MenuItem
         {
@@ -516,23 +534,8 @@ public partial class MainWindow : Window
             PlacementTarget = button,
             Placement = PlacementMode.Bottom,
         };
-        if (explicitConfirmItem.Visibility == Visibility.Visible)
-        {
-            menu.Items.Add(explicitConfirmItem);
-        }
         menu.Items.Add(clearReviewItem);
         menu.IsOpen = true;
-    }
-
-    private async void ConfirmSkippedDuplicate_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_viewModel.CanExplicitlyConfirmSkippedReview)
-        {
-            return;
-        }
-
-        // 明示確定はKeepを変更しない補助操作なので、通常のA/B Keep選択や確認Dialogには流さない。
-        await ExecuteReviewActionAsync(CandidateReviewDecision.ConfirmedDuplicate, _viewModel.ConfirmSkippedDuplicateAsync);
     }
 
     private async void ClearReview_Click(object sender, RoutedEventArgs e)

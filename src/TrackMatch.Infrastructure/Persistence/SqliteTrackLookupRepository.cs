@@ -30,6 +30,38 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
     }
 
     /// <inheritdoc />
+    public async Task<bool> IsHumanVerdictUsableAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var status = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId AND IsMissing = 0;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        return string.Equals(status, "Verified", StringComparison.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsFileOrganizationBlockedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM TrackFileOrganizationBlocks WHERE AffectedTrackId = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        return count != 0;
+    }
+
+    /// <inheritdoc />
     public async Task<bool> IsInLibraryAsync(
         long trackId,
         long libraryId,

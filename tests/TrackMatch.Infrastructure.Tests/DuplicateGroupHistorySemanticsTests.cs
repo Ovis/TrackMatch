@@ -108,8 +108,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, originalGroup.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
         // KeepではないCだけがMissingになってGroupが縮退するケースでも、単なるGroupRebuildではなく原因を履歴化する。
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
@@ -127,16 +125,15 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
             Assert.Contains("TrackMissing", kinds);
         }
 
-        // 同じTrackが再発見されても旧Dispositionは自動適用しない。
-        // Trashから手動復元したファイルを再び無確認でTrash対象にしないため、Current Keepは要確認へ戻す。
+        // 同じGlobal Trackが内容同一のまま再登場した場合はHuman Verdictを再利用し、Keepも再導出する。
         var restoredTrackId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(c, restoredTrackId);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
 
         await using var verifyConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var changeKinds = (await verifyConnection.QueryAsync<string>(
@@ -147,7 +144,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestoreAfterKeepChange_StillRequiresReviewBeforeOldTrashDispositionCanApply()
+    public async Task RestoreAfterTemporaryDerivedKeepChange_RecomputesOriginalPreference()
     {
         var tracks = new SqliteTrackRepository(_database);
         var a = await CreateTrackAsync(tracks, "a.flac");
@@ -158,23 +155,20 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var reduced = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
 
-        // Missing中の構成だけを見てKeepを変更しても、物理Track復帰というTopology遷移は消えない。
-        // 復帰Trackを旧Dispositionで即Trashしないため、復帰後は必ず要確認へ戻す。
-        await groups.SetKeepAsync(_libraryId, reduced.Id, b, "UserSelected", TestContext.Current.CancellationToken);
+        // CがMissingの間はA>BのPreferenceからAが引き続きKeepとなる。復帰後も正本はHuman Verdictである。
+        Assert.Equal(a, reduced.KeepTrackId);
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("c.flac"), TestContext.Current.CancellationToken);
         Assert.Equal(c, restoredId);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         var latestTopology = await connection.QuerySingleAsync<string>(
@@ -201,8 +195,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -211,7 +203,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         // Restore判定を旧Group IDやMissing直前Graph全体の完全一致へ依存させると、Cの復帰を見失う。
         await SaveConfirmedAsync(service, b, d, b);
         var changedWhileMissing = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        Assert.Equal(b, changedWhileMissing.KeepTrackId);
+        Assert.Equal(a, changedWhileMissing.KeepTrackId);
         Assert.Equal(new[] { a, b, d }.Order().ToArray(), changedWhileMissing.GlobalTrackIds.Order().ToArray());
 
         var restoredId = await tracks.UpsertMetadataAsync(CreateMetadata("topology-c.flac"), TestContext.Current.CancellationToken);
@@ -220,8 +212,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         var restored = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
         Assert.Equal(new[] { a, b, c, d }.Order().ToArray(), restored.GlobalTrackIds.Order().ToArray());
-        Assert.Equal(DuplicateGroupKeepStatus.Unselected, restored.KeepStatus);
-        Assert.Null(restored.KeepTrackId);
+        Assert.Equal(DuplicateGroupKeepStatus.Selected, restored.KeepStatus);
+        Assert.Equal(a, restored.KeepTrackId);
     }
 
     [Fact]
@@ -236,15 +228,15 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
         var service = CreateService();
         var groups = new SqliteDuplicateGroupRepository(_database);
 
-        // A-B-C-D-Eの一本鎖を作り、KeepをEにする。
-        // CがMissingになるとA-BとD-Eへ2:2でSplitし、旧Group IDは小さいTrack側A-Bへ継承される。
-        // Keep=Eは新しいGroup IDのD-Eへ移るため、Restore判定をGroup IDだけへ結び付けると復帰を見失う。
+        // A側とE側に最大候補を持つ連結成分を作る。
+        // CがMissingになるとA-BとD-EへSplitして各成分のKeepが一意になり、復帰すると再び候補が競合する。
+        // 復帰判定を旧Group IDだけへ結び付けると、D-E側の状態変化を見失う。
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
         await SaveConfirmedAsync(service, c, d, d);
         await SaveConfirmedAsync(service, d, e, e);
         var original = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, original.Id, e, "UserSelected", TestContext.Current.CancellationToken);
+        Assert.Equal(DuplicateGroupKeepStatus.Unselected, original.KeepStatus);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -265,8 +257,8 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
         // Split後は複数の旧Component Current Stateが同じ復帰Topologyへ合流するため、
-        // TrackRestored履歴自体は複数行になり得る。旧Keep=Eを保持していたSelected Stateが
-        // 復帰として履歴化されたことを確認すれば、Q64の安全条件を直接検証できる。
+        // TrackRestored履歴自体は複数行になり得る。Missing中にD-E成分から導出されたKeep=EのSelected Stateが
+        // 復帰として履歴化されたことを確認し、Topology変化の追跡が失われていないことを検証する。
         var selectedRestoreCount = await connection.ExecuteScalarAsync<long>(
             """
             SELECT COUNT(*)
@@ -291,8 +283,6 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
 
         await SaveConfirmedAsync(service, a, b, a);
         await SaveConfirmedAsync(service, b, c, b);
-        var originalGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(_libraryId, originalGroup.Id, a, "UserSelected", TestContext.Current.CancellationToken);
 
         await tracks.MarkMissingAsync(c, TestContext.Current.CancellationToken);
         await service.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
@@ -327,8 +317,7 @@ public sealed class DuplicateGroupHistorySemanticsTests : IAsyncLifetime
     {
         await service.SaveReviewAsync(
             _libraryId,
-            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, null),
-            keepTrackId,
+            new CandidateReview(CandidatePairKey.Create(left, right), CandidateReviewDecision.ConfirmedDuplicate, keepTrackId, null),
             TestContext.Current.CancellationToken);
     }
 

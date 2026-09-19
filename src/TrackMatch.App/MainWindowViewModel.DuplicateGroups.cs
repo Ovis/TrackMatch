@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
 
@@ -16,14 +17,14 @@ public sealed partial class MainWindowViewModel
     public bool HasDuplicateGroups => DuplicateGroups.Count > 0;
 
     /// <summary>
-    /// 重複グループ詳細画面で変更されたKeepをCandidate一覧のレビュー省略状態にも反映して再読込する。
+    /// 重複グループ詳細画面から戻った後、Track状態やHuman Verdict由来の派生状態をCandidate一覧へ反映する。
     /// </summary>
     public async Task RefreshDuplicateGroupsAsync()
     {
         var selected = SelectedCandidate;
         if (selected is not null)
         {
-            // レビュー省略はKeepから導出するため、右ペインのGroup表示だけでなくCandidate一覧も同じ最新Projectionから再構築する。
+            // レビュー省略はHuman Verdictと派生Keepから再計算するため、右ペインだけでなくCandidate一覧も最新Projectionから再構築する。
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
 
@@ -31,9 +32,9 @@ public sealed partial class MainWindowViewModel
     }
 
     /// <summary>
-    /// 指定TrackをKeepにする操作が現在Libraryの既存Keepへ与える影響を確認Dialog向け文面として返す。
+    /// 指定TrackをPreferredとするHuman Verdictが派生Keepへ与える影響を確認Dialog向け文面として返す。
     /// </summary>
-    public async Task<string?> GetKeepChangeImpactAsync(long keepTrackId)
+    public async Task<string?> GetKeepChangeImpactAsync(long preferredTrackId)
     {
         var selected = SelectedCandidate;
         var library = SelectedLibrary;
@@ -51,32 +52,56 @@ public sealed partial class MainWindowViewModel
             return null;
         }
 
-        if (groups.Count == 1
-            && groups[0].KeepStatus == DuplicateGroupKeepStatus.Selected
-            && groups[0].KeepTrackId == keepTrackId)
+        if (groups.Count > 1)
+        {
+            var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
+            return $"このHuman Verdictにより重複グループ {groupIds} が結合されます。結合後のKeepは全優劣関係から再計算されます。";
+        }
+
+        var group = groups[0];
+        var pair = CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB);
+        var proposedReviews = (await GetUsableReviewsAsync(database))
+            .Where(review => review.Pair != pair)
+            .Append(new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, preferredTrackId, null))
+            .ToArray();
+        PreferenceGraphEvaluator.EnsureAcyclic(proposedReviews);
+
+        var globalTrackIds = group.GlobalTrackIds.ToHashSet();
+        var groupReviews = proposedReviews
+            .Where(review => globalTrackIds.Contains(review.Pair.TrackIdA)
+                && globalTrackIds.Contains(review.Pair.TrackIdB))
+            .ToArray();
+
+        // Conflictや複数Top候補が残る場合に「このTrackでKeepが一意化する」と断定しない。
+        // 確認文もHuman Verdictから同じ派生ロジックで計算し、保存後の実状態と食い違わないようにする。
+        if (DuplicateGroupConflictEvaluator.FindConflicts(groupReviews).Count != 0)
+        {
+            return $"この優劣判定後も重複グループ #{group.Id} にはHuman VerdictのConflictが残るため、ファイル整理は引き続き停止されます。";
+        }
+
+        var keepCandidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, group.TrackIds);
+        if (keepCandidates.Count != 1)
+        {
+            return $"この優劣判定後も重複グループ #{group.Id} の残す候補は {keepCandidates.Count} ファイル残ります。追加レビュー後にKeepが再計算されます。";
+        }
+
+        var derivedKeepTrackId = keepCandidates[0];
+        if (group.KeepStatus == DuplicateGroupKeepStatus.Selected
+            && group.KeepTrackId == derivedKeepTrackId)
         {
             return null;
         }
 
         var tracks = new SqliteTrackLookupRepository(database);
-        var newKeep = await tracks.GetByIdAsync(keepTrackId);
-        // 重複候補では曲タイトルが同一であることが多いため、Keep変更確認では識別可能なファイル名を表示する。
-        var newKeepName = FormatTrackFileName(newKeep, keepTrackId);
-
-        if (groups.Count == 1)
+        var derivedKeep = await tracks.GetByIdAsync(derivedKeepTrackId);
+        var derivedKeepName = FormatTrackFileName(derivedKeep, derivedKeepTrackId);
+        if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
         {
-            var group = groups[0];
-            if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
-            {
-                return $"この操作により、重複グループ #{group.Id} で残すファイルを「{newKeepName}」に設定します。";
-            }
-
-            var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
-            return $"この操作により、重複グループ #{group.Id} の残すファイルが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{newKeepName}」に変更されます。";
+            return $"この優劣判定により、重複グループ #{group.Id} の残すファイルが「{derivedKeepName}」に一意化されます。";
         }
 
-        var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
-        return $"この操作により重複グループ {groupIds} が結合されます。既存Keepが複数ある場合、結合後は自動選択せず要確認になります。";
+        var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
+        return $"この優劣判定により、重複グループ #{group.Id} の派生Keepが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{derivedKeepName}」へ変わります。";
     }
 
     private async Task LoadDuplicateGroupsForSelectionAsync(CandidateReviewItemViewModel? selected)

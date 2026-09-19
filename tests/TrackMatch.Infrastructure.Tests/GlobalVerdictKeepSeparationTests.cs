@@ -9,7 +9,7 @@ using Xunit;
 namespace TrackMatch.Infrastructure.Tests;
 
 /// <summary>
-/// Global Human VerdictとLibrary固有Keepを独立したCurrent Stateとして扱うことを実SQLiteで検証する。
+/// Preferred Trackを含むGlobal Human Verdictと派生Keepの一貫性を実SQLiteで検証する。
 /// </summary>
 public sealed class GlobalVerdictKeepSeparationTests : IAsyncLifetime
 {
@@ -31,14 +31,13 @@ public sealed class GlobalVerdictKeepSeparationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SameConfirmedVerdictFromAnotherLibraryChangesOnlyThatLibraryKeep()
+    public async Task ChangingPreferredTrackFromAnotherLibraryChangesGlobalVerdictAndDerivedKeep()
     {
         var libraries = new SqliteLibraryRepository(_database);
         var source = await libraries.CreateAsync("Source Library", [_directory], TestContext.Current.CancellationToken);
         var viewer = await libraries.CreateAsync("Viewer Library", [_directory], TestContext.Current.CancellationToken);
         var sourceRoot = Assert.Single(source.Roots);
         var viewerRoot = Assert.Single(viewer.Roots);
-
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await tracks.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         var trackB = await tracks.UpsertMetadataAsync(CreateMetadata("b.flac"), TestContext.Current.CancellationToken);
@@ -48,45 +47,36 @@ public sealed class GlobalVerdictKeepSeparationTests : IAsyncLifetime
             await tracks.EnsureMembershipAsync(libraryId, rootId, trackB, "b.flac", TestContext.Current.CancellationToken);
         }
 
-        var service = new DuplicateGroupService(
-            new SqliteCandidateReviewRepository(_database),
-            new SqliteTrackLookupRepository(_database),
-            new SqliteDuplicateGroupRepository(_database));
+        var service = CreateService();
         var pair = CandidatePairKey.Create(trackA, trackB);
-
         await service.SaveReviewAsync(
             source.Id,
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null),
-            trackA,
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, trackA, null),
             TestContext.Current.CancellationToken);
-
-        // Global Verdictは既に同じConfirmedDuplicateなので、Viewer側の操作はKeepだけを変更する。
         await service.SaveReviewAsync(
             viewer.Id,
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null),
-            trackB,
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, trackB, null),
             TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        var currentSourceLibraryId = await connection.QuerySingleAsync<long>(
-            "SELECT SourceLibraryId FROM CandidateReviews WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+        var current = await connection.QuerySingleAsync<(long SourceLibraryId, long PreferredTrackId)>(
+            "SELECT SourceLibraryId, PreferredTrackId FROM CandidateReviews WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
             new { pair.TrackIdA, pair.TrackIdB });
-        var reviewHistoryCount = await connection.ExecuteScalarAsync<long>(
+        var historyCount = await connection.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM CandidateReviewHistory WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
             new { pair.TrackIdA, pair.TrackIdB });
 
-        Assert.Equal(source.Id, currentSourceLibraryId);
-        Assert.Equal(0, reviewHistoryCount);
+        Assert.Equal(viewer.Id, current.SourceLibraryId);
+        Assert.Equal(trackB, current.PreferredTrackId);
+        Assert.Equal(1, historyCount);
 
         var groups = new SqliteDuplicateGroupRepository(_database);
-        var sourceGroup = Assert.Single(await groups.GetByLibraryIdAsync(source.Id, TestContext.Current.CancellationToken));
         var viewerGroup = Assert.Single(await groups.GetByLibraryIdAsync(viewer.Id, TestContext.Current.CancellationToken));
-        Assert.Equal(trackA, sourceGroup.KeepTrackId);
         Assert.Equal(trackB, viewerGroup.KeepTrackId);
     }
 
     [Fact]
-    public async Task SameConfirmedVerdictAndSameKeepDoesNotAppendKeepHistory()
+    public async Task SameGlobalVerdictDoesNotAppendReviewOrKeepHistory()
     {
         var libraries = new SqliteLibraryRepository(_database);
         var library = await libraries.CreateAsync("Library", [_directory], TestContext.Current.CancellationToken);
@@ -97,28 +87,31 @@ public sealed class GlobalVerdictKeepSeparationTests : IAsyncLifetime
         await tracks.EnsureMembershipAsync(library.Id, root.Id, trackA, "same-a.flac", TestContext.Current.CancellationToken);
         await tracks.EnsureMembershipAsync(library.Id, root.Id, trackB, "same-b.flac", TestContext.Current.CancellationToken);
 
-        var service = new DuplicateGroupService(
-            new SqliteCandidateReviewRepository(_database),
-            new SqliteTrackLookupRepository(_database),
-            new SqliteDuplicateGroupRepository(_database));
+        var service = CreateService();
         var review = new CandidateReview(
             CandidatePairKey.Create(trackA, trackB),
             CandidateReviewDecision.ConfirmedDuplicate,
+            trackA,
             null);
-        await service.SaveReviewAsync(library.Id, review, trackA, TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(library.Id, review, TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        var before = await connection.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE LibraryId = @LibraryId;",
-            new { LibraryId = library.Id });
+        var reviewHistoryBefore = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateReviewHistory;");
+        var keepHistoryBefore = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;");
 
-        await service.SaveReviewAsync(library.Id, review, trackA, TestContext.Current.CancellationToken);
+        await service.SaveReviewAsync(library.Id, review, TestContext.Current.CancellationToken);
 
-        var after = await connection.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory WHERE LibraryId = @LibraryId;",
-            new { LibraryId = library.Id });
-        Assert.Equal(before, after);
+        var reviewHistoryAfter = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateReviewHistory;");
+        var keepHistoryAfter = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM LibraryDuplicateGroupKeepHistory;");
+        Assert.Equal(reviewHistoryBefore, reviewHistoryAfter);
+        Assert.Equal(keepHistoryBefore, keepHistoryAfter);
     }
+
+    private DuplicateGroupService CreateService()
+        => new(
+            new SqliteCandidateReviewRepository(_database),
+            new SqliteTrackLookupRepository(_database),
+            new SqliteDuplicateGroupRepository(_database));
 
     private AudioTrackMetadata CreateMetadata(string fileName)
         => new(

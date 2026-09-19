@@ -18,7 +18,7 @@ public sealed partial class MainWindowViewModel
             && SelectedLibrary?.Id == snapshot.LibraryId;
 
     /// <summary>
-    /// Candidateレビュー操作の前後状態を比較し、実際に状態が変わった場合だけ1段Undoへ登録する。
+    /// Candidateレビュー操作の前後Human Verdictを比較し、実際に正本が変わった場合だけ1段Undoへ登録する。
     /// </summary>
     /// <param name="action">既存の確認処理を含めたレビュー操作</param>
     public async Task ExecuteReviewWithUndoAsync(Func<Task> action)
@@ -67,26 +67,18 @@ public sealed partial class MainWindowViewModel
             var groups = new SqliteDuplicateGroupRepository(database);
             var service = new DuplicateGroupService(reviews, tracks, groups);
 
+            // Undoの正本はHuman Verdictだけである。Keepやレビュー省略は復元後のVerdict集合から再導出する。
             if (snapshot.Review is null)
             {
                 await service.DeleteReviewAsync(snapshot.LibraryId, snapshot.Pair);
-            }
-            else if (snapshot.Review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-                && snapshot.KeepTrackId is { } keepTrackId)
-            {
-                await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review, keepTrackId);
-            }
-            else if (snapshot.Review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
-            {
-                // Conflict/UnselectedだったGroupには選ぶべきKeepがない。Global Verdictだけを戻して再同期し、
-                // RepositoryのMerge/Split継承規則にLibrary固有Keep Stateの復元を任せる。
-                await reviews.SaveAsync(snapshot.Review, snapshot.LibraryId);
-                await service.SynchronizeGlobalAsync();
             }
             else
             {
                 await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review);
             }
+
+            // UndoでKeep候補が再び複数になった場合も、通常レビュー後と同じく仕分けを完遂できる比較手段を補完する。
+            await EnsureSupplementalCandidatesAsync(database, snapshot.LibraryId);
 
             // Undo自体を再Undoする履歴は持たない。復元に成功してから1段履歴を消費する。
             _lastReviewUndo = null;
@@ -106,36 +98,18 @@ public sealed partial class MainWindowViewModel
         await database.InitializeAsync();
         var reviews = new SqliteCandidateReviewRepository(database);
         var review = (await reviews.GetAllAsync()).SingleOrDefault(item => item.Pair == pair);
-
-        long? keepTrackId = null;
-        if (review?.Decision == CandidateReviewDecision.ConfirmedDuplicate)
-        {
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var groupA = await groups.GetByTrackIdAsync(pair.TrackIdA, libraryId);
-            var groupB = await groups.GetByTrackIdAsync(pair.TrackIdB, libraryId);
-            if (groupA is not null
-                && groupB is not null
-                && groupA.Id == groupB.Id
-                && groupA.KeepStatus == DuplicateGroupKeepStatus.Selected)
-            {
-                keepTrackId = groupA.KeepTrackId;
-            }
-        }
-
-        return new ReviewUndoSnapshot(libraryId, pair, review, keepTrackId);
+        return new ReviewUndoSnapshot(libraryId, pair, review);
     }
 
     /// <summary>
-    /// 直前レビュー操作の復元に必要なGlobal VerdictとLibrary固有Keepを保持する。
+    /// 直前レビュー操作の復元に必要なGlobal Human Verdictを保持する。
     /// </summary>
     private sealed record ReviewUndoSnapshot(
         long LibraryId,
         CandidatePairKey Pair,
-        CandidateReview? Review,
-        long? KeepTrackId)
+        CandidateReview? Review)
     {
-        /// <summary>レビュー操作によって永続状態が実際に変化したかを判定する。</summary>
-        public bool HasSameReviewState(ReviewUndoSnapshot other)
-            => Equals(Review, other.Review) && KeepTrackId == other.KeepTrackId;
+        /// <summary>レビュー操作によってHuman Verdictが実際に変化したかを判定する。</summary>
+        public bool HasSameReviewState(ReviewUndoSnapshot other) => Equals(Review, other.Review);
     }
 }

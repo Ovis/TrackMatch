@@ -242,7 +242,132 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
     }
 
     /// <inheritdoc />
-    public async Task SetKeepAsync(
+    public async Task<IReadOnlyList<long>> GetLibraryIdsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var ids = await connection.QueryAsync<long>(new CommandDefinition(
+            "SELECT Id FROM Libraries ORDER BY Id;",
+            cancellationToken: cancellationToken));
+        return ids.ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task SetDerivedKeepStateAsync(
+        long libraryId,
+        long groupId,
+        long? keepTrackId,
+        DuplicateGroupKeepStatus status,
+        string changeKind,
+        CancellationToken cancellationToken = default)
+    {
+        if (status == DuplicateGroupKeepStatus.Selected)
+        {
+            if (keepTrackId is null)
+            {
+                throw new ArgumentException("Selected状態にはKeep Trackが必要です。", nameof(keepTrackId));
+            }
+
+            await SetSelectedDerivedKeepAsync(libraryId, groupId, keepTrackId.Value, changeKind, cancellationToken);
+            return;
+        }
+
+        if (status is not (DuplicateGroupKeepStatus.Unselected or DuplicateGroupKeepStatus.Conflict))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), "Human Verdictから直接導出できないKeep状態です。");
+        }
+
+        if (keepTrackId is not null)
+        {
+            throw new ArgumentException("未確定またはConflict状態にKeep Trackは指定できません。", nameof(keepTrackId));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(changeKind);
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var globalTrackIds = (await connection.QueryAsync<long>(new CommandDefinition(
+            "SELECT TrackId FROM DuplicateGroupTracks WHERE DuplicateGroupId = @GroupId ORDER BY TrackId;",
+            new { GroupId = groupId },
+            transaction,
+            cancellationToken: cancellationToken))).ToArray();
+        if (globalTrackIds.Length < 2)
+        {
+            throw new InvalidOperationException("派生Keep状態の対象Global Duplicate Groupが存在しません。");
+        }
+
+        var libraryHasGroupMembership = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+            FROM DuplicateGroupTracks gt
+            INNER JOIN LibraryTracks lt ON lt.TrackId = gt.TrackId
+            INNER JOIN Tracks t ON t.Id = lt.TrackId AND t.IsMissing = 0
+            WHERE gt.DuplicateGroupId = @GroupId
+              AND lt.LibraryId = @LibraryId;
+            """,
+            new { LibraryId = libraryId, GroupId = groupId },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (libraryHasGroupMembership == 0)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        var current = await connection.QuerySingleOrDefaultAsync<KeepStateRow>(new CommandDefinition(
+            """
+            SELECT LibraryId, DuplicateGroupId, KeepTrackId, Status, UpdatedAtUtcTicks
+            FROM LibraryDuplicateGroupKeepStates
+            WHERE LibraryId = @LibraryId AND DuplicateGroupId = @GroupId;
+            """,
+            new { LibraryId = libraryId, GroupId = groupId },
+            transaction,
+            cancellationToken: cancellationToken));
+        var statusName = status.ToString();
+        if (current is not null && current.KeepTrackId is null
+            && string.Equals(current.Status, statusName, StringComparison.Ordinal))
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        if (current is not null)
+        {
+            await InsertKeepHistoryAsync(
+                connection,
+                transaction,
+                libraryId,
+                groupId,
+                BuildGraphKey(globalTrackIds),
+                current.KeepTrackId,
+                current.Status,
+                changeKind,
+                note: null,
+                cancellationToken);
+        }
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO LibraryDuplicateGroupKeepStates (
+                LibraryId, DuplicateGroupId, KeepTrackId, Status, UpdatedAtUtcTicks)
+            VALUES (@LibraryId, @GroupId, NULL, @Status, @UpdatedAtUtcTicks)
+            ON CONFLICT(LibraryId, DuplicateGroupId) DO UPDATE SET
+                KeepTrackId = NULL,
+                Status = excluded.Status,
+                UpdatedAtUtcTicks = excluded.UpdatedAtUtcTicks;
+            """,
+            new
+            {
+                LibraryId = libraryId,
+                GroupId = groupId,
+                Status = statusName,
+                UpdatedAtUtcTicks = DateTime.UtcNow.Ticks,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>Human Verdictから一意に導出されたSelected Keepを保存する。</summary>
+    private async Task SetSelectedDerivedKeepAsync(
         long libraryId,
         long groupId,
         long keepTrackId,
@@ -300,23 +425,22 @@ public sealed class SqliteDuplicateGroupRepository(SqliteDatabase database) : ID
             throw new InvalidOperationException("Keepを設定するLibraryが存在しません。");
         }
 
-        // Library外TrackをKeepにすること自体は許可するが、そのLibraryがGroupへ全く関与していない状態では
-        // Library固有Dispositionを作成できない。Projectionと同じく、少なくとも1件のActive Membershipを要求する。
-        var libraryHasGroupMembership = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+        // Library固有Keepは「そのLibrary内で最終的に残すTrack」であるため、
+        // Global Groupに含まれていても現在LibraryのActive Membership外TrackはSelectedへ保存しない。
+        var keepTrackIsInLibrary = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             """
             SELECT COUNT(*)
-            FROM DuplicateGroupTracks gt
-            INNER JOIN LibraryTracks lt ON lt.TrackId = gt.TrackId
+            FROM LibraryTracks lt
             INNER JOIN Tracks t ON t.Id = lt.TrackId AND t.IsMissing = 0
-            WHERE gt.DuplicateGroupId = @GroupId
-              AND lt.LibraryId = @LibraryId;
+            WHERE lt.LibraryId = @LibraryId
+              AND lt.TrackId = @KeepTrackId;
             """,
-            new { LibraryId = libraryId, GroupId = groupId },
+            new { LibraryId = libraryId, KeepTrackId = keepTrackId },
             transaction,
             cancellationToken: cancellationToken));
-        if (libraryHasGroupMembership == 0)
+        if (keepTrackIsInLibrary == 0)
         {
-            throw new InvalidOperationException("現在LibraryがActive Membershipを持たないGlobal Duplicate GroupへKeepを設定できません。");
+            throw new InvalidOperationException("Library固有Keepは現在Library内のActive Trackである必要があります。");
         }
 
         var current = await connection.QuerySingleOrDefaultAsync<KeepStateRow>(new CommandDefinition(

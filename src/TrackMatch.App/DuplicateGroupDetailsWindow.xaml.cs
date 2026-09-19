@@ -134,6 +134,10 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
     public ObservableCollection<DuplicateGroupTrackViewModel> AllTracks { get; } = [];
     public ObservableCollection<DuplicateGroupRelationViewModel> SelectedRelations { get; } = [];
+    public ObservableCollection<DuplicateGroupConflictViewModel> Conflicts { get; } = [];
+
+    /// <summary>Conflict一覧からMain Windowへ戻すレビュー対象Pair。</summary>
+    public CandidatePairKey? RequestedReviewPair { get; private set; }
 
     /// <summary>選択中のファイルに直接つながる確定済み重複がない場合だけ表示する案内。</summary>
     public string RelationEmptyText => SelectedRelations.Count == 0
@@ -202,9 +206,9 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         KeepStateText = group.KeepStatus switch
         {
             DuplicateGroupKeepStatus.Selected => "このライブラリで残すファイルは確定済みです。",
-            DuplicateGroupKeepStatus.Conflict => "以前の指定が競合しています。残すファイルを再確認してください。",
-            DuplicateGroupKeepStatus.Missing => "以前残すよう指定したファイルが見つかりません。残すファイルを再確認してください。",
-            _ => "残すファイルはまだ選択されていません。",
+            DuplicateGroupKeepStatus.Conflict => "Human Verdictが矛盾しています。関連するレビュー判定を確認してください。",
+            DuplicateGroupKeepStatus.Missing => "Keep候補に必要なファイルが見つかりません。",
+            _ => "残す候補が複数あります。候補同士のレビューが必要です。",
         };
 
         AllTracks.Clear();
@@ -216,10 +220,58 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
 
         var globalMemberIds = group.GlobalTrackIds.ToHashSet();
         var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
-        foreach (var review in reviews
-                     .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate
-                         && globalMemberIds.Contains(review.Pair.TrackIdA)
-                         && globalMemberIds.Contains(review.Pair.TrackIdB))
+        var usableByTrackId = new Dictionary<long, bool>();
+        var groupReviews = new List<CandidateReview>();
+        foreach (var review in reviews.Where(review => globalMemberIds.Contains(review.Pair.TrackIdA)
+            && globalMemberIds.Contains(review.Pair.TrackIdB)))
+        {
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdA, out var usableA))
+            {
+                usableA = await trackLookup.IsHumanVerdictUsableAsync(review.Pair.TrackIdA);
+                usableByTrackId.Add(review.Pair.TrackIdA, usableA);
+            }
+
+            if (!usableByTrackId.TryGetValue(review.Pair.TrackIdB, out var usableB))
+            {
+                usableB = await trackLookup.IsHumanVerdictUsableAsync(review.Pair.TrackIdB);
+                usableByTrackId.Add(review.Pair.TrackIdB, usableB);
+            }
+
+            if (usableA && usableB)
+            {
+                groupReviews.Add(review);
+            }
+        }
+
+        if (group.KeepStatus == DuplicateGroupKeepStatus.Selected && group.KeepTrackId is { } keepTrackId)
+        {
+            KeepStateText = $"残すファイル: {trackModels[keepTrackId].Title}";
+        }
+        else if (group.KeepStatus == DuplicateGroupKeepStatus.Unselected)
+        {
+            var keepCandidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, group.TrackIds);
+            KeepStateText = $"残す候補: {string.Join("、", keepCandidates.Select(trackId => trackModels[trackId].Title))}";
+        }
+
+        Conflicts.Clear();
+        var listedConflictPairs = new HashSet<CandidatePairKey>();
+        foreach (var conflict in DuplicateGroupConflictEvaluator.FindConflicts(groupReviews))
+        {
+            foreach (var relatedReview in conflict.RelatedReviews.Where(review => listedConflictPairs.Add(review.Pair)))
+            {
+                var a = trackModels[relatedReview.Pair.TrackIdA];
+                var b = trackModels[relatedReview.Pair.TrackIdB];
+                Conflicts.Add(new DuplicateGroupConflictViewModel(
+                    relatedReview.Pair,
+                    $"{a.Title} ↔ {b.Title}",
+                    relatedReview.Decision == CandidateReviewDecision.NotDuplicate
+                        ? "重複ではない判定がConfirmedDuplicateの連結関係と矛盾しています"
+                        : "このConfirmedDuplicate判定が矛盾する連結経路を構成しています"));
+            }
+        }
+
+        foreach (var review in groupReviews
+                     .Where(review => review.Decision == CandidateReviewDecision.ConfirmedDuplicate)
                      .OrderBy(review => review.Pair.TrackIdA)
                      .ThenBy(review => review.Pair.TrackIdB))
         {
@@ -271,44 +323,15 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         OnPropertyChanged(nameof(RelationEmptyText));
     }
 
-    private async void SetSelectedKeep_Click(object sender, RoutedEventArgs e)
+    private void ReviewConflict_Click(object sender, RoutedEventArgs e)
     {
-        var track = SelectedTrack;
-        if (track is null || !track.CanSelectAsKeep)
+        if (sender is not Button { Tag: CandidatePairKey pair })
         {
             return;
         }
 
-        var detail = track.IsInCurrentLibrary
-            ? "このライブラリの重複グループで、このファイル以外がごみ箱への移動対象になります。"
-            : "このファイルは現在のライブラリ外ですが、この重複グループを構成するファイルなので残すファイルとして選択できます。現在のライブラリへ追加されることはありません。";
-        var confirmation = new ConfirmationDialog(
-            "残すファイルを変更",
-            $"「{track.Title}」をこのライブラリで残すファイルに設定しますか？",
-            detail,
-            "このファイルを残す",
-            "キャンセル",
-            kind: AppDialogKind.Warning)
-        { Owner = this };
-        confirmation.ShowDialog();
-        if (confirmation.SelectedResult != AppDialogResult.Primary)
-        {
-            return;
-        }
-
-        try
-        {
-            _previewPlayer.Stop();
-            var database = new SqliteDatabase(_databasePath);
-            await database.InitializeAsync();
-            var groups = new SqliteDuplicateGroupRepository(database);
-            await groups.SetKeepAsync(_libraryId, _groupId, track.TrackId, "UserSelected");
-            await LoadGroupAsync();
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
-        {
-            ShowError("残すファイル変更失敗", "残すファイルを変更できませんでした", exception.Message);
-        }
+        RequestedReviewPair = pair;
+        DialogResult = true;
     }
 
     private async void TrashSelectedTrack_Click(object sender, RoutedEventArgs e)
@@ -358,7 +381,7 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
             }
             if (impact is not null && impact.KeepLibraries.Count > 0)
             {
-                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのファイルが「残すファイル」に指定されています。移動後は残すファイルを再確認する必要があります。";
+                detail += $"\n\n警告: {string.Join("、", impact.KeepLibraries.Select(item => item.Name))} ではこのファイルが「残すファイル」として確定しています。移動後は残すファイルを再確認する必要があります。";
             }
 
             var confirmation = new ConfirmationDialog(
@@ -546,3 +569,11 @@ public sealed record DuplicateGroupRelationViewModel(
     string Title,
     string Path,
     string ScopeLabel);
+
+/// <summary>
+/// Conflict一覧から通常レビューへ移動するための表示モデル。
+/// </summary>
+public sealed record DuplicateGroupConflictViewModel(
+    CandidatePairKey Pair,
+    string Title,
+    string Reason);

@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 7;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -61,7 +61,7 @@ public sealed class SqliteDatabase
             if (existingVersion != CurrentSchemaVersion)
             {
                 throw new InvalidOperationException(
-                    $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {existingVersion}");
+                    $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {existingVersion}。DBを削除して再作成してください。");
             }
         }
         else
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 2)
+            VALUES (1, 6)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
@@ -126,12 +126,28 @@ public sealed class SqliteDatabase
                 BitDepth INTEGER NULL,
                 Channels INTEGER NULL,
                 IsMissing INTEGER NOT NULL DEFAULT 0 CHECK (IsMissing IN (0, 1)),
+                ContentVerificationStatus TEXT NOT NULL DEFAULT 'Verified'
+                    CHECK (ContentVerificationStatus IN ('Verified', 'VerificationPending', 'VerificationFailed', 'ReevaluationPending', 'ReevaluationFailed')),
+                ContentVerificationError TEXT NULL,
                 UpdatedAtUtcTicks INTEGER NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS IX_Tracks_Path ON Tracks (Path COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS IX_Tracks_LastWriteTimeUtcTicks ON Tracks (LastWriteTimeUtcTicks);
             CREATE INDEX IF NOT EXISTS IX_Tracks_IsMissing ON Tracks (IsMissing);
+            CREATE INDEX IF NOT EXISTS IX_Tracks_ContentVerificationStatus ON Tracks (ContentVerificationStatus);
+
+            -- Content Verification/再評価中に、直前のDuplicate Group範囲でファイル整理を停止する。
+            CREATE TABLE IF NOT EXISTS TrackFileOrganizationBlocks (
+                SourceTrackId INTEGER NOT NULL,
+                AffectedTrackId INTEGER NOT NULL,
+                PRIMARY KEY (SourceTrackId, AffectedTrackId),
+                FOREIGN KEY (SourceTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (AffectedTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_TrackFileOrganizationBlocks_Affected
+                ON TrackFileOrganizationBlocks (AffectedTrackId);
 
             CREATE TABLE IF NOT EXISTS LibraryTracks (
                 LibraryId INTEGER NOT NULL,
@@ -155,6 +171,7 @@ public sealed class SqliteDatabase
             CREATE TABLE IF NOT EXISTS Fingerprints (
                 TrackId INTEGER PRIMARY KEY,
                 Algorithm INTEGER NOT NULL,
+                DurationTicks INTEGER NOT NULL,
                 ValuesBlob BLOB NOT NULL,
                 ExtractedAtUtcTicks INTEGER NOT NULL,
                 FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
@@ -233,14 +250,19 @@ public sealed class SqliteDatabase
                 TrackIdA INTEGER NOT NULL,
                 TrackIdB INTEGER NOT NULL,
                 Decision TEXT NOT NULL,
+                PreferredTrackId INTEGER NULL,
                 Note TEXT NULL,
                 SourceLibraryId INTEGER NULL,
                 SourceLibraryNameSnapshot TEXT NULL,
                 ReviewedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
                 CHECK (TrackIdA < TrackIdB),
+                CHECK (
+                    (Decision = 'ConfirmedDuplicate' AND PreferredTrackId IN (TrackIdA, TrackIdB))
+                    OR (Decision = 'NotDuplicate' AND PreferredTrackId IS NULL)),
                 FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
                 FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (PreferredTrackId) REFERENCES Tracks (Id) ON DELETE CASCADE,
                 FOREIGN KEY (SourceLibraryId) REFERENCES Libraries (Id) ON DELETE SET NULL
             );
 
@@ -251,6 +273,7 @@ public sealed class SqliteDatabase
                 TrackIdA INTEGER NOT NULL,
                 TrackIdB INTEGER NOT NULL,
                 Decision TEXT NOT NULL,
+                PreferredTrackId INTEGER NULL,
                 Note TEXT NULL,
                 SourceLibraryId INTEGER NULL,
                 SourceLibraryNameSnapshot TEXT NULL,
@@ -355,17 +378,6 @@ public sealed class SqliteDatabase
             CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_Status ON CandidateQualityComparisons (Status);
             CREATE INDEX IF NOT EXISTS IX_CandidateQualityComparisons_ComparisonVersion ON CandidateQualityComparisons (ComparisonVersion);
 
-            -- Track Contentが変わった場合はTrack Identityを維持したまま重い解析キャッシュを破棄する。
-            -- Human VerdictはRepository側でHistoryへ退避してからCurrentを無効化するため、Triggerでは触らない。
-            CREATE TRIGGER IF NOT EXISTS TR_Tracks_InvalidateQualityCache
-            AFTER UPDATE OF FileSize, LastWriteTimeUtcTicks ON Tracks
-            WHEN OLD.FileSize <> NEW.FileSize
-              OR OLD.LastWriteTimeUtcTicks <> NEW.LastWriteTimeUtcTicks
-            BEGIN
-                DELETE FROM TrackQualityAnalyses WHERE TrackId = NEW.Id;
-                DELETE FROM CandidateQualityComparisons
-                WHERE TrackIdA = NEW.Id OR TrackIdB = NEW.Id;
-            END;
 
             CREATE TABLE IF NOT EXISTS ScanSessions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,

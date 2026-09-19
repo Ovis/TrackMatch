@@ -60,6 +60,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
             new CandidateReview(
                 CandidatePairKey.Create(trackA, trackB),
                 CandidateReviewDecision.NotDuplicate,
+                null,
                 null),
             TestContext.Current.CancellationToken);
 
@@ -107,7 +108,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         }
 
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         var report = new SqliteCandidateReviewReportRepository(_database);
@@ -180,7 +181,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         var pair = CandidatePairKey.Create(trackA, trackB);
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
         await libraries.DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
@@ -192,7 +193,7 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
 
         // Source Library削除後に別LibraryからVerdictを変更しても、旧判定の出所名SnapshotをHistoryへそのまま退避する。
         await new SqliteCandidateReviewRepository(_database, viewer.Id).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.ConfirmedDuplicate, trackA, null),
             TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
@@ -203,35 +204,27 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ContentChangePreservesDeletedSourceLibraryNameInReviewHistory()
+    public async Task ContentChangeDeletesCurrentVerdictWithoutCreatingHistory()
     {
         var tracks = new SqliteTrackRepository(_database);
         var trackA = await AddTrackAsync(tracks, "content-a.flac");
         var trackB = await AddTrackAsync(tracks, "content-b.flac");
         var pair = CandidatePairKey.Create(trackA, trackB);
         await new SqliteCandidateReviewRepository(_database, _libraryId).SaveAsync(
-            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null),
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
-        await new SqliteLibraryRepository(_database).DeleteAsync(_libraryId, TestContext.Current.CancellationToken);
-
-        // Content Version更新はCurrent Verdictを無効化するが、判定時点のLibrary名Snapshotまで現在状態から再解決してはならない。
-        await tracks.UpsertMetadataAsync(
-            CreateMetadata("content-a.flac", fileSize: 2048),
-            TestContext.Current.CancellationToken);
+        await tracks.ConfirmContentChangedAsync(trackA, TestContext.Current.CancellationToken);
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-        var history = await connection.QuerySingleAsync<(string? SourceLibraryNameSnapshot, string ChangeKind)>(
-            """
-            SELECT SourceLibraryNameSnapshot, ChangeKind
-            FROM CandidateReviewHistory
-            WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB
-            ORDER BY Id DESC
-            LIMIT 1;
-            """,
+        var currentCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM CandidateReviews WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
             new { pair.TrackIdA, pair.TrackIdB });
-        Assert.Equal("Source Library", history.SourceLibraryNameSnapshot);
-        Assert.Equal("ContentChanged", history.ChangeKind);
+        var historyCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM CandidateReviewHistory WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+            new { pair.TrackIdA, pair.TrackIdB });
+        Assert.Equal(0, currentCount);
+        Assert.Equal(0, historyCount);
     }
 
     private async Task AddComparisonAsync(long trackA, long trackB)

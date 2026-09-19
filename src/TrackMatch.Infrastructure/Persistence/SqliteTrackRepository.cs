@@ -30,14 +30,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             transaction,
             cancellationToken: cancellationToken));
 
-        if (existing is not null
-            && (existing.FileSize != metadata.FileSize
-                || existing.LastWriteTimeUtcTicks != metadata.LastWriteTimeUtc.Ticks))
-        {
-            // Path Identityは維持する一方、Content Versionが変わったTrackについては古い機械解析と
-            // Human Verdictを再利用できない。VerdictだけはHistoryへ退避してからCurrentを無効化する。
-            await ArchiveAndInvalidateTrackContentAsync(connection, transaction, existing.Id, cancellationToken);
-        }
+        // FileSize/LastWriteTimeの変化だけでは音声内容変更と断定しない。
+        // Human Verdictの無効化は追加解析後にConfirmContentChangedAsyncから明示的に行う。
 
         var parameters = new
         {
@@ -293,10 +287,11 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
 
         const string sql = """
-            INSERT INTO Fingerprints (TrackId, Algorithm, ValuesBlob, ExtractedAtUtcTicks)
-            VALUES (@TrackId, @Algorithm, @ValuesBlob, @ExtractedAtUtcTicks)
+            INSERT INTO Fingerprints (TrackId, Algorithm, DurationTicks, ValuesBlob, ExtractedAtUtcTicks)
+            VALUES (@TrackId, @Algorithm, @DurationTicks, @ValuesBlob, @ExtractedAtUtcTicks)
             ON CONFLICT(TrackId) DO UPDATE SET
                 Algorithm = excluded.Algorithm,
+                DurationTicks = excluded.DurationTicks,
                 ValuesBlob = excluded.ValuesBlob,
                 ExtractedAtUtcTicks = excluded.ExtractedAtUtcTicks;
             """;
@@ -308,6 +303,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             {
                 TrackId = trackId,
                 Algorithm = algorithm,
+                DurationTicks = fingerprint.Duration.Ticks,
                 ValuesBlob = EncodeFingerprint(fingerprint.Values),
                 ExtractedAtUtcTicks = DateTime.UtcNow.Ticks,
             },
@@ -340,7 +336,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         }
 
         const string sql = """
-            SELECT t.Path, t.DurationTicks, f.ValuesBlob
+            SELECT t.Path, f.DurationTicks, f.ValuesBlob
             FROM Fingerprints f
             INNER JOIN Tracks t ON t.Id = f.TrackId
             WHERE f.TrackId = @TrackId;
@@ -356,27 +352,289 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             : new AudioFingerprint(row.Path, TimeSpan.FromTicks(row.DurationTicks), DecodeFingerprint(row.ValuesBlob));
     }
 
-    private static async Task ArchiveAndInvalidateTrackContentAsync(
+    /// <inheritdoc />
+    public async Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var status = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        return status is "VerificationPending" or "VerificationFailed";
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'VerificationPending',
+                ContentVerificationError = NULL
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerificationFailedAsync(long trackId, CancellationToken cancellationToken = default, string? error = null)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'VerificationFailed',
+                ContentVerificationError = @Error
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId, Error = error },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // Metadata-only確認と整理禁止解除を分離すると、途中障害でVerifiedなのに整理禁止だけ残る。
+        // 復帰状態を1つのCurrent Stateとして確定するため同一Transactionで更新する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'Verified',
+                ContentVerificationError = NULL
+            WHERE Id = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ConfirmContentChangedAndGetInvalidatedReviewCountAsync(
+        long trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM CandidateReviews WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
+            new { TrackId = trackId },
+            cancellationToken: cancellationToken));
+        await ConfirmContentChangedAsync(trackId, cancellationToken);
+        return checked((int)count);
+    }
+
+    /// <inheritdoc />
+    public async Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
+    {
+        if (trackId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(trackId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // Groupが一時分断された後に安全範囲を復元できないため、無効化前のGroup構成を整理禁止範囲として保存する。
+        await CaptureFileOrganizationBlockAsync(connection, transaction, trackId, cancellationToken);
+
+        // Content Changed確定後だけ、対象Trackに直接関係するVerdictとContent依存解析を同一Transactionで無効化する。
+        await InvalidateTrackContentAsync(connection, transaction, trackId, cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE Tracks SET ContentVerificationStatus = 'ReevaluationPending', ContentVerificationError = NULL WHERE Id = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task CaptureFileOrganizationBlockAsync(
         SqliteConnection connection,
         System.Data.Common.DbTransaction transaction,
         long trackId,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow.Ticks;
+        // Materialized Groupは失敗直前の有効Verdictから構成されているため、ここで影響範囲をSnapshotする。
+        // Group外TrackまでLibrary全体を止めず、該当Groupが無い場合は対象Track自身だけを停止する。
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO CandidateReviewHistory (
-                TrackIdA, TrackIdB, Decision, Note, SourceLibraryId, SourceLibraryNameSnapshot,
-                ChangedAtUtcTicks, ChangeKind, InvalidationReason)
-            SELECT r.TrackIdA, r.TrackIdB, r.Decision, r.Note, r.SourceLibraryId, r.SourceLibraryNameSnapshot,
-                   @ChangedAtUtcTicks, 'ContentChanged', 'FileSizeOrLastWriteTimeChanged'
-            FROM CandidateReviews r
-            WHERE r.TrackIdA = @TrackId OR r.TrackIdB = @TrackId;
+            INSERT OR IGNORE INTO TrackFileOrganizationBlocks (SourceTrackId, AffectedTrackId)
+            SELECT @TrackId, gt.TrackId
+            FROM DuplicateGroupTracks gt
+            WHERE gt.DuplicateGroupId = (
+                SELECT DuplicateGroupId FROM DuplicateGroupTracks WHERE TrackId = @TrackId)
+            UNION
+            SELECT @TrackId, @TrackId;
             """,
-            new { TrackId = trackId, ChangedAtUtcTicks = now },
+            new { TrackId = trackId },
             transaction,
             cancellationToken: cancellationToken));
+    }
 
+    /// <summary>
+    /// 前回失敗したCandidate再評価を、今回のWorkflowで再試行する状態へ戻す。
+    /// </summary>
+    public async Task MarkReevaluationStartedAsync(long libraryId, CancellationToken cancellationToken = default)
+    {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = 'ReevaluationPending',
+                ContentVerificationError = NULL
+            WHERE ContentVerificationStatus = 'ReevaluationFailed'
+              AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
+            """,
+            new { LibraryId = libraryId },
+            cancellationToken: cancellationToken));
+    }
+
+    /// <summary>
+    /// LibraryのCandidate再評価が最後まで成功したTrackを通常利用可能へ戻す。
+    /// </summary>
+    public async Task MarkReevaluationCompletedAsync(long libraryId, CancellationToken cancellationToken = default)
+    {
+        await SetReevaluationStatusForLibraryAsync(libraryId, "Verified", cancellationToken);
+    }
+
+    /// <summary>
+    /// LibraryのCandidate再評価が失敗したTrackを永続的な失敗状態へ遷移させる。
+    /// </summary>
+    public async Task MarkReevaluationFailedAsync(
+        long libraryId,
+        string? error,
+        CancellationToken cancellationToken = default)
+    {
+        await SetReevaluationStatusForLibraryAsync(libraryId, "ReevaluationFailed", cancellationToken, error);
+    }
+
+    private async Task SetReevaluationStatusForLibraryAsync(
+        long libraryId,
+        string status,
+        CancellationToken cancellationToken,
+        string? error = null)
+    {
+        if (libraryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(libraryId));
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        if (string.Equals(status, "Verified", StringComparison.Ordinal))
+        {
+            // Shared Trackは全Library MembershipのCandidate再評価が終わるまで利用可能へ戻さない。
+            // CandidateGenerationPendingをMembership単位の完了バリアとして使い、一部Libraryだけの成功で整理禁止を解除しない。
+            const string eligibleSql = """
+                SELECT t.Id
+                FROM Tracks t
+                WHERE t.ContentVerificationStatus = 'ReevaluationPending'
+                  AND t.Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId)
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM LibraryTracks pending
+                        WHERE pending.TrackId = t.Id
+                          AND pending.CandidateGenerationPending = 1);
+                """;
+            var completedTrackIds = (await connection.QueryAsync<long>(new CommandDefinition(
+                eligibleSql,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken))).ToArray();
+            if (completedTrackIds.Length != 0)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM TrackFileOrganizationBlocks WHERE SourceTrackId IN @TrackIds;",
+                    new { TrackIds = completedTrackIds },
+                    transaction,
+                    cancellationToken: cancellationToken));
+                await connection.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE Tracks
+                    SET ContentVerificationStatus = 'Verified',
+                        ContentVerificationError = NULL
+                    WHERE Id IN @TrackIds;
+                    """,
+                    new { TrackIds = completedTrackIds },
+                    transaction,
+                    cancellationToken: cancellationToken));
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        // Candidate生成後の比較・分類で失敗した場合も、そのLibraryの再評価を次回最初からやり直す。
+        // これによりShared Trackの別Libraryが成功しても、失敗したMembershipが残っている間はVerifiedにならない。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE LibraryTracks
+            SET CandidateGenerationPending = 1,
+                CandidateGenerationVersion = NULL
+            WHERE LibraryId = @LibraryId
+              AND TrackId IN (
+                    SELECT Id FROM Tracks WHERE ContentVerificationStatus = 'ReevaluationPending');
+            """,
+            new { LibraryId = libraryId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE Tracks
+            SET ContentVerificationStatus = @Status,
+                ContentVerificationError = @Error
+            WHERE ContentVerificationStatus = 'ReevaluationPending'
+              AND Id IN (SELECT TrackId FROM LibraryTracks WHERE LibraryId = @LibraryId);
+            """,
+            new { LibraryId = libraryId, Status = status, Error = error },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task InvalidateTrackContentAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        long trackId,
+        CancellationToken cancellationToken)
+    {
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateReviews WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
             new { TrackId = trackId },
@@ -384,6 +642,14 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidatePairs WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;",
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM TrackQualityAnalyses WHERE TrackId = @TrackId;
+            DELETE FROM CandidateQualityComparisons WHERE TrackIdA = @TrackId OR TrackIdB = @TrackId;
+            """,
             new { TrackId = trackId },
             transaction,
             cancellationToken: cancellationToken));
