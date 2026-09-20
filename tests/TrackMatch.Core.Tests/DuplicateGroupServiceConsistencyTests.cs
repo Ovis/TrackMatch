@@ -118,6 +118,27 @@ public sealed class DuplicateGroupServiceConsistencyTests
     }
 
     [Fact]
+    public async Task DeleteReviewAsync_ClearingSuspendedVerdictPreservesOtherActiveTopology()
+    {
+        var suspendedPair = CandidatePairKey.Create(1, 2);
+        var activePair = CandidatePairKey.Create(2, 3);
+        var reviews = new RecordingReviewRepository(
+            new CandidateReview(suspendedPair, CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            new CandidateReview(activePair, CandidateReviewDecision.ConfirmedDuplicate, 2, null));
+        var tracks = new FakeTrackLookupRepository(unusableTrackIds: new HashSet<long> { 1 });
+        var groups = new RecordingGroupRepository(new GlobalDuplicateGroup(1, [2, 3]));
+        var service = new DuplicateGroupService(reviews, tracks, groups);
+
+        await service.DeleteReviewAsync(10, suspendedPair, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, reviews.DeleteCount);
+        var remaining = Assert.Single(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(activePair, remaining.Pair);
+        Assert.Empty(groups.ReplaceCancellationStates);
+        Assert.Equal(2, groups.SelectedKeepTrackId);
+    }
+
+    [Fact]
     public async Task DeleteReviewAsync_AllowsClearingExistingVerdictWhileTrackIsMissing()
     {
         var initial = new CandidateReview(
@@ -193,9 +214,12 @@ public sealed class DuplicateGroupServiceConsistencyTests
             => Task.FromResult<IReadOnlySet<CandidatePairKey>>(_reviews.Select(item => item.Pair).ToHashSet());
     }
 
-    private sealed class FakeTrackLookupRepository(IReadOnlySet<long>? missingTrackIds = null) : ITrackLookupRepository
+    private sealed class FakeTrackLookupRepository(
+        IReadOnlySet<long>? missingTrackIds = null,
+        IReadOnlySet<long>? unusableTrackIds = null) : ITrackLookupRepository
     {
         private readonly IReadOnlySet<long> _missingTrackIds = missingTrackIds ?? new HashSet<long>();
+        private readonly IReadOnlySet<long> _unusableTrackIds = unusableTrackIds ?? new HashSet<long>();
 
         public Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<StoredTrack?>(new StoredTrack(
@@ -213,6 +237,9 @@ public sealed class DuplicateGroupServiceConsistencyTests
 
         public Task<IReadOnlyList<TrackLibraryReference>> GetLibrariesAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<TrackLibraryReference>>([new TrackLibraryReference(10, "Library")]);
+
+        public Task<bool> IsHumanVerdictUsableAsync(long trackId, CancellationToken cancellationToken = default)
+            => Task.FromResult(!_unusableTrackIds.Contains(trackId));
     }
 
     private sealed class RecordingGroupRepository : IDuplicateGroupRepository
