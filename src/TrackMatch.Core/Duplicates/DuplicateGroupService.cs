@@ -43,8 +43,12 @@ public sealed class DuplicateGroupService(
     public async Task DeleteReviewAsync(long libraryId, CandidatePairKey pair, CancellationToken cancellationToken = default)
     {
         await EnsurePairBelongsToLibraryAsync(libraryId, pair, false, cancellationToken);
-        var current = await GetActiveGlobalReviewsAsync(cancellationToken);
-        var proposed = current.Where(item => item.Pair != pair).ToArray();
+        // 削除対象がContent Verification等で一時利用停止中でも、他の利用可能なCurrent Verdictは
+        // すべて残してTopologyを再構築する。対象Pairだけを除くことで、無関係なSuspended Verdictを
+        // 誤って削除扱いにしたり、利用可能な関係を落としたりしない。
+        var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
+        var remainingReviews = allReviews.Where(item => item.Pair != pair).ToArray();
+        var proposed = await GetActiveGlobalReviewsAsync(remainingReviews, cancellationToken);
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(proposed, existingGroups);
         await reviewRepository.DeleteAsync(pair, libraryId, cancellationToken);
