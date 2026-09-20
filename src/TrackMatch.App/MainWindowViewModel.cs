@@ -500,15 +500,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
             .ToHashSet();
         var needsAnalysis = created || required.Any(pair => !comparedKeys.Contains(pair));
-        if (!needsAnalysis)
+
+        // 比較保存後から分類保存前の間に終了したケースも自己修復する。
+        // Review ReportはClassificationをLEFT JOINするため表示自体は可能だが、分類なしのまま恒久化すると
+        // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
+        var classifiedKeys = (await new SqliteCandidateClassificationRepository(database, libraryId).GetReportAsync())
+            .Select(classification => CandidatePairKey.Create(classification.TrackIdA, classification.TrackIdB))
+            .ToHashSet();
+        var needsClassification = required.Any(pair => comparedKeys.Contains(pair) && !classifiedKeys.Contains(pair));
+        if (!needsAnalysis && !needsClassification)
         {
             return;
         }
 
-        // 補完Candidateも通常Candidateと同じ3択レビューに載せるため、raw Fingerprint比較と分類まで通常経路を再利用する。
         var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
         var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
-        await workflow.AnalyzeCandidatesAsync(libraryId);
+        if (needsAnalysis)
+        {
+            await workflow.AnalyzeCandidatesAsync(libraryId);
+        }
+
+        // 補完Candidateも通常Candidateと同じMachine Resultを持たせる。
+        // 分類だけ欠けた中断状態では不要なFingerprint比較を繰り返さず、分類処理だけを再実行する。
         await workflow.ClassifyCandidatesAsync(libraryId);
     }
 
