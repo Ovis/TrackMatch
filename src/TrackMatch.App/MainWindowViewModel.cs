@@ -504,9 +504,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // 比較保存後から分類保存前の間に終了したケースも自己修復する。
         // Review ReportはClassificationをLEFT JOINするため表示自体は可能だが、分類なしのまま恒久化すると
         // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
-        var classifiedKeys = (await new SqliteCandidateClassificationRepository(database, libraryId).GetReportAsync())
-            .Select(classification => CandidatePairKey.Create(classification.TrackIdA, classification.TrackIdB))
-            .ToHashSet();
+        var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId)
+            .GetClassifiedPairKeysAsync();
         var needsClassification = required.Any(pair => comparedKeys.Contains(pair) && !classifiedKeys.Contains(pair));
         if (!needsAnalysis && !needsClassification)
         {
