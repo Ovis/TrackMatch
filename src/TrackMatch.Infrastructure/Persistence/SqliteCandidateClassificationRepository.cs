@@ -97,6 +97,40 @@ public sealed class SqliteCandidateClassificationRepository(
         await transaction.CommitAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 現在Libraryで有効なClassificationが保存されているPairを取得する。
+    /// </summary>
+    public async Task<IReadOnlySet<CandidatePairKey>> GetClassifiedPairKeysAsync(
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT c.TrackIdA, c.TrackIdB
+            FROM CandidateClassifications c
+            INNER JOIN CandidateComparisons x
+                ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
+               AND x.ComparisonVersion = @ComparisonVersion
+            INNER JOIN Tracks a ON a.Id = c.TrackIdA AND a.IsMissing = 0
+            INNER JOIN Tracks b ON b.Id = c.TrackIdB AND b.IsMissing = 0
+            WHERE @LibraryId IS NULL
+               OR (
+                    EXISTS (SELECT 1 FROM LibraryTracks la WHERE la.LibraryId = @LibraryId AND la.TrackId = c.TrackIdA)
+                AND EXISTS (SELECT 1 FROM LibraryTracks lb WHERE lb.LibraryId = @LibraryId AND lb.TrackId = c.TrackIdB));
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<PairRow>(new CommandDefinition(
+            sql,
+            new
+            {
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
+            cancellationToken: cancellationToken));
+        return rows
+            .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
+            .ToHashSet();
+    }
+
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> GetReportAsync(
         CancellationToken cancellationToken = default)
     {
@@ -221,6 +255,8 @@ public sealed class SqliteCandidateClassificationRepository(
         string Kind,
         string Reason,
         string ThresholdProfileJson);
+
+    private sealed record PairRow(long TrackIdA, long TrackIdB);
 
     private sealed record ReportRow(
         long TrackIdA,
