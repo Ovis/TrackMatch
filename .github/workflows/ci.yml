@@ -44,12 +44,12 @@ jobs:
       # TRXと詳細ログを常に残してハング箇所を特定できるようにする。
       - name: Test Core
         timeout-minutes: 10
-        run: dotnet test --project tests/TrackMatch.Core.Tests/TrackMatch.Core.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=core.trx"
+        run: dotnet test --project tests/TrackMatch.Core.Tests/TrackMatch.Core.Tests.csproj --configuration Release --no-build
 
       - name: Test Infrastructure
         timeout-minutes: 15
-        run: dotnet test --project tests/TrackMatch.Infrastructure.Tests/TrackMatch.Infrastructure.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=infrastructure.trx"
+        run: dotnet test --project tests/TrackMatch.Infrastructure.Tests/TrackMatch.Infrastructure.Tests.csproj --configuration Release --no-build
 
       - name: Test App
         timeout-minutes: 10
-        run: dotnet test --project tests/TrackMatch.App.Tests/TrackMatch.App.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=app.trx"
+        run: dotnet test --project tests/TrackMatch.App.Tests/TrackMatch.App.Tests.csproj --configuration Release --no-build
