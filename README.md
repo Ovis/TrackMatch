@@ -1,16 +1,87 @@
 # TrackMatch
 
-TrackMatch is a Windows desktop application for finding acoustically duplicate or related FLAC tracks in a music library.
+[日本語](README.ja.md)
 
-The application uses Chromaprint fingerprints so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
+TrackMatch is a Windows desktop application for finding acoustically duplicate or closely related audio tracks in a music library and helping you decide which file to keep.
+
+TrackMatch compares audio using Chromaprint fingerprints, so tracks can still be matched when file names, tags, loudness, mastering, or leading/trailing silence differ. It currently supports FLAC and MP3 files.
+
+## Important notice
+
+TrackMatch can move audio files to a configured Trash folder. Review the detected duplicates and the destination carefully before executing file organization.
+
+**Back up important files before using TrackMatch.**
+
+TrackMatch is provided without warranty. To the extent permitted by applicable law, the author is not responsible for data loss, file loss, or any other damage arising from the use of this software. See [LICENSE](LICENSE) for the license terms and warranty/liability disclaimer.
 
 ## Requirements
 
-- Windows 10/11
-- .NET 10 SDK for development
-- Chromaprint `fpcalc` for fingerprint extraction
+### Using a release build
 
-Release archives include the required `fpcalc` files and native audio dependencies.
+- Windows 10 or Windows 11
+
+The Windows release archive includes the required Chromaprint `fpcalc` files and native audio dependencies. No separate .NET SDK installation is required for normal use.
+
+### Development
+
+- .NET 10 SDK
+
+## Getting started
+
+1. Download the Windows x64 ZIP from GitHub Releases and extract it to a folder.
+2. Start `TrackMatch.App.exe`.
+3. Create a Library and add one or more folders containing FLAC or MP3 files.
+4. Run analysis. TrackMatch scans the Library, extracts fingerprints, generates comparison candidates, and evaluates their similarity.
+5. Review candidates and choose one of:
+   - `重複ではない` — the files are not duplicates.
+   - `重複 / Aを残す` — the files are duplicates and A is preferred.
+   - `重複 / Bを残す` — the files are duplicates and B is preferred.
+6. Check the resulting duplicate groups and the file selected to remain.
+7. If necessary, configure the Trash folder and explicitly move files selected for removal.
+
+Moving files to Trash is never performed merely by reviewing a candidate. File organization is a separate explicit operation.
+
+## How TrackMatch organizes duplicates
+
+A physical audio file is represented as a Track independently of Library membership. The same Track may therefore belong to multiple Libraries.
+
+Comparison candidates are generated only between tracks that coexist in at least one Library. Review decisions for the same pair of physical Tracks are shared across Libraries.
+
+When a pair is confirmed as duplicate, the review also records which file is preferred. These preference relationships form duplicate groups. TrackMatch derives the file to keep for each Library from the accumulated review decisions rather than storing an independent manual selection.
+
+For groups containing more than two files, TrackMatch may request additional comparisons when they are necessary to determine which file should remain. Comparisons that cannot affect that decision may be skipped.
+
+If review decisions contradict one another, or if a file is being re-evaluated after its contents change, TrackMatch blocks affected file-organization operations until the state is safe to use again.
+
+## Analysis and rescanning
+
+A Library scan recursively reads supported FLAC and MP3 files. TrackMatch stores reusable metadata, fingerprints, comparison results, and review state in its local database.
+
+Later scans reuse analysis data for unchanged files. If a file disappears from a successfully scanned Library root, it is marked as missing instead of immediately deleting its Track record.
+
+When a previously known file changes, TrackMatch distinguishes metadata-only changes from audio-content changes where possible. Existing review decisions are not discarded merely because metadata changed. If the audio content has changed, affected analysis data and directly related review state are re-evaluated.
+
+## Track management
+
+The Track management window can display all Tracks, missing Tracks, and Tracks that no longer belong to any Library. It also provides Force Reanalysis and explicit deletion of TrackMatch-managed data.
+
+Force Reanalysis invalidates analysis data that must be recalculated. Explicit Track deletion removes TrackMatch-managed records but does not delete the original audio file.
+
+## Moving a Library root
+
+Library roots can be remapped when a music directory is moved. Root remapping preserves Track IDs and reusable analysis data where possible, updates membership paths, and marks files as missing when the expected destination file is absent.
+
+Path collisions are checked before the remap is applied. TrackMatch does not automatically add unrelated Library memberships simply because the destination overlaps another Library root.
+
+## Trash and file safety
+
+Trash processing is explicit. Files selected for removal are moved under the configured Trash folder, and TrackMatch does not overwrite an existing file at the destination.
+
+Because one physical Track may be shared by multiple Libraries, moving it affects every Library that references that file. TrackMatch checks these relationships and blocks file organization when the current duplicate/review state is not safe to apply.
+
+If the database update fails after a physical file has been moved, TrackMatch attempts to move the file back to its original location before reporting the failure. This is a safety measure, not a substitute for backups.
+
+A file manually restored from Trash can be detected again on a later scan. TrackMatch reuses the existing Track where possible and recalculates the current organization state rather than blindly reusing a previous removal decision.
 
 ## Build
 
@@ -19,72 +90,14 @@ dotnet restore TrackMatch.slnx
 dotnet build TrackMatch.slnx --configuration Release
 ```
 
-## Run
+## Run from source
 
 ```powershell
 dotnet run --project src/TrackMatch.App
 ```
 
-TrackMatch is operated through the WPF application. The former command-line host has been removed so scanning, candidate generation, comparison, review, duplicate-group management, and Trash operations all use the same Library-scoped application workflow.
+## License
 
-## Library workflow
+TrackMatch is distributed under the MIT License. See [LICENSE](LICENSE).
 
-Create a Library from the application and register one or more target folders. A physical audio file is stored as a Global Track identified by its normalized absolute path, while Library membership is managed separately.
-
-The normal workflow is:
-
-```text
-Library scan
-  -> candidate generation
-  -> detailed comparison
-  -> automatic classification
-  -> human review
-  -> duplicate-group Keep selection
-  -> optional Trash move
-```
-
-A scan recursively reads supported audio metadata and extracts Chromaprint fingerprints when required. Later scans reuse unchanged Global Track analysis data and mark files that disappear from a successfully enumerated Root as Missing.
-
-Candidate generation is always scoped to the selected Library. Different Libraries may share the same Global Track, but TrackMatch does not create comparison candidates between tracks that do not coexist in the same Library.
-
-## Human review
-
-The candidate list provides these Global Human Verdict operations:
-
-- `重複ではない` — records `NotDuplicate`
-- `重複 / Aを残す` — records `ConfirmedDuplicate` and selects A as the current Library's Keep
-- `重複 / Bを残す` — records `ConfirmedDuplicate` and selects B as the current Library's Keep
-
-The duplicate/not-duplicate verdict is Global for the Track pair. Keep selection is Library-specific and is managed as Duplicate Group state. If a Global Verdict created from another Library is changed, the application warns that the change is visible from every Library containing that pair.
-
-ConfirmedDuplicate edges form Global Duplicate Groups. A Library may choose a Keep Track from the Global Group even when that Track is outside the current Library membership; this does not add membership automatically.
-
-## Track management
-
-The Track management window can display all Global Tracks, Missing Tracks, and tracks that are no longer owned by any Library. It also provides Force Reanalysis and explicit deletion of TrackMatch-managed data.
-
-Force Reanalysis invalidates machine analysis data and the current Human Verdict for affected Tracks while retaining review history. Explicit Track deletion removes TrackMatch data but never deletes the original audio file.
-
-## Root relocation
-
-Library Roots can be remapped when a music directory is moved. Root Remap preserves Global Track IDs and reusable analysis data, updates affected child Roots and membership-relative paths, and marks tracks as Missing when the expected destination file is absent.
-
-Path collisions are detected before applying the remap. TrackMatch does not automatically add unrelated Library memberships merely because the destination overlaps a Root belonging to another Library.
-
-## Trash
-
-Trash processing is explicit. Tracks selected for removal from the current Library's duplicate groups are moved under the configured Trash Root without overwriting an existing destination.
-
-Shared Global Tracks are handled conservatively: the application shows the affected Libraries before moving a file. Once a physical file is moved away, that Global Track becomes Missing for every Library that referenced it. If the database update fails after the physical move, TrackMatch attempts to move the file back before reporting the failure.
-
-If a Trash/Missing file is later restored to its original path, TrackMatch reuses the same Global Track ID and retains the historical verdict/disposition records, but the current Library Keep is returned to an unselected state. The restored file must therefore be reviewed again before Trash can be executed from the old disposition.
-
-## Project structure
-
-- `TrackMatch.Core` — domain models, candidate generation, fingerprint comparison, duplicate-group rules, and analysis services.
-- `TrackMatch.Infrastructure` — file-system access, audio metadata, SQLite persistence, Chromaprint integration, and Trash I/O.
-- `TrackMatch.Application` — Library-scoped application workflows used by the WPF UI.
-- `TrackMatch.App` — WPF desktop application.
-- `TrackMatch.Core.Tests` — Core unit tests.
-- `TrackMatch.Infrastructure.Tests` — SQLite and infrastructure integration tests.
-- `TrackMatch.App.Tests` — application/UI-facing regression tests.
+The Windows release also contains third-party components with their own license terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
