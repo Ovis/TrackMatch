@@ -619,6 +619,22 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         };
     }
 
+    /// <summary>
+    /// スキャン中のフォルダー位置と、そのフォルダー内の曲処理数を区別して表示する。
+    /// </summary>
+    private static string FormatScanProgress(LibraryAnalysisProgress progress)
+    {
+        var folder = string.IsNullOrWhiteSpace(progress.Detail)
+            ? string.Empty
+            : $" {progress.Detail.Replace("対象フォルダ ", "フォルダー ", StringComparison.Ordinal)}";
+        var tracks = progress.TotalCount is { } total
+            ? $"　曲 {progress.CompletedCount:N0}/{total:N0}"
+            : progress.CompletedCount > 0
+                ? $"　{progress.CompletedCount:N0}曲処理済み"
+                : string.Empty;
+        return $"スキャン中:{folder}{tracks}";
+    }
+
     private string FormatAnalysisSummary(string prefix, IReadOnlyCollection<ScanSessionSummary> summaries)
     {
         var total = summaries.Sum(item => item.TotalFiles); var added = summaries.Sum(item => item.AddedFiles); var updated = summaries.Sum(item => item.UpdatedFiles); var missing = summaries.Sum(item => item.RemovedFiles); var errors = summaries.Sum(item => item.ErrorCount);
