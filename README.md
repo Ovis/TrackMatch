@@ -23,9 +23,7 @@ TrackMatch is provided without warranty. To the extent permitted by applicable l
 ### Using a release build
 
 - Windows 10 or Windows 11
-- .NET 10 Desktop Runtime (x64)
-
-ZIP archives distributed through GitHub Releases already include Chromaprint `fpcalc` and the native audio libraries required by TrackMatch.
+ZIP archives distributed through GitHub Releases include the .NET runtime and other files required by TrackMatch, including Chromaprint `fpcalc` and native audio libraries. No additional runtime installation is required.
 
 ### Development
 
