@@ -24,7 +24,8 @@ public sealed class CandidateGridLayoutTests
             {
                 var application = CreateApplication();
 
-                var window = new MainWindow { Width = 1480, Height = 1040 };
+                using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
+                var window = new MainWindow(viewModel) { Width = 1480, Height = 1040 };
                 window.Show();
                 window.UpdateLayout();
 
