@@ -4,7 +4,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using TrackMatch.App.Playback;
 using TrackMatch.App.Quality;
+using TrackMatch.Core.Playback;
 using Xunit;
 
 namespace TrackMatch.App.Tests;
@@ -24,7 +26,8 @@ public sealed class CandidateGridLayoutTests
             {
                 var application = CreateApplication();
 
-                var window = new MainWindow { Width = 1480, Height = 1040 };
+                using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
+                var window = new MainWindow(viewModel) { Width = 1480, Height = 1040 };
                 window.Show();
                 window.UpdateLayout();
 
@@ -205,6 +208,34 @@ public sealed class CandidateGridLayoutTests
         var pixels = new byte[4];
         bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
         return Color.FromArgb(pixels[3], pixels[2], pixels[1], pixels[0]);
+    }
+
+    private sealed class FakeSynchronizedPlaybackService : ISynchronizedPlaybackService
+    {
+        public event EventHandler? PlaybackEnded { add { } remove { } }
+        public event Action<string>? PlaybackFailed { add { } remove { } }
+        public TimeSpan Position { get; private set; }
+        public TimeSpan Duration { get; private set; }
+        public PlaybackOffsets Offsets { get; private set; } = new(TimeSpan.Zero, TimeSpan.Zero);
+        public SynchronizedPlaybackMode Mode { get; set; } = SynchronizedPlaybackMode.StereoOverlay;
+        public float VolumeA { get; set; } = 1f;
+        public float VolumeB { get; set; } = 1f;
+        public bool IsPlaying { get; private set; }
+        public bool IsPaused { get; private set; }
+
+        public void Load(string pathA, string pathB, TimeSpan bestOffset)
+        {
+            Position = TimeSpan.Zero;
+            Duration = TimeSpan.FromMinutes(3);
+            Offsets = PlaybackOffsets.Normalize(TimeSpan.Zero, bestOffset);
+        }
+
+        public void Play() { IsPlaying = true; IsPaused = false; }
+        public void Pause() { IsPlaying = false; IsPaused = true; }
+        public void Stop() { IsPlaying = false; IsPaused = false; Position = TimeSpan.Zero; }
+        public void Seek(TimeSpan position) => Position = position;
+        public void SetOffsets(TimeSpan offsetA, TimeSpan offsetB) => Offsets = PlaybackOffsets.Normalize(offsetA, offsetB);
+        public void Dispose() { }
     }
 
     private sealed record CandidateRow(int Index)

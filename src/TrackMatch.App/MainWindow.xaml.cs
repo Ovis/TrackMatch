@@ -5,7 +5,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
-using TrackMatch.App.Playback;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
@@ -19,12 +18,17 @@ namespace TrackMatch.App;
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan OffsetStep = TimeSpan.FromMilliseconds(10);
-    private readonly MainWindowViewModel _viewModel = new(new NAudioSynchronizedPlaybackService());
+    private readonly MainWindowViewModel _viewModel;
     private readonly DispatcherTimer _playbackTimer;
     private bool _isPlaybackSeekPointerActive;
 
-    public MainWindow()
+    /// <summary>
+    /// DIで構築されたViewModelを使用してMain Windowを生成する。
+    /// </summary>
+    /// <param name="viewModel">アプリケーション共通サービスを注入済みのViewModel</param>
+    public MainWindow(MainWindowViewModel viewModel)
     {
+        _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
         _playbackTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
