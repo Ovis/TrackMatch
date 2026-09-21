@@ -4,11 +4,15 @@
 
 TrackMatch is a Windows desktop application for finding duplicate files that appear to contain the same audio, as well as very similar audio tracks, and helping you decide which file to keep.
 
-TrackMatch compares audio using Chromaprint fingerprints, so tracks can still be matched when file names, tags, loudness, mastering, or leading/trailing silence differ. It currently supports FLAC and MP3 files.
+TrackMatch compares the audio itself using [Chromaprint](https://github.com/acoustid/chromaprint) fingerprints, so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
+
+The officially supported audio formats are currently FLAC and MP3.
 
 ## Important notice
 
-TrackMatch can move audio files to a configured Trash folder. Review the detected duplicates and the destination carefully before executing file organization.
+TrackMatch can move audio files you no longer want to a configured Trash folder.
+
+Marking files as duplicates does not delete or move them. Before running Move to Trash, carefully check the files to be moved and the destination.
 
 **Back up important files before using TrackMatch.**
 
@@ -19,8 +23,9 @@ TrackMatch is provided without warranty. To the extent permitted by applicable l
 ### Using a release build
 
 - Windows 10 or Windows 11
+- .NET 10 Desktop Runtime (x64)
 
-The Windows release archive includes the required Chromaprint `fpcalc` files and native audio dependencies. No separate .NET SDK installation is required for normal use.
+ZIP archives distributed through GitHub Releases already include Chromaprint `fpcalc` and the native audio libraries required by TrackMatch.
 
 ### Development
 
@@ -28,60 +33,70 @@ The Windows release archive includes the required Chromaprint `fpcalc` files and
 
 ## Getting started
 
-1. Download the Windows x64 ZIP from GitHub Releases and extract it to a folder.
+1. Download the ZIP archive from GitHub Releases and extract it to a folder.
 2. Start `TrackMatch.App.exe`.
-3. Create a Library and add one or more folders containing FLAC or MP3 files.
-4. Run analysis. TrackMatch scans the Library, extracts fingerprints, generates comparison candidates, and evaluates their similarity.
-5. Review candidates and choose one of:
-   - `重複ではない` — the files are not duplicates.
-   - `重複 / Aを残す` — the files are duplicates and A is preferred.
-   - `重複 / Bを残す` — the files are duplicates and B is preferred.
-6. Check the resulting duplicate groups and the file selected to remain.
-7. If necessary, configure the Trash folder and explicitly move files selected for removal.
+3. Create a Library and add a folder containing FLAC or MP3 files.
+4. Run analysis. TrackMatch examines the audio files and finds pairs that may be duplicates.
+5. Review each candidate and choose one of:
+   - `重複ではない` — the two files are not duplicates.
+   - `重複 / Aを残す` — the files are duplicates and A should be kept.
+   - `重複 / Bを残す` — the files are duplicates and B should be kept.
+6. Check the resulting duplicate groups and the files selected to remain.
+7. To organize unwanted files, configure the Trash folder and run Move to Trash.
 
-Marking files as duplicates does not immediately delete or move them. At that point, TrackMatch only records the duplicate decision. The actual files are moved only when you later explicitly run the Move to Trash operation.
+Marking files as duplicates does not immediately delete or move them. At that point, TrackMatch only records the duplicate decision. The actual files are moved only when you later run Move to Trash.
 
-## How TrackMatch organizes duplicates
+## Duplicate decisions and choosing files to keep
 
-A physical audio file is represented as a Track independently of Library membership. The same Track may therefore belong to multiple Libraries.
+Candidates found by TrackMatch are not automatically confirmed as duplicates. Review them and choose `重複ではない`, `重複 / Aを残す`, or `重複 / Bを残す`.
 
-Comparison candidates are generated only between tracks that coexist in at least one Library. Review decisions for the same pair of physical Tracks are shared across Libraries.
+When you confirm a duplicate, you also record which file you want to keep. For groups of three or more files containing the same audio, TrackMatch uses the decisions already made to determine which file should remain.
 
-When a pair is confirmed as duplicate, the review also records which file is preferred. These preference relationships form duplicate groups. TrackMatch derives the file to keep for each Library from the accumulated review decisions rather than storing an independent manual selection.
+TrackMatch may skip comparisons whose result is already determined by previous decisions. Conversely, when another comparison is needed to decide which file to keep, that pair is shown as a new candidate.
 
-For groups containing more than two files, TrackMatch may request additional comparisons when they are necessary to determine which file should remain. Comparisons that cannot affect that decision may be skipped.
+If the same file is registered in multiple Libraries, duplicate decisions for that file are shared between those Libraries.
 
-If review decisions contradict one another, or if a file is being re-evaluated after its contents change, TrackMatch blocks affected file-organization operations until the state is safe to use again.
+If decisions conflict or the files otherwise cannot be organized safely, TrackMatch does not move the affected files until the problem is resolved.
 
 ## Analysis and rescanning
 
-A Library scan recursively reads supported FLAC and MP3 files. TrackMatch stores reusable metadata, fingerprints, comparison results, and review state in its local database.
+When you scan a Library, TrackMatch searches its registered folders for FLAC and MP3 files and performs the analysis needed to detect duplicates.
 
-Later scans reuse analysis data for unchanged files. If a file disappears from a successfully scanned Library root, it is marked as missing instead of immediately deleting its Track record.
+If a previously analyzed file has not changed, later scans reuse its existing analysis results.
 
-When a previously known file changes, TrackMatch distinguishes metadata-only changes from audio-content changes where possible. Existing review decisions are not discarded merely because metadata changed. If the audio content has changed, affected analysis data and directly related review state are re-evaluated.
+If a file disappears from a registered folder, its TrackMatch record is not immediately deleted. It is marked as missing and can be checked from the Track management window.
+
+When a file changes, TrackMatch attempts to distinguish changes to information such as tags from changes to the audio itself.
+
+If only tags or similar information changed, existing duplicate decisions continue to be used. If the audio itself changed, TrackMatch prepares the affected analysis and duplicate decisions to be performed again as needed.
 
 ## Track management
 
-The Track management window can display all Tracks, missing Tracks, and Tracks that no longer belong to any Library. It also provides Force Reanalysis and explicit deletion of TrackMatch-managed data.
+The Track management window lists files recognized by TrackMatch.
 
-Force Reanalysis invalidates analysis data that must be recalculated. Explicit Track deletion removes TrackMatch-managed records but does not delete the original audio file.
+It also shows files that are missing from their registered folders and files that currently belong to no Library.
 
-## Moving a Library root
+You can reanalyze files or delete information held by TrackMatch when necessary.
 
-Library roots can be remapped when a music directory is moved. Root remapping preserves Track IDs and reusable analysis data where possible, updates membership paths, and marks files as missing when the expected destination file is absent.
+Deleting information from the Track management window does not delete the original audio file.
 
-Path collisions are checked before the remap is applied. TrackMatch does not automatically add unrelated Library memberships simply because the destination overlaps another Library root.
+## Moving a Library folder
+
+If you move a music folder to another location, you can update the folder registered with TrackMatch.
+
+After the change, scanning checks the files in the new location and reuses previous analysis results where possible. Files not found at the new location are marked as missing.
+
+If the folder configuration would cause a conflict, TrackMatch reports an error without applying the change so that existing Libraries are not unintentionally affected.
 
 ## Trash and file safety
 
-Trash processing is explicit. Files selected for removal are moved under the configured Trash folder, and TrackMatch does not overwrite an existing file at the destination.
+Marking files as duplicates does not delete or move them. Files selected for removal are moved to the configured Trash folder only when you run Move to Trash.
 
-Because one physical Track may be shared by multiple Libraries, moving it affects every Library that references that file. TrackMatch checks these relationships and blocks file organization when the current duplicate/review state is not safe to apply.
+TrackMatch does not overwrite a file with the same name at the destination. It also avoids moving files when duplicate decisions conflict or another condition makes organization unsafe.
 
-If the database update fails after a physical file has been moved, TrackMatch attempts to move the file back to its original location before reporting the failure. This is a safety measure, not a substitute for backups.
+If TrackMatch fails to update its records after moving a file to Trash, it attempts to return the file to its original location. This cannot completely prevent file loss in every unexpected situation, so back up important files beforehand.
 
-A file manually restored from Trash can be detected again on a later scan. TrackMatch reuses the existing Track where possible and recalculates the current organization state rather than blindly reusing a previous removal decision.
+If you manually restore a file from Trash to its original location, TrackMatch can detect it again during the next scan.
 
 ## Build
 
