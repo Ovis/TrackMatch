@@ -180,7 +180,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 OnPropertyChanged(nameof(SimilarityDisplayLowerBoundPercent));
             }
             var management = new LibraryManagementService(DatabasePath, TrashRoot);
-            var libraries = await management.GetLibrariesAsync();
+            // Library取得にはDB初期化や派生状態の同期が含まれるため、起動時にDispatcherを占有させない。
+            // 取得結果をObservableCollectionへ反映する処理だけをUI Threadへ戻して実行する。
+            var libraries = await Task.Run(() => management.GetLibrariesAsync());
             Libraries.Clear(); foreach (var library in libraries)
             {
                 Libraries.Add(library);
@@ -230,7 +232,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath, logger: _loggerFactory.CreateLogger<LibraryAnalysisWorkflow>());
             var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
             _logger.LogInformation("ライブラリ分析を開始する LibraryId={LibraryId} ThreadId={ThreadId} UIThreadId={UIThreadId} IsUIThread={IsUIThread}", library.Id, Environment.CurrentManagedThreadId, _uiThreadId, Environment.CurrentManagedThreadId == _uiThreadId);
-            var result = await workflow.RunAsync(library.Id, progress, _analysisCancellation.Token);
+            // Workflow内部には同期ファイル列挙やCPU処理が含まれる。asyncメソッドをUI Threadから直接呼ぶだけでは
+            // それらもDispatcher Thread上で実行されるため、Workflow全体を明示的にThreadPoolへ移す。
+            // Progress<T>はUI Thread上で生成済みなので、画面更新だけはDispatcherへ戻る。
+            var result = await Task.Run(
+                () => workflow.RunAsync(library.Id, progress, _analysisCancellation.Token),
+                _analysisCancellation.Token);
             _logger.LogInformation("ライブラリ分析が完了した LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
             var summaries = result.Scan.Roots.Select(item => item.Summary).ToArray();
             foreach (var error in result.Scan.Roots.SelectMany(item => item.Errors))
@@ -361,7 +368,24 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         _allCandidates.Clear(); Candidates.Clear(); SelectedCandidate = null;
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
-        var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
+        // DB同期、Supplemental Candidate生成、Presentation State構築は候補数に応じて重くなるため、
+        // UI Threadでは実行しない。ObservableCollectionなどWPFへ公開する状態の更新だけをawait後に行う。
+        var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id));
+        _allCandidates.AddRange(loadedCandidates);
+        NotifyCandidateCountsChanged(); ApplyCandidateFilter();
+    }
+
+    /// <summary>
+    /// Candidate一覧を構築するためのDB同期と派生計算をUI Thread外で完結させる。
+    /// </summary>
+    /// <param name="databasePath">TrackMatch DatabaseのPath</param>
+    /// <param name="libraryId">読み込み対象LibraryのID</param>
+    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidatesForLibraryAsync(
+        string databasePath,
+        long libraryId)
+    {
+        var database = new SqliteDatabase(databasePath);
+        await database.InitializeAsync();
 
         // Human Verdict保存後の派生状態更新中にプロセスが終了しても、Current Human Verdictを正本として起動時に自己修復する。
         // Materialized Group/Keepをそのまま信頼して表示やファイル整理へ進まない。
@@ -372,9 +396,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .SynchronizeGlobalAsync();
 
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
-        await EnsureSupplementalCandidatesAsync(database, library.Id);
-        _allCandidates.AddRange(await LoadCandidateItemsAsync(database, library.Id));
-        NotifyCandidateCountsChanged(); ApplyCandidateFilter();
+        await EnsureSupplementalCandidatesAsync(database, libraryId);
+        return await LoadCandidateItemsAsync(database, libraryId);
     }
 
     /// <summary>
