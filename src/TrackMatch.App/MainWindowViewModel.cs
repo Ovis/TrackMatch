@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 using TrackMatch.App.Playback;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
@@ -20,6 +21,8 @@ namespace TrackMatch.App;
 public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly JsonAppSettingsStore _settingsStore = new();
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<MainWindowViewModel> _logger;
     private readonly Dictionary<long, (long TrackIdA, long TrackIdB)> _sessionSelections = [];
     private readonly List<IncrementalScanError> _analysisErrors = [];
     private readonly List<ContentChangeNotice> _contentChanges = [];
@@ -43,9 +46,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     /// <summary>候補レビュー画面のViewModelを生成する。</summary>
     /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
-    public MainWindowViewModel(ISynchronizedPlaybackService playbackService)
+    /// <param name="loggerFactory">Application層を含む診断Loggerを生成するFactory</param>
+    public MainWindowViewModel(ISynchronizedPlaybackService playbackService, ILoggerFactory loggerFactory)
     {
         Playback = new SynchronizedPlaybackControlsViewModel(playbackService ?? throw new ArgumentNullException(nameof(playbackService)));
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _logger = _loggerFactory.CreateLogger<MainWindowViewModel>();
     }
 
     public ObservableCollection<Library> Libraries { get; } = [];
@@ -216,9 +222,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         try
         {
             var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
-            var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
+            var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath, logger: _loggerFactory.CreateLogger<LibraryAnalysisWorkflow>());
             var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
+            _logger.LogInformation("ライブラリ分析を開始する LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
             var result = await workflow.RunAsync(library.Id, progress, _analysisCancellation.Token);
+            _logger.LogInformation("ライブラリ分析が完了した LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
             var summaries = result.Scan.Roots.Select(item => item.Summary).ToArray();
             foreach (var error in result.Scan.Roots.SelectMany(item => item.Errors))
             {
@@ -236,8 +244,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                     : $" — 音声内容変更 {_contentChanges.Count}ファイル / レビュー判定解除 {invalidatedReviews}件";
             }
         }
-        catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException) { AnalysisStatusText = $"分析失敗: {exception.Message}"; }
+        catch (OperationCanceledException) { _logger.LogInformation("ライブラリ分析がキャンセルされた LibraryId={LibraryId}", library.Id); AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException) { _logger.LogError(exception, "ライブラリ分析に失敗した LibraryId={LibraryId}", library.Id); AnalysisStatusText = $"分析失敗: {exception.Message}"; }
         finally
         {
             _analysisCancellation.Dispose(); _analysisCancellation = null; IsCancellingAnalysis = false; IsAnalyzing = false; OnPropertyChanged(nameof(AnalysisErrorCount));
@@ -599,7 +607,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
-        _settings = new TrackMatchAppSettings(SelectedLibrary?.Id, SimilarityDisplayLowerBoundPercent, string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot);
+        _settings = new TrackMatchAppSettings(SelectedLibrary?.Id, SimilarityDisplayLowerBoundPercent, string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot, _settings.DetailedLogging);
         try { await _settingsStore.SaveAsync(_settings); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { StatusText = $"設定保存失敗: {exception.Message}"; }
     }
