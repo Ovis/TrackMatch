@@ -232,8 +232,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             {
                 var invalidatedReviews = _contentChanges.Sum(item => item.InvalidatedReviewCount);
                 AnalysisStatusText += _contentChanges.Count == 1
-                    ? $" — 音声内容変更: {Path.GetFileName(_contentChanges[0].Path)} / Human Verdict解除 {invalidatedReviews}件"
-                    : $" — 音声内容変更 {_contentChanges.Count}ファイル / Human Verdict解除 {invalidatedReviews}件";
+                    ? $" — 音声内容変更: {Path.GetFileName(_contentChanges[0].Path)} / レビュー判定解除 {invalidatedReviews}件"
+                    : $" — 音声内容変更 {_contentChanges.Count}ファイル / レビュー判定解除 {invalidatedReviews}件";
             }
         }
         catch (OperationCanceledException) { AnalysisStatusText = "キャンセルしました — 完了済みの処理は保持されています。"; }

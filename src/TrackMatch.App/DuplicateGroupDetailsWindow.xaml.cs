@@ -206,8 +206,8 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
         KeepStateText = group.KeepStatus switch
         {
             DuplicateGroupKeepStatus.Selected => "このライブラリで残すファイルは確定済みです。",
-            DuplicateGroupKeepStatus.Conflict => "Human Verdictが矛盾しています。関連するレビュー判定を確認してください。",
-            DuplicateGroupKeepStatus.Missing => "Keep候補に必要なファイルが見つかりません。",
+            DuplicateGroupKeepStatus.Conflict => "レビュー判定が矛盾しています。関連する判定を確認してください。",
+            DuplicateGroupKeepStatus.Missing => "残す候補に必要なファイルが見つかりません。",
             _ => "残す候補が複数あります。候補同士のレビューが必要です。",
         };
 
@@ -265,8 +265,8 @@ public partial class DuplicateGroupDetailsWindow : Window, INotifyPropertyChange
                     relatedReview.Pair,
                     $"{a.Title} ↔ {b.Title}",
                     relatedReview.Decision == CandidateReviewDecision.NotDuplicate
-                        ? "重複ではない判定がConfirmedDuplicateの連結関係と矛盾しています"
-                        : "このConfirmedDuplicate判定が矛盾する連結経路を構成しています"));
+                        ? "「重複ではない」という判定が、確認済みの重複関係と矛盾しています"
+                        : "この「重複として確認済み」という判定が、矛盾する重複関係の一部になっています"));
             }
         }
 

@@ -75,7 +75,7 @@ public sealed partial class CandidateReviewItemViewModel
 
             if (Row.ReviewDecision is null)
             {
-                return Row.IsSupplementalCandidate ? "Keep候補を決定するための補完Candidate" : string.Empty;
+                return Row.IsSupplementalCandidate ? "残すファイルを決定するために追加された比較候補" : string.Empty;
             }
 
             return string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)

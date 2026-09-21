@@ -22,7 +22,7 @@ public sealed record DuplicateGroupSummaryViewModel(
     {
         DuplicateGroupKeepStatus.Selected when string.IsNullOrWhiteSpace(KeepYear) => KeepTitle,
         DuplicateGroupKeepStatus.Selected => $"{KeepTitle}（{KeepYear}）",
-        DuplicateGroupKeepStatus.Conflict => "Human Verdictが矛盾しています",
+        DuplicateGroupKeepStatus.Conflict => "レビュー判定が矛盾しています",
         DuplicateGroupKeepStatus.Missing => "残すファイルが見つかりません",
         _ => "残す候補の追加レビューが必要です",
     };

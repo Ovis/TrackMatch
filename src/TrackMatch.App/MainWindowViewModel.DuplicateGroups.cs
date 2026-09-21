@@ -55,7 +55,7 @@ public sealed partial class MainWindowViewModel
         if (groups.Count > 1)
         {
             var groupIds = string.Join(" と ", groups.Select(group => $"#{group.Id}"));
-            return $"このHuman Verdictにより重複グループ {groupIds} が結合されます。結合後のKeepは全優劣関係から再計算されます。";
+            return $"このレビュー判定により重複グループ {groupIds} が結合されます。結合後の残すファイルは、すべての優劣関係から再計算されます。";
         }
 
         var group = groups[0];
@@ -76,13 +76,13 @@ public sealed partial class MainWindowViewModel
         // 確認文もHuman Verdictから同じ派生ロジックで計算し、保存後の実状態と食い違わないようにする。
         if (DuplicateGroupConflictEvaluator.FindConflicts(groupReviews).Count != 0)
         {
-            return $"この優劣判定後も重複グループ #{group.Id} にはHuman VerdictのConflictが残るため、ファイル整理は引き続き停止されます。";
+            return $"この優劣判定後も重複グループ #{group.Id} にはレビュー判定の矛盾が残るため、ファイル整理は引き続き停止されます。";
         }
 
         var keepCandidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, group.TrackIds);
         if (keepCandidates.Count != 1)
         {
-            return $"この優劣判定後も重複グループ #{group.Id} の残す候補は {keepCandidates.Count} ファイル残ります。追加レビュー後にKeepが再計算されます。";
+            return $"この優劣判定後も重複グループ #{group.Id} の残す候補は {keepCandidates.Count} ファイル残ります。追加レビュー後に残すファイルが再計算されます。";
         }
 
         var derivedKeepTrackId = keepCandidates[0];
@@ -101,7 +101,7 @@ public sealed partial class MainWindowViewModel
         }
 
         var currentKeep = await tracks.GetByIdAsync(group.KeepTrackId.Value);
-        return $"この優劣判定により、重複グループ #{group.Id} の派生Keepが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{derivedKeepName}」へ変わります。";
+        return $"この優劣判定により、重複グループ #{group.Id} の残すファイルが「{FormatTrackFileName(currentKeep, group.KeepTrackId.Value)}」から「{derivedKeepName}」へ変わります。";
     }
 
     private async Task LoadDuplicateGroupsForSelectionAsync(CandidateReviewItemViewModel? selected)

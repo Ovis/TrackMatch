@@ -441,7 +441,8 @@
                                                TextWrapping="Wrap" />
                                     <TextBlock Margin="0,4,0,0"
                                                Style="{StaticResource SecondaryTextStyle}"
-                                               Text="{Binding ReviewOriginText}" />
+                                               Text="{Binding ReviewOriginText}"
+                                               TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

@@ -117,10 +117,10 @@ public partial class MainWindow : Window
         var detail = string.Join(
             Environment.NewLine,
             _viewModel.ContentChanges.Select(item =>
-                $"{Path.GetFileName(item.Path)} — Human Verdict解除 {item.InvalidatedReviewCount}件"));
+                $"{Path.GetFileName(item.Path)} — レビュー判定解除 {item.InvalidatedReviewCount}件"));
         new ConfirmationDialog(
             "音声内容の変更",
-            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました / Human Verdict解除 {invalidatedReviewCount}件",
+            $"{_viewModel.ContentChanges.Count}ファイルの音声内容変更を検出しました / レビュー判定解除 {invalidatedReviewCount}件",
             detail,
             "閉じる",
             kind: AppDialogKind.Information)
@@ -184,7 +184,7 @@ public partial class MainWindow : Window
                 var detail = $"影響するLibrary: {string.Join("、", impactedLibraries)}";
                 if (keepLibraries.Length > 0)
                 {
-                    detail += $"\n\n次のLibraryでは移動対象が「残すファイル」として確定しています。移動後はKeep不在となり、再確認が必要です: {string.Join("、", keepLibraries)}";
+                    detail += $"\n\n次のライブラリでは移動対象が「残すファイル」として確定しています。移動後は残すファイルが未確定になるため、再確認が必要です: {string.Join("、", keepLibraries)}";
                 }
 
                 // Shared Trackは1つの物理ファイルを複数Libraryが参照するため、通常のTrash確認とは別に影響範囲を明示する。
@@ -401,9 +401,9 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(impact))
             {
                 var confirmation = new ConfirmationDialog(
-                    "重複判定によるKeep変更を確認",
+                    "重複判定による「残すファイル」の変更を確認",
                     impact,
-                    "Preferred TrackはGlobal Human Verdictとして保存され、派生Keepとごみ箱移動対象が再計算されます。",
+                    "優先するファイルの判定は全ライブラリで共有され、その判定から残すファイルとごみ箱への移動対象が再計算されます。",
                     "判定を確定",
                     "キャンセル",
                     kind: AppDialogKind.Warning)
@@ -476,8 +476,8 @@ public partial class MainWindow : Window
         var confirmation = new ConfirmationDialog(
             "他のLibraryで確定した判定を変更します",
             $"この判定は「{sourceName}」で確定されています。",
-            "Human VerdictはGlobal Pair単位で共有されるため、ここで変更すると他のLibraryから見える判定も同時に変わります。",
-            "Global判定を変更",
+            "レビュー判定はファイルの組み合わせごとに全ライブラリで共有されるため、ここで変更すると他のライブラリから見える判定も同時に変わります。",
+            "共有されている判定を変更",
             "キャンセル",
             kind: AppDialogKind.Warning)
         { Owner = this };
@@ -548,7 +548,7 @@ public partial class MainWindow : Window
         var confirmation = new ConfirmationDialog(
             "レビュー判定を解除",
             "この候補のレビュー判定を解除しますか？",
-            "現在のHuman Verdictを削除します。重複グループと候補状態は残っている判定から再計算されます。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
+            "現在のレビュー判定を削除します。重複グループと候補状態は残っている判定から再計算されます。ごみ箱へ移動済みのファイルは自動では元に戻りません。",
             "レビュー判定を解除",
             "キャンセル",
             kind: AppDialogKind.Warning)

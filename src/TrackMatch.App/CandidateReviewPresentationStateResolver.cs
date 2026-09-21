@@ -8,7 +8,7 @@ namespace TrackMatch.App;
 /// </summary>
 internal static class CandidateReviewPresentationStateResolver
 {
-    internal const string ReviewSkipReason = "この組み合わせは現在のHuman VerdictからKeep決定に不要と判断できるため、レビューを省略しています";
+    internal const string ReviewSkipReason = "この組み合わせは現在のレビュー判定から、残すファイルの決定には不要と判断できるため、レビューを省略しています";
 
     /// <summary>
     /// Candidateごとのレビュー省略状態を計算する。
