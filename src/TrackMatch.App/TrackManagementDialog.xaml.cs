@@ -68,7 +68,8 @@ public partial class TrackManagementDialog : Window
     {
         try
         {
-            _tracks = await _service.GetTracksAsync(SelectedFilter);
+            var filter = SelectedFilter;
+            _tracks = await Task.Run(() => _service.GetTracksAsync(filter));
             TracksGrid.ItemsSource = _tracks;
             CountText.Text = $"{_tracks.Count:N0} 件";
             UpdateCommandState();
@@ -243,7 +244,8 @@ public partial class TrackManagementDialog : Window
         try
         {
             IsEnabled = false;
-            var message = await action();
+            // Track管理操作は大量のGlobal Track・レビュー・派生状態を更新し得るため、UI Thread外で実行する。
+            var message = await Task.Run(action);
             await ReloadAsync();
             new ConfirmationDialog(
                 "音源管理",
