@@ -43,6 +43,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private bool _isAnalyzing;
     private bool _isCancellingAnalysis;
     private bool _disposed;
+    private readonly int _uiThreadId;
 
     /// <summary>候補レビュー画面のViewModelを生成する。</summary>
     /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
@@ -52,6 +53,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         Playback = new SynchronizedPlaybackControlsViewModel(playbackService ?? throw new ArgumentNullException(nameof(playbackService)));
         _loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<MainWindowViewModel>();
+        // ViewModelはWPFのComposition RootからUI Thread上で生成されるため、このIDを基準に
+        // 長時間処理がDispatcher Threadを占有していないか診断する。
+        _uiThreadId = Environment.CurrentManagedThreadId;
+        _logger.LogDebug("MainWindowViewModel生成 UIThreadId={UIThreadId}", _uiThreadId);
     }
 
     public ObservableCollection<Library> Libraries { get; } = [];
@@ -224,7 +229,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
             var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath, logger: _loggerFactory.CreateLogger<LibraryAnalysisWorkflow>());
             var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
-            _logger.LogInformation("ライブラリ分析を開始する LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
+            _logger.LogInformation("ライブラリ分析を開始する LibraryId={LibraryId} ThreadId={ThreadId} UIThreadId={UIThreadId} IsUIThread={IsUIThread}", library.Id, Environment.CurrentManagedThreadId, _uiThreadId, Environment.CurrentManagedThreadId == _uiThreadId);
             var result = await workflow.RunAsync(library.Id, progress, _analysisCancellation.Token);
             _logger.LogInformation("ライブラリ分析が完了した LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
             var summaries = result.Scan.Roots.Select(item => item.Summary).ToArray();
