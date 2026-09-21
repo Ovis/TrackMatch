@@ -296,13 +296,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         StopPlayback(); IsLoading = true;
         try
         {
-            var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            var reviews = new SqliteCandidateReviewRepository(database);
-            var tracks = new SqliteTrackLookupRepository(database);
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var groupService = new DuplicateGroupService(reviews, tracks, groups);
-            await groupService.DeleteReviewAsync(library.Id, CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB));
-            await EnsureSupplementalCandidatesAsync(database, library.Id);
+            var pair = CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB);
+            // Verdict更新後はGlobal Group再同期や補完Candidate生成まで連鎖するため、
+            // DB・CPU処理をUI Threadから分離し、表示状態の差し替えだけをawait後に行う。
+            await Task.Run(() => DeleteReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, pair));
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
@@ -316,25 +313,20 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         StopPlayback(); IsLoading = true;
         try
         {
-            TrashPathRules.ValidateRootSeparation(TrashRoot, Libraries.SelectMany(item => item.Roots).Select(root => root.Path));
-            var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            var reviews = new SqliteCandidateReviewRepository(database);
-            var trackLookup = new SqliteTrackLookupRepository(database);
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
-
-            // 実ファイルを動かす直前にGlobal Verdictからグループを再同期し、古い派生状態を削除根拠にしない。
-            await groupService.SynchronizeGlobalAsync();
-
-            var tracks = new SqliteTrackRepository(database);
-            var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
-            var result = await service.ProcessAsync(library.Id, TrashRoot, execute, collisionBehavior);
+            var trashRoot = TrashRoot;
+            var libraryRoots = Libraries.SelectMany(item => item.Roots).Select(root => root.Path).ToArray();
+            TrashPathRules.ValidateRootSeparation(trashRoot, libraryRoots);
+            // TrashはNASを含む実ファイルI/OとGlobal Group再同期を行うため、UI Threadでは実行しない。
+            var result = await Task.Run(() => ProcessTrashCoreAsync(
+                DatabasePath,
+                library.Id,
+                trashRoot,
+                execute,
+                collisionBehavior));
 
             if (execute && result.MovedCount > 0)
             {
-                // Trash後はTrackがMissingへ変わるため、Current VerdictからGlobal Groupを再構成し、
-                // 移動済みTrackを候補一覧やKeep表示へ残さない。
-                await groupService.SynchronizeGlobalAsync();
+                // UI公開中のCandidate集合は、バックグラウンド側の派生状態更新が完了してから差し替える。
                 await LoadCandidatesCoreAsync();
             }
 
@@ -474,22 +466,78 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         StopPlayback(); IsLoading = true;
         try
         {
-            var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-            var reviews = new SqliteCandidateReviewRepository(database);
-            var tracks = new SqliteTrackLookupRepository(database);
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var groupService = new DuplicateGroupService(reviews, tracks, groups);
-            await groupService.SaveReviewAsync(
-                library.Id,
-                new CandidateReview(
-                    CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB),
-                    decision,
-                    decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
-                    null));
-            await EnsureSupplementalCandidatesAsync(database, library.Id);
+            var review = new CandidateReview(
+                CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB),
+                decision,
+                decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
+                null);
+            // Review保存はGlobal Group再同期と補完Candidate生成を伴うため、UI Threadから分離する。
+            await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review));
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
         }
         finally { IsLoading = false; }
+    }
+
+    /// <summary>
+    /// Human Verdictを保存し、そこから派生するGroupと補完CandidateをUI Thread外で更新する。
+    /// </summary>
+    private async Task SaveReviewAndRefreshDerivedStateAsync(string databasePath, long libraryId, CandidateReview review)
+    {
+        var database = new SqliteDatabase(databasePath);
+        await database.InitializeAsync();
+        var service = new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(database),
+            new SqliteTrackLookupRepository(database),
+            new SqliteDuplicateGroupRepository(database));
+        await service.SaveReviewAsync(libraryId, review);
+        await EnsureSupplementalCandidatesAsync(database, libraryId);
+    }
+
+    /// <summary>
+    /// Human Verdictを解除し、残ったVerdictから派生状態と補完CandidateをUI Thread外で再構築する。
+    /// </summary>
+    private async Task DeleteReviewAndRefreshDerivedStateAsync(string databasePath, long libraryId, CandidatePairKey pair)
+    {
+        var database = new SqliteDatabase(databasePath);
+        await database.InitializeAsync();
+        var service = new DuplicateGroupService(
+            new SqliteCandidateReviewRepository(database),
+            new SqliteTrackLookupRepository(database),
+            new SqliteDuplicateGroupRepository(database));
+        await service.DeleteReviewAsync(libraryId, pair);
+        await EnsureSupplementalCandidatesAsync(database, libraryId);
+    }
+
+    /// <summary>
+    /// Trashの判定、実ファイル移動、移動後のGlobal Group再同期をUI Thread外で完結させる。
+    /// </summary>
+    private static async Task<RejectedTrackTrashResult> ProcessTrashCoreAsync(
+        string databasePath,
+        long libraryId,
+        string trashRoot,
+        bool execute,
+        TrashDestinationCollisionBehavior collisionBehavior)
+    {
+        var database = new SqliteDatabase(databasePath);
+        await database.InitializeAsync();
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var trackLookup = new SqliteTrackLookupRepository(database);
+        var groups = new SqliteDuplicateGroupRepository(database);
+        var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
+
+        // 実ファイルを動かす直前にGlobal Verdictからグループを再同期し、古い派生状態を削除根拠にしない。
+        await groupService.SynchronizeGlobalAsync();
+
+        var tracks = new SqliteTrackRepository(database);
+        var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
+        var result = await service.ProcessAsync(libraryId, trashRoot, execute, collisionBehavior);
+        if (execute && result.MovedCount > 0)
+        {
+            // 物理移動でTrackがMissingへ変わるため、Current VerdictからGlobal Groupを再構築する。
+            await groupService.SynchronizeGlobalAsync();
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -611,8 +659,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
-        var database = new SqliteDatabase(DatabasePath); await database.InitializeAsync();
-        var items = await LoadCandidateItemsAsync(database, library.Id);
+        var items = await Task.Run(async () =>
+        {
+            var database = new SqliteDatabase(DatabasePath);
+            await database.InitializeAsync();
+            return await LoadCandidateItemsAsync(database, library.Id);
+        });
         _allCandidates.Clear(); _allCandidates.AddRange(items);
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
         SelectedCandidate = Candidates.FirstOrDefault(item => item.TrackIdA == trackIdA && item.TrackIdB == trackIdB) ?? SelectedCandidate;
