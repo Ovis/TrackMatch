@@ -1,116 +1,114 @@
 # TrackMatch
 
-[日本語](README.ja.md)
+TrackMatchは、音楽ライブラリから同じ音源と思われる重複ファイルや、非常によく似た音源を見つけ、どのファイルを残すか整理するためのWindowsデスクトップアプリケーションです。
 
-TrackMatch is a Windows desktop application for finding duplicate files that appear to contain the same audio, as well as very similar audio tracks, and helping you decide which file to keep.
+[Chromaprint](https://github.com/acoustid/chromaprint)のフィンガープリントを利用して音声そのものを比較するため、ファイル名やタグ、音量、マスタリング、曲の前後の無音部分などが異なっていても比較できます。
 
-TrackMatch compares the audio itself using [Chromaprint](https://github.com/acoustid/chromaprint) fingerprints, so tracks can still be compared when file names, tags, loudness, mastering, or leading/trailing silence differ.
+現在正式に対応している音声形式はFLACとMP3です。
 
-The officially supported audio formats are currently FLAC and MP3.
+## 重要な注意事項
 
-## Important notice
+TrackMatchには、不要と判断した音声ファイルを指定したごみ箱フォルダーへ移動する機能があります。
 
-TrackMatch can move audio files you no longer want to a configured Trash folder.
+重複と判定しただけではファイルが削除・移動されることはありませんが、実際に「ごみ箱に移動」を実行する前には、対象となるファイルと移動先を十分に確認してください。
 
-Marking files as duplicates does not delete or move them. Before running Move to Trash, carefully check the files to be moved and the destination.
+**重要なファイルは、TrackMatchを利用する前に必ずバックアップしてください。**
 
-**Back up important files before using TrackMatch.**
+TrackMatchは無保証で提供されます。適用法令で認められる範囲において、本ソフトウェアの利用によって生じたデータ消失、ファイル消失、その他の損害について作者は責任を負いません。ライセンス上の保証および責任に関する条件は[LICENSE](LICENSE)を確認してください。
 
-TrackMatch is provided without warranty. To the extent permitted by applicable law, the author is not responsible for data loss, file loss, or any other damage arising from the use of this software. See [LICENSE](LICENSE) for the license terms and warranty/liability disclaimer.
+## 動作環境
 
-## Requirements
+### リリース版を利用する場合
 
-### Using a release build
+- Windows 10 または Windows 11
+GitHub Releasesで配布しているZIPファイルには、.NETランタイムを含むTrackMatchの動作に必要なファイルと、Chromaprint `fpcalc`やネイティブ音声ライブラリなどがあらかじめ同梱されています。追加のランタイムをインストールする必要はありません。
 
-- Windows 10 or Windows 11
-ZIP archives distributed through GitHub Releases include the .NET runtime and other files required by TrackMatch, including Chromaprint `fpcalc` and native audio libraries. No additional runtime installation is required.
-
-### Development
+### 開発する場合
 
 - .NET 10 SDK
 
-## Getting started
+## 基本的な使い方
 
-1. Download the ZIP archive from GitHub Releases and extract it to a folder.
-2. Start `TrackMatch.App.exe`.
-3. Create a Library and add a folder containing FLAC or MP3 files.
-4. Run analysis. TrackMatch examines the audio files and finds pairs that may be duplicates.
-5. Review each candidate and choose one of:
-   - `重複ではない` — the two files are not duplicates.
-   - `重複 / Aを残す` — the files are duplicates and A should be kept.
-   - `重複 / Bを残す` — the files are duplicates and B should be kept.
-6. Check the resulting duplicate groups and the files selected to remain.
-7. To organize unwanted files, configure the Trash folder and run Move to Trash.
+1. GitHub ReleasesからZIPファイルを取得し、任意のフォルダーへ展開します。
+2. `TrackMatch.App.exe`を起動します。
+3. ライブラリを作成し、FLACまたはMP3ファイルが入っているフォルダーを登録します。
+4. 解析を実行します。TrackMatchが音声ファイルを調べ、重複している可能性のある組み合わせを探します。
+5. 見つかった候補を確認し、次のいずれかを選択します。
+   - `重複ではない` — 2つのファイルを重複ではないと判定します。
+   - `重複 / Aを残す` — 重複と判定し、Aを残すファイルとして選択します。
+   - `重複 / Bを残す` — 重複と判定し、Bを残すファイルとして選択します。
+6. 重複グループと、残すファイルを確認します。
+7. 不要なファイルを整理する場合は、ごみ箱フォルダーを設定して「ごみ箱に移動」を実行します。
 
-Marking files as duplicates does not immediately delete or move them. At that point, TrackMatch only records the duplicate decision. The actual files are moved only when you later run Move to Trash.
+重複と判定しただけでは、ファイルが削除・移動されることはありません。この時点ではTrackMatch上で重複として記録されるだけです。実際のファイルは、後から「ごみ箱に移動」を実行したときに初めて移動されます。
 
-## Duplicate decisions and choosing files to keep
+## 重複判定と残すファイル
 
-Candidates found by TrackMatch are not automatically confirmed as duplicates. Review them and choose `重複ではない`, `重複 / Aを残す`, or `重複 / Bを残す`.
+TrackMatchが見つけた候補は、自動的に重複として確定されるわけではありません。実際に重複しているかを確認し、「重複ではない」「重複 / Aを残す」「重複 / Bを残す」のいずれかを選択します。
 
-When you confirm a duplicate, you also record which file you want to keep. For groups of three or more files containing the same audio, TrackMatch uses the decisions already made to determine which file should remain.
+重複と判定した場合は、同時にどちらのファイルを残したいかを記録します。3つ以上のファイルが同じ音源として見つかった場合も、それまでの判定をもとにTrackMatchが残すファイルを判断します。
 
-TrackMatch may skip comparisons whose result is already determined by previous decisions. Conversely, when another comparison is needed to decide which file to keep, that pair is shown as a new candidate.
+すでに行った判定から結果が決まる組み合わせは、確認を省略することがあります。反対に、どのファイルを残すか決めるために追加の比較が必要な場合は、その組み合わせが新しい候補として表示されます。
 
-If the same file is registered in multiple Libraries, duplicate decisions for that file are shared between those Libraries.
+同じファイルを複数のライブラリに登録している場合でも、そのファイルに対して行った重複判定は共有されます。
 
-If decisions conflict or the files otherwise cannot be organized safely, TrackMatch does not move the affected files until the problem is resolved.
+判定に矛盾がある場合など、安全にファイルを整理できない状態では、問題が解消されるまで対象ファイルの移動を行いません。
 
-## Analysis and rescanning
+## 解析と再スキャン
 
-When you scan a Library, TrackMatch searches its registered folders for FLAC and MP3 files and performs the analysis needed to detect duplicates.
+ライブラリをスキャンすると、登録したフォルダー以下にあるFLACとMP3を探し、重複の検出に必要な解析を行います。
 
-If a previously analyzed file has not changed, later scans reuse its existing analysis results.
+一度解析したファイルに変更がなければ、次回以降のスキャンでは以前の解析結果を再利用します。
 
-If a file disappears from a registered folder, its TrackMatch record is not immediately deleted. It is marked as missing and can be checked from the Track management window.
+登録したフォルダーからファイルがなくなった場合も、TrackMatch上の記録がすぐに削除されることはありません。見つからなくなったファイルとして管理され、Track管理画面から確認できます。
 
-When a file changes, TrackMatch attempts to distinguish changes to information such as tags from changes to the audio itself.
+ファイルが変更された場合は、タグなどの情報だけが変更されたのか、音声そのものが変更されたのかを可能な範囲で判別します。
 
-If only tags or similar information changed, existing duplicate decisions continue to be used. If the audio itself changed, TrackMatch prepares the affected analysis and duplicate decisions to be performed again as needed.
+タグなどが変更されただけの場合は、それまでに行った重複判定を引き続き利用します。音声そのものが変更された場合は、必要な解析や重複判定を改めて行える状態にします。
 
-## Track management
+## Track管理
 
-The Track management window lists files recognized by TrackMatch.
+Track管理画面では、TrackMatchが認識しているファイルを一覧で確認できます。
 
-It also shows files that are missing from their registered folders and files that currently belong to no Library.
+登録したフォルダーから見つからなくなったファイルや、現在どのライブラリにも登録されていないファイルも確認できます。
 
-You can reanalyze files or delete information held by TrackMatch when necessary.
+必要に応じて再解析を行ったり、TrackMatchが保持しているファイルの情報を削除したりすることもできます。
 
-Deleting information from the Track management window does not delete the original audio file.
+Track管理画面から情報を削除しても、元の音声ファイルそのものが削除されることはありません。
 
-## Moving a Library folder
+## ライブラリのフォルダーを移動した場合
 
-If you move a music folder to another location, you can update the folder registered with TrackMatch.
+音楽フォルダーを別の場所へ移動した場合は、TrackMatchに登録しているフォルダーを新しい場所へ変更できます。
 
-After the change, scanning checks the files in the new location and reuses previous analysis results where possible. Files not found at the new location are marked as missing.
+変更後にスキャンすると、新しい場所にあるファイルを確認し、それまでの解析結果を可能な範囲で引き継ぎます。新しい場所で見つからなかったファイルは「見つからない」状態になります。
 
-If the folder configuration would cause a conflict, TrackMatch reports an error without applying the change so that existing Libraries are not unintentionally affected.
+フォルダーの設定に問題がある場合は、既存のライブラリへ意図しない影響が出ないよう、変更を行わずエラーとして扱います。
 
-## Trash and file safety
+## ごみ箱とファイルの安全性
 
-Marking files as duplicates does not delete or move them. Files selected for removal are moved to the configured Trash folder only when you run Move to Trash.
+重複と判定しただけでは、ファイルが削除・移動されることはありません。削除候補のファイルは、「ごみ箱に移動」を実行したときに、設定したごみ箱フォルダーへ移動されます。
 
-TrackMatch does not overwrite a file with the same name at the destination. It also avoids moving files when duplicate decisions conflict or another condition makes organization unsafe.
+移動先に同じ名前のファイルがある場合は上書きしません。また、重複の判定に矛盾があるなど、安全に整理できない状態ではファイルの移動を行いません。
 
-If TrackMatch fails to update its records after moving a file to Trash, it attempts to return the file to its original location. This cannot completely prevent file loss in every unexpected situation, so back up important files beforehand.
+ファイルをごみ箱へ移動した後、TrackMatch側の記録更新に失敗した場合は、できる限りファイルを元の場所へ戻します。ただし、予期しない問題によるファイルの消失を完全に防げるわけではないため、大切なファイルはあらかじめバックアップしてください。
 
-If you manually restore a file from Trash to its original location, TrackMatch can detect it again during the next scan.
+ごみ箱へ移動したファイルを手動で元の場所へ戻した場合は、次回のスキャンで再び検出されます。
 
-## Build
+## ビルド
 
 ```powershell
 dotnet restore TrackMatch.slnx
 dotnet build TrackMatch.slnx --configuration Release
 ```
 
-## Run from source
+## ソースコードから実行
 
 ```powershell
 dotnet run --project src/TrackMatch.App
 ```
 
-## License
+## ライセンス
 
-TrackMatch is distributed under the MIT License. See [LICENSE](LICENSE).
+TrackMatchはMIT Licenseで配布しています。詳細は[LICENSE](LICENSE)を確認してください。
 
-ZIP archives distributed through GitHub Releases include the third-party components required to run TrackMatch. Each of these components is subject to its own license terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+GitHub Releasesで配布しているZIPファイルには、TrackMatchの動作に必要なサードパーティ製のコンポーネントがあらかじめ同梱されています。これらのコンポーネントには、それぞれのライセンス条件が適用されます。詳細は[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を確認してください。
