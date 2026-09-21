@@ -42,7 +42,7 @@ public partial class LibraryManagementDialog : Window
 
     private async Task ReloadAsync(long? preferredId)
     {
-        _libraries = await _service.GetLibrariesAsync();
+        _libraries = await Task.Run(() => _service.GetLibrariesAsync());
         LibrariesListBox.ItemsSource = _libraries;
         var selected = _libraries.FirstOrDefault(item => item.Id == preferredId) ?? _libraries.FirstOrDefault();
         _revertingSelection = true;
@@ -100,7 +100,8 @@ public partial class LibraryManagementDialog : Window
         try
         {
             var id = _selectedLibrary.Id;
-            await _service.RenameLibraryAsync(id, NameTextBox.Text);
+            var name = NameTextBox.Text;
+            await Task.Run(() => _service.RenameLibraryAsync(id, name));
             await ReloadAsync(id);
             StatusText.Text = "ライブラリ名を保存しました。";
             return true;
@@ -162,7 +163,7 @@ public partial class LibraryManagementDialog : Window
             return;
         }
 
-        var summary = await _service.GetDeleteSummaryAsync(library.Id);
+        var summary = await Task.Run(() => _service.GetDeleteSummaryAsync(library.Id));
 
         var confirmation = new ConfirmationDialog(
             "ライブラリを削除",
@@ -178,7 +179,7 @@ public partial class LibraryManagementDialog : Window
             return;
         }
 
-        await _service.DeleteLibraryAsync(library.Id);
+        await Task.Run(() => _service.DeleteLibraryAsync(library.Id));
         await ReloadAsync(null);
     }
 
@@ -196,7 +197,12 @@ public partial class LibraryManagementDialog : Window
             return;
         }
 
-        try { await _service.AddRootAsync(library.Id, dialog.FolderName); await ReloadAsync(library.Id); }
+        try
+        {
+            var folderName = dialog.FolderName;
+            await Task.Run(() => _service.AddRootAsync(library.Id, folderName));
+            await ReloadAsync(library.Id);
+        }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { StatusText.Text = exception.Message; }
     }
 
@@ -211,7 +217,7 @@ public partial class LibraryManagementDialog : Window
 
         try
         {
-            var count = await _service.GetRootTrackCountAsync(root.Id);
+            var count = await Task.Run(() => _service.GetRootTrackCountAsync(root.Id));
             var confirmation = new ConfirmationDialog(
                 "対象フォルダを削除",
                 $"対象フォルダ「{root.Path}」を削除しますか？",
@@ -226,7 +232,7 @@ public partial class LibraryManagementDialog : Window
                 return;
             }
 
-            await _service.RemoveRootAsync(library.Id, root.Id);
+            await Task.Run(() => _service.RemoveRootAsync(library.Id, root.Id));
             await ReloadAsync(library.Id);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException) { StatusText.Text = exception.Message; }
@@ -249,14 +255,15 @@ public partial class LibraryManagementDialog : Window
 
         try
         {
-            var preview = await _service.PreviewRootRemapAsync(library.Id, root.Id, picker.FolderName);
+            var folderName = picker.FolderName;
+            var preview = await Task.Run(() => _service.PreviewRootRemapAsync(library.Id, root.Id, folderName));
             var confirmation = new RootRemapPreviewDialog(preview) { Owner = this };
             if (confirmation.ShowDialog() != true)
             {
                 return;
             }
 
-            await _service.RemapRootAsync(library.Id, root.Id, picker.FolderName);
+            await Task.Run(() => _service.RemapRootAsync(library.Id, root.Id, folderName));
             await ReloadAsync(library.Id);
             StatusText.Text = "対象フォルダの保存場所を変更しました。通常のスキャン・分析は自動実行していません。";
         }
