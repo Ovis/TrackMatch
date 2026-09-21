@@ -731,7 +731,7 @@
                     </Button.Style>
                 </Button>
                 <TextBlock Grid.Column="7"
-                           VerticalAlignment="Center"><Run Text="{Binding TrashStatusText, Mode=OneWay}" /><Run Text="   再生: " /><Run Text="{Binding Playback.StatusText, Mode=OneWay}" /></TextBlock>
+                           VerticalAlignment="Center"><Run Text="再生: " /><Run Text="{Binding Playback.StatusText, Mode=OneWay}" /></TextBlock>
             </Grid>
         </Border>
     </Grid>
