@@ -78,22 +78,36 @@ public sealed class LibraryAnalysisWorkflow
                     cancellationToken.ThrowIfCancellationRequested();
                     var root = library.Roots[index];
                     var rootProgress = new Progress<IncrementalScanProgress>(value =>
+                    {
+                        if (_logger.IsEnabled(LogLevel.Debug) && (value.CompletedFiles % 100 == 0 || value.CompletedFiles == value.TotalFiles))
+                        {
+                            _logger.LogDebug("スキャン進捗 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex} Completed={Completed} Total={Total} ThreadId={ThreadId}", library.Id, root.Id, index + 1, value.CompletedFiles, value.TotalFiles, Environment.CurrentManagedThreadId);
+                        }
+
                         progress?.Report(new LibraryScanBatchProgress(
                             index + 1,
                             library.Roots.Count,
                             value.CompletedFiles,
                             value.TotalFiles,
-                            value.CurrentPath)));
+                            value.CurrentPath));
+                    });
 
                     // Root ScanはTrack単位で完了済み更新を保持するため、呼び出し後に例外となっても
                     // Global Groupの派生状態をCurrent Verdictへ追従させる必要がある。
                     scanMayHaveCommittedChanges = true;
-                    results.Add(await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress));
+                    var rootStopwatch = Stopwatch.StartNew();
+                    _logger.LogInformation("Rootスキャン開始 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Path={Path}", library.Id, root.Id, index + 1, library.Roots.Count, root.Path);
+                    var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
+                    results.Add(rootResult);
+                    _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.Total, rootResult.Summary.Processed, rootResult.Summary.Added, rootResult.Summary.Updated, rootResult.Summary.Removed, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
                 }
 
                 // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
                 // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
+                var synchronizationStopwatch = Stopwatch.StartNew();
+                _logger.LogInformation("Scan Batch後Duplicate Group同期開始 LibraryId={LibraryId}", library.Id);
                 await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
+                _logger.LogInformation("Scan Batch後Duplicate Group同期完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs}", library.Id, synchronizationStopwatch.ElapsedMilliseconds);
                 return new LibraryRootScanBatchResult(library.Id, results);
             }
             catch
