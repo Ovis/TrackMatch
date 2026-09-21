@@ -20,11 +20,6 @@ public partial class MainWindow
             Keyboard.PreviewKeyDownEvent,
             new KeyEventHandler(MainWindow_ReviewPreviewKeyDown),
             handledEventsToo: true);
-        EventManager.RegisterClassHandler(
-            typeof(MainWindow),
-            ButtonBase.ClickEvent,
-            new RoutedEventHandler(MainWindow_ReviewButtonClick),
-            handledEventsToo: true);
     }
 
     private static async void MainWindow_ReviewPreviewKeyDown(object sender, KeyEventArgs e)
@@ -40,7 +35,7 @@ public partial class MainWindow
             if (modifiers == ModifierKeys.Control && e.Key == Key.D1)
             {
                 e.Handled = true;
-                await window.ExecuteKeyboardReviewAsync(CandidateReviewDecision.NotDuplicate, keepTrackId: null);
+                await window.ExecuteKeyboardReviewAsync(CandidateReviewDecision.NotDuplicate, preferredTrackId: null);
                 return;
             }
 
@@ -88,43 +83,7 @@ public partial class MainWindow
         }
     }
 
-    private static async void MainWindow_ReviewButtonClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MainWindow window || e.Handled || e.Source is not Button button || button.Content is not string label)
-        {
-            return;
-        }
-
-        // 既存Click Handlerを迂回すると確認Dialogの安全策が失われるため、レビュー3操作だけを同じ処理経路へ明示的に流す。
-        if (label.StartsWith("重複ではない", StringComparison.Ordinal))
-        {
-            e.Handled = true;
-            await window._viewModel.ExecuteReviewWithUndoAsync(
-                () => window.ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, window._viewModel.MarkNotDuplicateAsync));
-            return;
-        }
-
-        var selected = window._viewModel.SelectedCandidate;
-        if (selected is null)
-        {
-            return;
-        }
-
-        if (label.StartsWith("重複 / Aを残す", StringComparison.Ordinal))
-        {
-            e.Handled = true;
-            await window._viewModel.ExecuteReviewWithUndoAsync(
-                () => window.ConfirmDuplicateWithImpactAsync(selected.TrackIdA, window._viewModel.ConfirmDuplicateKeepAAsync));
-        }
-        else if (label.StartsWith("重複 / Bを残す", StringComparison.Ordinal))
-        {
-            e.Handled = true;
-            await window._viewModel.ExecuteReviewWithUndoAsync(
-                () => window.ConfirmDuplicateWithImpactAsync(selected.TrackIdB, window._viewModel.ConfirmDuplicateKeepBAsync));
-        }
-    }
-
-    private async Task ExecuteKeyboardReviewAsync(CandidateReviewDecision decision, long? keepTrackId)
+    private async Task ExecuteKeyboardReviewAsync(CandidateReviewDecision decision, long? preferredTrackId)
     {
         if (!_viewModel.CanReview || _viewModel.SelectedCandidate is null)
         {
@@ -138,15 +97,15 @@ public partial class MainWindow
             return;
         }
 
-        if (keepTrackId is not { } keep)
+        if (preferredTrackId is not { } preferred)
         {
             return;
         }
 
-        Func<Task> action = keep == _viewModel.SelectedCandidate.TrackIdA
+        Func<Task> action = preferred == _viewModel.SelectedCandidate.TrackIdA
             ? _viewModel.ConfirmDuplicateKeepAAsync
             : _viewModel.ConfirmDuplicateKeepBAsync;
-        await _viewModel.ExecuteReviewWithUndoAsync(() => ConfirmDuplicateWithImpactAsync(keep, action));
+        await _viewModel.ExecuteReviewWithUndoAsync(() => ConfirmDuplicateWithImpactAsync(preferred, action));
     }
 
     private bool MoveCandidateSelection(int offset)

@@ -5,7 +5,7 @@
 /// </summary>
 /// <param name="Id">Global Duplicate Group ID</param>
 /// <param name="LibraryId">このProjectionを表示・処置するLibrary ID</param>
-/// <param name="KeepTrackId">Library固有の現在Keep。未選択・競合・Missingの場合はnull</param>
+/// <param name="KeepTrackId">Library固有の派生Keep。候補複数・Human Verdict矛盾・Missingの場合はnull</param>
 /// <param name="KeepStatus">Library固有Keepの現在状態</param>
 /// <param name="TrackIds">現在LibraryのMembershipに含まれる構成Track ID</param>
 /// <param name="GlobalTrackIds">Global Group全体の構成Track ID</param>
@@ -70,13 +70,13 @@ public sealed record DuplicateGroup(
 /// </summary>
 public enum DuplicateGroupKeepStatus
 {
-    /// <summary>利用可能なKeepが選択済み。</summary>
+    /// <summary>現在有効なPreferenceからKeepが一意に導出済み。</summary>
     Selected,
 
-    /// <summary>Keepがまだ選択されていない。</summary>
+    /// <summary>Keep候補が複数残っており、追加レビューが必要。</summary>
     Unselected,
 
-    /// <summary>Group Merge等により複数の旧Keepが競合している。</summary>
+    /// <summary>同一ConfirmedDuplicate連結成分内のNotDuplicateによりHuman Verdictが矛盾している。</summary>
     Conflict,
 
     /// <summary>選択済みKeepがMissingとなり、再確認が必要。</summary>

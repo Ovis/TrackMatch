@@ -51,6 +51,107 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_MetadataOnlyChange_PreservesVerdictStateAndMarksVerificationCompleted()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "metadata-only.flac");
+        var previousFingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 100, 10))],
+            existingFingerprint: previousFingerprint);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 200, 20))]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
+
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L], repository.VerificationPendingTrackIds);
+        Assert.Equal([1L], repository.VerifiedTrackIds);
+        Assert.Empty(repository.ContentChangedTrackIds);
+        Assert.Empty(result.ContentChanges);
+    }
+
+    [Fact]
+    public async Task ScanAsync_AudioContentChange_InvalidatesVerdictStateAndReportsCount()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "audio-changed.flac");
+        var previousFingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [9u, 9u, 9u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 100, 10))],
+            existingFingerprint: previousFingerprint,
+            invalidatedReviewCount: 2);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 200, 20))]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
+
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L], repository.VerificationPendingTrackIds);
+        Assert.Empty(repository.VerifiedTrackIds);
+        Assert.Equal([1L], repository.ContentChangedTrackIds);
+        var notice = Assert.Single(result.ContentChanges);
+        Assert.Equal(path, notice.Path);
+        Assert.Equal(2, notice.InvalidatedReviewCount);
+    }
+
+    [Fact]
+    public async Task ScanAsync_ContentVerificationFailure_PreservesVerdictAndLeavesRetryState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "verification-failed.flac");
+        var previousFingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 100, 10))],
+            existingFingerprint: previousFingerprint);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 200, 20))]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(path),
+            2);
+
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L], repository.VerificationPendingTrackIds);
+        Assert.Equal([1L], repository.VerificationFailedTrackIds);
+        Assert.Empty(repository.ContentChangedTrackIds);
+        Assert.Empty(repository.VerifiedTrackIds);
+        Assert.Equal("Fingerprint", Assert.Single(result.Errors).Stage);
+    }
+
+    [Fact]
+    public async Task ScanAsync_PreviousVerificationFailure_RetriesEvenWhenFileAttributesNoLongerDiffer()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "retry-verification.flac");
+        var fingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, Metadata(path, 200, 20))],
+            existingFingerprint: fingerprint,
+            verificationPendingTrackIds: new HashSet<long> { 1 });
+        var extractor = new FakeFingerprintExtractor();
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner([LibraryScanResult.Success(Metadata(path, 200, 20))]),
+            repository,
+            new FakeScanSessionRepository(),
+            extractor,
+            2);
+
+        await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal([path], extractor.Paths);
+        Assert.Equal([1L], repository.VerifiedTrackIds);
+        Assert.Empty(repository.ContentChangedTrackIds);
+    }
+
+    [Fact]
     public async Task ScanAsync_NormalCompletionMarksStoredTrackMissingWhenScannerDidNotFindIt()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -252,7 +353,10 @@ public sealed class IncrementalLibraryScanServiceTests
     private sealed class FakeTrackRepository(
         IReadOnlyList<StoredTrack> initialTracks,
         IReadOnlySet<long>? missingFingerprintIds = null,
-        CancellationTokenSource? cancelDuringMissingBatch = null) : ITrackRepository
+        CancellationTokenSource? cancelDuringMissingBatch = null,
+        AudioFingerprint? existingFingerprint = null,
+        int invalidatedReviewCount = 0,
+        IReadOnlySet<long>? verificationPendingTrackIds = null) : ITrackRepository
     {
         private long _nextId = 100;
         public List<string> UpsertedPaths { get; } = [];
@@ -261,6 +365,10 @@ public sealed class IncrementalLibraryScanServiceTests
         public List<(long TrackId, AudioFingerprint Fingerprint, int Algorithm)> SavedFingerprints { get; } = [];
         public List<(long LibraryId, long RootId, long TrackId, string RelativePath)> Memberships { get; } = [];
         public HashSet<long> MissingFingerprintIds { get; } = missingFingerprintIds?.ToHashSet() ?? [];
+        public List<long> VerificationPendingTrackIds { get; } = [];
+        public List<long> VerificationFailedTrackIds { get; } = [];
+        public List<long> VerifiedTrackIds { get; } = [];
+        public List<long> ContentChangedTrackIds { get; } = [];
 
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
         {
@@ -328,7 +436,39 @@ public sealed class IncrementalLibraryScanServiceTests
         }
 
         public Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default)
-            => Task.FromResult<AudioFingerprint?>(null);
+            => Task.FromResult(existingFingerprint);
+
+        public Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+            => Task.FromResult(verificationPendingTrackIds?.Contains(trackId) == true);
+
+        public Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+        {
+            VerificationPendingTrackIds.Add(trackId);
+            return Task.CompletedTask;
+        }
+
+        public Task MarkContentVerificationFailedAsync(
+            long trackId,
+            CancellationToken cancellationToken = default,
+            string? error = null)
+        {
+            VerificationFailedTrackIds.Add(trackId);
+            return Task.CompletedTask;
+        }
+
+        public Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
+        {
+            VerifiedTrackIds.Add(trackId);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> ConfirmContentChangedAndGetInvalidatedReviewCountAsync(
+            long trackId,
+            CancellationToken cancellationToken = default)
+        {
+            ContentChangedTrackIds.Add(trackId);
+            return Task.FromResult(invalidatedReviewCount);
+        }
     }
 
     private sealed class FakeScanSessionRepository : IScanSessionRepository

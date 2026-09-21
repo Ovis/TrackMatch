@@ -154,7 +154,13 @@ public sealed class LibraryPersistenceTests : IAsyncLifetime
             [new DuplicateGroupRebuildItem(null, [trackA, trackB])],
             TestContext.Current.CancellationToken);
         var group = Assert.Single(await groups.GetByLibraryIdAsync(library.Id, TestContext.Current.CancellationToken));
-        await groups.SetKeepAsync(library.Id, group.Id, trackA, "UserSelected", TestContext.Current.CancellationToken);
+        await groups.SetDerivedKeepStateAsync(
+            library.Id,
+            group.Id,
+            trackA,
+            DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference",
+            TestContext.Current.CancellationToken);
 
         await _repository.RemoveRootAsync(library.Id, removedRoot.Id, TestContext.Current.CancellationToken);
 

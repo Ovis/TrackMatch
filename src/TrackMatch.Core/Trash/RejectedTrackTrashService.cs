@@ -42,6 +42,28 @@ public sealed class RejectedTrackTrashService(
             cancellationToken.ThrowIfCancellationRequested();
             group.Validate();
 
+            var organizationBlocked = false;
+            foreach (var trackId in group.GlobalTrackIds)
+            {
+                if (await trackLookupRepository.IsFileOrganizationBlockedAsync(trackId, cancellationToken))
+                {
+                    organizationBlocked = true;
+                    break;
+                }
+            }
+
+            if (organizationBlocked)
+            {
+                await AddBlockedGroupItemsAsync(
+                    group,
+                    libraryId,
+                    fullTrashRoot,
+                    items,
+                    "音声内容の確認または再評価が完了していないため、安全のため移動を中止しました。",
+                    cancellationToken);
+                continue;
+            }
+
             if (group.KeepStatus != DuplicateGroupKeepStatus.Selected || group.KeepTrackId is null)
             {
                 await AddBlockedGroupItemsAsync(
@@ -71,7 +93,6 @@ public sealed class RejectedTrackTrashService(
                 continue;
             }
 
-            // KeepがLibrary外Trackの場合、現在Libraryの構成TrackはすべてReject候補になる。
             var rejectTrackIds = group.TrackIds
                 .Where(trackId => trackId != keepTrackId)
                 .Distinct()
@@ -151,14 +172,9 @@ public sealed class RejectedTrackTrashService(
                 "現在のライブラリに所属するファイルは、ライブラリ外ファイル用の明示的なごみ箱操作では移動できません。");
         }
 
-        // KeepはLibrary外Trackを指すこともできる。Membershipだけで判定すると、現在Libraryが残すよう指定した
-        // 外部ファイルをこのGlobal操作で消せるため、Projection上のKeepも独立してGuardする。
-        var currentGroup = await groupRepository.GetByTrackIdAsync(trackId, currentLibraryId, cancellationToken);
-        if (currentGroup?.KeepStatus == DuplicateGroupKeepStatus.Selected
-            && currentGroup.KeepTrackId == trackId)
+        if (await trackLookupRepository.IsFileOrganizationBlockedAsync(trackId, cancellationToken))
         {
-            throw new InvalidOperationException(
-                "このファイルは現在のライブラリで残すファイルに指定されているため、ごみ箱へ移動できません。");
+            throw new InvalidOperationException("音声内容の確認または再評価が完了していないため、このファイルはごみ箱へ移動できません。");
         }
 
         var sourcePath = Path.GetFullPath(track.Metadata.Path);

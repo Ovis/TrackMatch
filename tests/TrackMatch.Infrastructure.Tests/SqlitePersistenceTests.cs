@@ -81,6 +81,11 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
         await repository.SaveFingerprintAsync(id, fingerprint, algorithm: 2, TestContext.Current.CancellationToken);
         Assert.DoesNotContain(id, await repository.GetTrackIdsWithoutFingerprintByRootAsync(_libraryId, _rootId, TestContext.Current.CancellationToken));
 
+        // Content VerificationではMetadata更新後に旧Fingerprintを読むため、DurationもFingerprint取得時点の値を保持する。
+        await repository.UpsertMetadataAsync(
+            updated with { Duration = TimeSpan.FromMinutes(5) },
+            TestContext.Current.CancellationToken);
+
         var restored = Assert.IsType<AudioFingerprint>(
             await repository.GetFingerprintAsync(id, TestContext.Current.CancellationToken));
         Assert.Equal(fingerprint.Path, restored.Path);

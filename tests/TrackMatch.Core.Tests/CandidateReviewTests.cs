@@ -14,26 +14,44 @@ public sealed class CandidateReviewTests
     }
 
     [Theory]
-    [InlineData(CandidateReviewDecision.NotDuplicate)]
-    [InlineData(CandidateReviewDecision.ConfirmedDuplicate)]
-    public void GlobalVerdict_ValidDecisionsDoNotRequireKeepTrack(CandidateReviewDecision decision)
+    [InlineData(1L)]
+    [InlineData(2L)]
+    public void ConfirmedDuplicate_WithPairTrackAsPreferred_IsValid(long preferredTrackId)
     {
-        var review = new CandidateReview(
-            CandidatePairKey.Create(1, 2),
-            decision,
-            null);
+        new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, preferredTrackId, null).Validate();
+    }
 
-        review.Validate();
+    [Fact]
+    public void ConfirmedDuplicate_WithoutPreferredTrack_IsRejected()
+    {
+        var review = new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, null, null);
+        Assert.Throws<InvalidOperationException>(review.Validate);
+    }
+
+    [Fact]
+    public void ConfirmedDuplicate_WithTrackOutsidePair_IsRejected()
+    {
+        var review = new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 3, null);
+        Assert.Throws<InvalidOperationException>(review.Validate);
+    }
+
+    [Fact]
+    public void NotDuplicate_WithoutPreferredTrack_IsValid()
+    {
+        new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.NotDuplicate, null, null).Validate();
+    }
+
+    [Fact]
+    public void NotDuplicate_WithPreferredTrack_IsRejected()
+    {
+        var review = new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.NotDuplicate, 1, null);
+        Assert.Throws<InvalidOperationException>(review.Validate);
     }
 
     [Fact]
     public void GlobalVerdict_UnknownDecisionIsRejected()
     {
-        var review = new CandidateReview(
-            CandidatePairKey.Create(1, 2),
-            (CandidateReviewDecision)999,
-            null);
-
+        var review = new CandidateReview(CandidatePairKey.Create(1, 2), (CandidateReviewDecision)999, null, null);
         Assert.Throws<ArgumentOutOfRangeException>(review.Validate);
     }
 
@@ -41,22 +59,11 @@ public sealed class CandidateReviewTests
     public async Task GenerateAsync_ExcludesReviewedPairFromReviewableResultButKeepsMachinePair()
     {
         var values = Enumerable.Repeat(0u, 300).ToArray();
-        var fingerprints = new FakeFingerprintCatalogRepository(
-        [
-            Stored(1, values),
-            Stored(2, values),
-        ]);
+        var fingerprints = new FakeFingerprintCatalogRepository([Stored(1, values), Stored(2, values)]);
         var pairRepository = new FakeCandidatePairRepository();
-        var reviewRepository = new FakeCandidateReviewRepository(
-            new HashSet<CandidatePairKey> { CandidatePairKey.Create(1, 2) });
+        var reviewRepository = new FakeCandidateReviewRepository(new HashSet<CandidatePairKey> { CandidatePairKey.Create(1, 2) });
         var sketcher = new FingerprintSegmentSketcher();
-        var service = new CandidateGenerationService(
-            fingerprints,
-            new FakeSketchRepository(),
-            pairRepository,
-            reviewRepository,
-            sketcher,
-            new CandidatePairGenerator(sketcher));
+        var service = new CandidateGenerationService(fingerprints, new FakeSketchRepository(), pairRepository, reviewRepository, sketcher, new CandidatePairGenerator(sketcher));
 
         var result = await service.GenerateAsync(2, new CandidateGenerationOptions(), TestContext.Current.CancellationToken);
 
@@ -68,11 +75,9 @@ public sealed class CandidateReviewTests
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values)
         => new(id, 2, new AudioFingerprint($"{id}.flac", TimeSpan.FromMinutes(4), values), DateTime.UnixEpoch.AddSeconds(id));
 
-    private sealed class FakeFingerprintCatalogRepository(IReadOnlyList<StoredFingerprint> items)
-        : IFingerprintCatalogRepository
+    private sealed class FakeFingerprintCatalogRepository(IReadOnlyList<StoredFingerprint> items) : IFingerprintCatalogRepository
     {
-        public Task<IReadOnlyList<StoredFingerprint>> GetActiveAsync(int algorithm, CancellationToken cancellationToken = default)
-            => Task.FromResult(items);
+        public Task<IReadOnlyList<StoredFingerprint>> GetActiveAsync(int algorithm, CancellationToken cancellationToken = default) => Task.FromResult(items);
     }
 
     private sealed class FakeSketchRepository : IFingerprintSegmentSketchRepository
@@ -80,46 +85,28 @@ public sealed class CandidateReviewTests
         private readonly Dictionary<long, DateTime> _states = [];
         private readonly Dictionary<long, IReadOnlyCollection<FingerprintSegmentSketch>> _sketches = [];
 
-        public Task<IReadOnlyDictionary<long, DateTime>> GetTrackStatesAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyDictionary<long, DateTime>>(_states);
-
-        public Task<IReadOnlyList<FingerprintSegmentSketch>> GetAllAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<FingerprintSegmentSketch>>(_sketches.Values.SelectMany(items => items).ToArray());
-
+        public Task<IReadOnlyDictionary<long, DateTime>> GetTrackStatesAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<long, DateTime>>(_states);
+        public Task<IReadOnlyList<FingerprintSegmentSketch>> GetAllAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FingerprintSegmentSketch>>(_sketches.Values.SelectMany(items => items).ToArray());
         public Task ReplaceTrackAsync(StoredFingerprint fingerprint, CandidateGenerationOptions options, IReadOnlyCollection<FingerprintSegmentSketch> sketches, CancellationToken cancellationToken = default)
         {
             _states[fingerprint.TrackId] = fingerprint.ExtractedAtUtc;
             _sketches[fingerprint.TrackId] = sketches.ToArray();
             return Task.CompletedTask;
         }
-
-        public Task PruneAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        public Task PruneAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeCandidatePairRepository : ICandidatePairRepository
     {
         public IReadOnlyList<CandidatePair> Pairs { get; private set; } = [];
-
-        public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> newPairs, CancellationToken cancellationToken = default)
-        {
-            Pairs = newPairs.ToArray();
-            return Task.CompletedTask;
-        }
-
-        public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Pairs);
+        public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> newPairs, CancellationToken cancellationToken = default) { Pairs = newPairs.ToArray(); return Task.CompletedTask; }
+        public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult(Pairs);
     }
 
     private sealed class FakeCandidateReviewRepository(IReadOnlySet<CandidatePairKey> excluded) : ICandidateReviewRepository
     {
-        public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
-
-        public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(excluded);
+        public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
+        public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default) => Task.FromResult(excluded);
     }
 }

@@ -35,14 +35,18 @@ public interface IDuplicateGroupRepository
         IReadOnlyCollection<DuplicateGroupRebuildItem> groups,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Keep投影を持ち得るLibrary IDを取得する。</summary>
+    Task<IReadOnlyList<long>> GetLibraryIdsAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<long>>([]);
+
     /// <summary>
-    /// 指定LibraryのGroup Keepを明示的に選択する。
-    /// Library外TrackもGlobal Group構成TrackであればKeepにできる。
+    /// Human Verdictから導出したLibrary固有Keep状態を反映する。
     /// </summary>
-    Task SetKeepAsync(
+    Task SetDerivedKeepStateAsync(
         long libraryId,
         long groupId,
-        long keepTrackId,
+        long? keepTrackId,
+        DuplicateGroupKeepStatus status,
         string changeKind,
         CancellationToken cancellationToken = default);
 }

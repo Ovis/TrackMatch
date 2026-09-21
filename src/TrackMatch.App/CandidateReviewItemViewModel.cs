@@ -31,6 +31,7 @@ public sealed partial class CandidateReviewItemViewModel
     public long TrackIdA => Row.TrackIdA;
     public long TrackIdB => Row.TrackIdB;
     public bool IsReviewed => Row.ReviewDecision is not null;
+    public bool IsHumanVerdictSuspended => Row.IsHumanVerdictSuspended;
     public bool IsReviewSkipped => !IsReviewed && _presentationState.IsReviewSkipped;
     public string? ReviewSkipReason => IsReviewSkipped ? _presentationState.ReviewSkipReason : null;
     public bool IsReReviewRecommended => Row.ReReviewRecommended;
@@ -47,19 +48,36 @@ public sealed partial class CandidateReviewItemViewModel
     public string ReviewResult => Row.ReviewDecision switch
     {
         CandidateReviewDecision.NotDuplicate => AppendReReview("重複ではない"),
-        // Human VerdictはGlobalだが、どのTrackを残すかはLibrary固有DispositionなのでGlobal Verdict表示には含めない。
+        CandidateReviewDecision.ConfirmedDuplicate when Row.PreferredTrackId == Row.TrackIdA
+            => AppendReReview("重複 / Aを優先"),
+        CandidateReviewDecision.ConfirmedDuplicate when Row.PreferredTrackId == Row.TrackIdB
+            => AppendReReview("重複 / Bを優先"),
         CandidateReviewDecision.ConfirmedDuplicate => AppendReReview("重複として確認済"),
         _ when IsReviewSkipped => "レビュー省略",
         _ => "未レビュー",
     };
 
-    public string ReviewOriginText => IsReviewSkipped
-        ? ReviewSkipReason ?? string.Empty
-        : Row.ReviewDecision is null
-            ? string.Empty
-            : string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
-                ? "判定元: 不明"
-                : $"判定元: {Row.ReviewSourceLibraryName}";
+    public string ReviewOriginText
+    {
+        get
+        {
+            if (IsHumanVerdictSuspended)
+            {
+                return string.IsNullOrWhiteSpace(Row.HumanVerdictSuspensionReason)
+                    ? "音声内容の確認が完了していないため判定を一時利用停止中"
+                    : $"音声内容の確認が完了していないため判定を一時利用停止中: {Row.HumanVerdictSuspensionReason}";
+            }
+
+            if (IsReviewSkipped)
+            {
+                return ReviewSkipReason ?? string.Empty;
+            }
+
+            return Row.ReviewDecision is null && Row.IsSupplementalCandidate
+                ? "残すファイルを決定するために追加された比較候補"
+                : string.Empty;
+        }
+    }
 
     public string Reason => Row.Reason ?? "自動判定は未実施";
     public string TitleA => Row.TitleA ?? Path.GetFileNameWithoutExtension(Row.PathA);

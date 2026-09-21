@@ -78,11 +78,11 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             await groupService.SaveReviewAsync(
                 _libraryId,
                 new CandidateReview(
-                    CandidatePairKey.Create(keepId, rejectId),
-                    CandidateReviewDecision.ConfirmedDuplicate,
-                    null),
+                CandidatePairKey.Create(keepId, rejectId),
+                CandidateReviewDecision.ConfirmedDuplicate,
                 keepId,
-                TestContext.Current.CancellationToken);
+                null),
+            TestContext.Current.CancellationToken);
 
             var service = new RejectedTrackTrashService(
                 groups,
@@ -118,7 +118,7 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestoredTrashTrack_ReusesTrackIdButRequiresKeepReviewBeforeTrashCanRunAgain()
+    public async Task RestoredTrashTrack_ReusesTrackIdAndHumanVerdict()
     {
         var libraryRoot = Path.Combine(_directory, "Music");
         var trashRoot = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests.Trash", Guid.NewGuid().ToString("N"));
@@ -157,17 +157,16 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
             await groupService.SaveReviewAsync(
                 otherLibrary.Id,
-                new CandidateReview(CandidatePairKey.Create(keepId, externalId), CandidateReviewDecision.ConfirmedDuplicate, null),
-                keepId,
-                TestContext.Current.CancellationToken);
+                new CandidateReview(CandidatePairKey.Create(keepId, externalId), CandidateReviewDecision.ConfirmedDuplicate, keepId, null),
+            TestContext.Current.CancellationToken);
             await groupService.SaveReviewAsync(
                 otherLibrary.Id,
-                new CandidateReview(CandidatePairKey.Create(keepId, rejectId), CandidateReviewDecision.ConfirmedDuplicate, null),
-                keepId,
-                TestContext.Current.CancellationToken);
+                new CandidateReview(CandidatePairKey.Create(keepId, rejectId), CandidateReviewDecision.ConfirmedDuplicate, keepId, null),
+            TestContext.Current.CancellationToken);
 
             var group = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-            await groups.SetKeepAsync(_libraryId, group.Id, keepId, "UserSelected", TestContext.Current.CancellationToken);
+            await groups.SetDerivedKeepStateAsync(_libraryId, group.Id, keepId, DuplicateGroupKeepStatus.Selected,
+            "DerivedPreference", TestContext.Current.CancellationToken);
 
             var trash = new RejectedTrackTrashService(
                 groups,
@@ -191,17 +190,17 @@ public sealed class RejectedTrackTrashPersistenceTests : IAsyncLifetime
             await groupService.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
 
             var restoredGroup = Assert.Single(await groups.GetByLibraryIdAsync(_libraryId, TestContext.Current.CancellationToken));
-            Assert.Equal(DuplicateGroupKeepStatus.Unselected, restoredGroup.KeepStatus);
-            Assert.Null(restoredGroup.KeepTrackId);
+            Assert.Equal(DuplicateGroupKeepStatus.Selected, restoredGroup.KeepStatus);
+            Assert.Equal(keepId, restoredGroup.KeepTrackId);
 
-            // 旧Keep/Trash判断はCurrentへ自動復元しないため、再確認前のTrash Previewは移動可能0件になる。
+            // 内容同一の同一Trackとして復帰したため、Human Verdictから同じKeepを再導出できる。
             var preview = await trash.ProcessAsync(
                 _libraryId,
                 trashRoot,
                 execute: false,
                 cancellationToken: TestContext.Current.CancellationToken);
-            Assert.Equal(0, preview.ReadyCount);
-            Assert.All(preview.Items, item => Assert.Equal(RejectedTrackMoveStatus.ReviewConflict, item.Status));
+            Assert.Equal(1, preview.ReadyCount);
+            Assert.Contains(preview.Items, item => item.TrackId == rejectId && item.Status == RejectedTrackMoveStatus.Ready);
         }
         finally
         {

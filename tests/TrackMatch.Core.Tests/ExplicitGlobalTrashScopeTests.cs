@@ -33,38 +33,6 @@ public sealed class ExplicitGlobalTrashScopeTests
         Assert.Empty(tracks.MarkedMissing);
     }
 
-    [Fact]
-    public async Task ProcessTrackGloballyAsync_ExternalCurrentKeepIsRejectedBeforePhysicalMove()
-    {
-        var source = Path.Combine(Path.GetTempPath(), "TrackMatch", "external-keep.flac");
-        var trash = Path.Combine(Path.GetTempPath(), "TrackMatch", "Trash");
-        var tracks = new FakeTrackRepository(CreateTrack(1, source), libraryId: 20);
-        var files = new FakeFileOperations(source);
-        var currentProjection = new DuplicateGroup(
-            5,
-            10,
-            1,
-            DuplicateGroupKeepStatus.Selected,
-            [2],
-            [1, 2]);
-        var service = new RejectedTrackTrashService(
-            new FakeGroupRepository(currentProjection),
-            tracks,
-            tracks,
-            files);
-
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ProcessTrackGloballyAsync(
-            10,
-            1,
-            trash,
-            execute: true,
-            cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Contains("残すファイル", exception.Message, StringComparison.Ordinal);
-        Assert.Empty(files.Moves);
-        Assert.Empty(tracks.MarkedMissing);
-    }
-
     private static StoredTrack CreateTrack(long id, string path)
         => new(
             id,
@@ -105,7 +73,13 @@ public sealed class ExplicitGlobalTrashScopeTests
         public Task ReplaceGlobalAsync(IReadOnlyCollection<DuplicateGroupRebuildItem> groups, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task SetKeepAsync(long libraryId, long groupId, long keepTrackId, string changeKind, CancellationToken cancellationToken = default)
+        public Task SetDerivedKeepStateAsync(
+            long libraryId,
+            long groupId,
+            long? keepTrackId,
+            DuplicateGroupKeepStatus status,
+            string changeKind,
+            CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 

@@ -186,33 +186,86 @@ public sealed class LibraryAnalysisWorkflow
                 value.CompletedFiles,
                 value.TotalFiles,
                 $"対象フォルダ {value.RootIndex}/{value.RootCount}")));
-        var scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
+        LibraryRootScanBatchResult scan;
+        try
+        {
+            scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
-        var generationProgress = new Progress<CandidateGenerationProgress>(value =>
-            progress?.Report(new LibraryAnalysisProgress(
-                LibraryAnalysisStage.GeneratingCandidates,
-                value.CompletedCount,
-                value.TotalCount,
-                value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
-        var generation = await GenerateCandidatesAsync(
-            libraryId,
-            cancellationToken: cancellationToken,
-            progress: generationProgress);
+            // Content Changed確定でHuman Verdictが削除された時点から旧Groupを表示・利用し続けない。
+            // Candidate再評価は長時間化し得るため、その完了を待たず残存Verdictだけで派生状態を更新する。
+            var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+            await SynchronizeDuplicateGroupsAsync(scanDatabase, CancellationToken.None);
+        }
+        catch
+        {
+            // Scan途中でキャンセルやDB障害が起きても、それ以前に確定済みのContent Changeだけは派生Groupへ反映する。
+            // 修復用DB自体を開けない場合は、修復例外で元のScan失敗理由を上書きしない。
+            try
+            {
+                var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+                await TrySynchronizeDuplicateGroupsAsync(scanDatabase);
+            }
+            catch
+            {
+                // 元のScan例外を呼び出し元へ返すことを優先する。
+            }
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
-        var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
-            progress?.Report(new LibraryAnalysisProgress(
-                LibraryAnalysisStage.AnalyzingCandidates,
-                value.CompletedPairs,
-                value.TotalPairs,
-                null)));
-        var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+            throw;
+        }
 
-        progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
-        await ClassifyCandidatesAsync(libraryId, cancellationToken);
+        try
+        {
+            var reevaluationDatabase = await OpenDatabaseAsync(cancellationToken);
+            await new SqliteTrackRepository(reevaluationDatabase).MarkReevaluationStartedAsync(libraryId, cancellationToken);
 
-        return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
+            var generationProgress = new Progress<CandidateGenerationProgress>(value =>
+                progress?.Report(new LibraryAnalysisProgress(
+                    LibraryAnalysisStage.GeneratingCandidates,
+                    value.CompletedCount,
+                    value.TotalCount,
+                    value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
+            var generation = await GenerateCandidatesAsync(
+                libraryId,
+                cancellationToken: cancellationToken,
+                progress: generationProgress);
+
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
+            var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
+                progress?.Report(new LibraryAnalysisProgress(
+                    LibraryAnalysisStage.AnalyzingCandidates,
+                    value.CompletedPairs,
+                    value.TotalPairs,
+                    null)));
+            var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+
+            progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
+            await ClassifyCandidatesAsync(libraryId, cancellationToken);
+
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await new SqliteTrackRepository(database).MarkReevaluationCompletedAsync(libraryId, CancellationToken.None);
+            await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+            return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
+        }
+        catch (OperationCanceledException)
+        {
+            // キャンセルは解析障害とは区別する。ReevaluationPendingを維持し、次回Workflowでそのまま再試行する。
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await TrySynchronizeDuplicateGroupsAsync(database);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Content Changed確定後の再評価が途中で失敗した場合は、次回通常Workflowで再試行できるよう状態を残す。
+            // 失敗TrackをKeepやTrash判断へ戻さないため、派生Groupも失敗状態を反映して再同期する。
+            var database = await OpenDatabaseAsync(CancellationToken.None);
+            await new SqliteTrackRepository(database).MarkReevaluationFailedAsync(
+                libraryId,
+                exception.Message,
+                CancellationToken.None);
+            await TrySynchronizeDuplicateGroupsAsync(database);
+            throw;
+        }
     }
 
     private IncrementalLibraryScanService CreateScanService(SqliteDatabase database)

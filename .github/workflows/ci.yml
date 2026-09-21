@@ -39,5 +39,17 @@ jobs:
       - name: Build
         run: dotnet build TrackMatch.slnx --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test --solution TrackMatch.slnx --configuration Release --no-build
+      # 1つのdotnet testに全プロジェクトを渡すと、テストホストが停止した場合に
+      # どのプロジェクトで詰まったか判別できない。プロジェクト単位でタイムアウトを設け、
+      # TRXと詳細ログを常に残してハング箇所を特定できるようにする。
+      - name: Test Core
+        timeout-minutes: 10
+        run: dotnet test --project tests/TrackMatch.Core.Tests/TrackMatch.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Test Infrastructure
+        timeout-minutes: 15
+        run: dotnet test --project tests/TrackMatch.Infrastructure.Tests/TrackMatch.Infrastructure.Tests.csproj --configuration Release --no-build
+
+      - name: Test App
+        timeout-minutes: 10
+        run: dotnet test --project tests/TrackMatch.App.Tests/TrackMatch.App.Tests.csproj --configuration Release --no-build

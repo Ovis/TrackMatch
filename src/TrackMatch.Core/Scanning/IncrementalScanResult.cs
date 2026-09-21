@@ -8,4 +8,10 @@ namespace TrackMatch.Core.Scanning;
 public sealed record IncrementalScanResult(
     long SessionId,
     ScanSessionSummary Summary,
-    IReadOnlyList<IncrementalScanError> Errors);
+    IReadOnlyList<IncrementalScanError> Errors,
+    IReadOnlyList<ContentChangeNotice> ContentChanges);
+
+/// <summary>
+/// Audio Content Change確定によって解除されたHuman Verdict件数を通知する。
+/// </summary>
+public sealed record ContentChangeNotice(string Path, int InvalidatedReviewCount);

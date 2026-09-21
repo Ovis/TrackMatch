@@ -49,7 +49,7 @@ public sealed class SchemaInitializationTests : IDisposable
     [Fact]
     public async Task InitializeAsync_RejectsUnsupportedVersionBeforeCreatingCurrentSchemaTables()
     {
-        var databasePath = Path.Combine(_directory, "version1.db");
+        var databasePath = Path.Combine(_directory, "unsupported-version.db");
         await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
         {
             await connection.OpenAsync(TestContext.Current.CancellationToken);
@@ -58,7 +58,7 @@ public sealed class SchemaInitializationTests : IDisposable
                 CREATE TABLE SchemaInfo (
                     Id INTEGER PRIMARY KEY CHECK (Id = 1),
                     Version INTEGER NOT NULL);
-                INSERT INTO SchemaInfo (Id, Version) VALUES (1, 1);
+                INSERT INTO SchemaInfo (Id, Version) VALUES (1, 2);
                 """;
             await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
@@ -66,7 +66,7 @@ public sealed class SchemaInitializationTests : IDisposable
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new SqliteDatabase(databasePath).InitializeAsync(TestContext.Current.CancellationToken));
 
-        Assert.Contains("期待値: 2, 実際: 1", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("期待値: 1, 実際: 2", exception.Message, StringComparison.Ordinal);
 
         await using var verifyConnection = new SqliteConnection($"Data Source={databasePath}");
         await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);

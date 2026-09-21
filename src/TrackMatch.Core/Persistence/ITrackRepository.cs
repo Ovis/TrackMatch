@@ -69,4 +69,36 @@ public interface ITrackRepository
     Task DeleteFingerprintAsync(long trackId, CancellationToken cancellationToken = default);
 
     Task<AudioFingerprint?> GetFingerprintAsync(long trackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Content Verificationを後続Scanで再試行する必要があるか確認する。</summary>
+    Task<bool> IsContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
+    /// <summary>追加解析開始前に対象TrackのHuman Verdictを一時利用停止し、キャンセル後も再試行対象として残す。</summary>
+    Task MarkContentVerificationPendingAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    /// <summary>追加解析失敗により対象TrackのHuman Verdictを一時利用停止する。</summary>
+    Task MarkContentVerificationFailedAsync(
+        long trackId,
+        CancellationToken cancellationToken = default,
+        string? error = null)
+        => Task.CompletedTask;
+
+    /// <summary>音声内容変更が確定したTrackのContent依存状態を無効化する。</summary>
+    Task ConfirmContentChangedAsync(long trackId, CancellationToken cancellationToken = default)
+        => DeleteFingerprintAsync(trackId, cancellationToken);
+
+    /// <summary>音声内容変更を確定し、自動解除したHuman Verdict件数を返す。</summary>
+    async Task<int> ConfirmContentChangedAndGetInvalidatedReviewCountAsync(
+        long trackId,
+        CancellationToken cancellationToken = default)
+    {
+        await ConfirmContentChangedAsync(trackId, cancellationToken);
+        return 0;
+    }
+
+    /// <summary>音声内容同一を確認し、一時利用停止中のHuman Verdictを再有効化する。</summary>
+    Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }

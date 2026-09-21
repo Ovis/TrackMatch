@@ -54,6 +54,7 @@ public sealed class IncrementalLibraryScanService(
         var updated = 0;
         var removed = 0;
         var errors = new List<IncrementalScanError>();
+        var contentChanges = new List<ContentChangeNotice>();
 
         try
         {
@@ -99,7 +100,8 @@ public sealed class IncrementalLibraryScanService(
                     updated++;
                 }
 
-                var needsFingerprint = contentChanged || missingFingerprintIds.Contains(trackId);
+                var verificationPending = await trackRepository.IsContentVerificationPendingAsync(trackId, cancellationToken);
+                var needsFingerprint = contentChanged || verificationPending || missingFingerprintIds.Contains(trackId);
                 if (!hasMembership && !needsFingerprint)
                 {
                     // 新Membershipが既知Global Trackを再利用した場合は既存Fingerprintも共有する。
@@ -108,13 +110,46 @@ public sealed class IncrementalLibraryScanService(
 
                 if (needsFingerprint)
                 {
+                    var previousFingerprint = contentChanged || verificationPending
+                        ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
+                        : null;
+                    if (contentChanged && !verificationPending)
+                    {
+                        // Metadata更新後に解析がキャンセルされても次回Scanで判定を再開できるよう、
+                        // 長時間Fingerprint解析へ入る前に利用停止と再試行必要状態だけを短いTransactionで確定する。
+                        await trackRepository.MarkContentVerificationPendingAsync(trackId, cancellationToken);
+                    }
+
                     try
                     {
+                        // FileSize/mtimeだけではタグ変更と音声変更を区別できないため、Fingerprintを追加解析してから
+                        // Human Verdictを維持するか無効化するかを確定する。解析中はSQLite Transactionを保持しない。
                         var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
+                        if (contentChanged || verificationPending)
+                        {
+                            if (previousFingerprint is not null && HasSameAudioContent(previousFingerprint, fingerprint))
+                            {
+                                await trackRepository.MarkContentVerifiedAsync(trackId, cancellationToken);
+                            }
+                            else
+                            {
+                                // 旧Fingerprintが無い場合も内容同一を証明できないため、安全側でContent Changedとする。
+                                var invalidatedReviewCount = await trackRepository
+                                    .ConfirmContentChangedAndGetInvalidatedReviewCountAsync(trackId, cancellationToken);
+                                contentChanges.Add(new ContentChangeNotice(fullPath, invalidatedReviewCount));
+                            }
+                        }
+
                         await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
                     {
+                        if (contentChanged || verificationPending)
+                        {
+                            // Decoder/I/O失敗はContent Changedと断定せず、Human Verdictを保持したまま派生計算だけ停止する。
+                            await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None, exception.Message);
+                        }
+
                         errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
                     }
                 }
@@ -138,7 +173,7 @@ public sealed class IncrementalLibraryScanService(
 
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.CompleteAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
-            return new IncrementalScanResult(sessionId, summary, errors);
+            return new IncrementalScanResult(sessionId, summary, errors, contentChanges);
         }
         catch
         {
@@ -147,6 +182,10 @@ public sealed class IncrementalLibraryScanService(
             throw;
         }
     }
+
+    private static bool HasSameAudioContent(AudioFingerprint previous, AudioFingerprint current)
+        => previous.Duration == current.Duration
+            && previous.Values.SequenceEqual(current.Values);
 
     private static bool HasChanged(StoredTrack stored, Models.AudioTrackMetadata current)
         => stored.Metadata.FileSize != current.FileSize
