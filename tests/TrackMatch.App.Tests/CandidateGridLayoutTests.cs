@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using TrackMatch.App.Playback;
 using TrackMatch.App.Quality;
+using TrackMatch.Core.Playback;
 using Xunit;
 
 namespace TrackMatch.App.Tests;
