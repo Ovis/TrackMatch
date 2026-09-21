@@ -380,7 +380,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// </summary>
     /// <param name="databasePath">TrackMatch DatabaseのPath</param>
     /// <param name="libraryId">読み込み対象LibraryのID</param>
-    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidatesForLibraryAsync(
+    private async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidatesForLibraryAsync(
         string databasePath,
         long libraryId)
     {
