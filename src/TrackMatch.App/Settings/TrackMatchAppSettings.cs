@@ -6,7 +6,8 @@
 public sealed record TrackMatchAppSettings(
     long? LastSelectedLibraryId,
     int SimilarityDisplayLowerBoundPercent,
-    string? TrashRoot)
+    string? TrashRoot,
+    bool DetailedLogging)
 {
     /// <summary>
     /// 初期設定を生成する。
@@ -14,5 +15,6 @@ public sealed record TrackMatchAppSettings(
     public static TrackMatchAppSettings Default { get; } = new(
         LastSelectedLibraryId: null,
         SimilarityDisplayLowerBoundPercent: 70,
-        TrashRoot: null);
+        TrashRoot: null,
+        DetailedLogging: false);
 }
