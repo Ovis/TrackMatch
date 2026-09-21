@@ -45,7 +45,9 @@ public partial class NewLibraryDialog : Window
         ErrorText.Text = string.Empty;
         try
         {
-            CreatedLibrary = await _service.CreateLibraryAsync(NameTextBox.Text, _roots.ToArray());
+            var name = NameTextBox.Text;
+            var roots = _roots.ToArray();
+            CreatedLibrary = await Task.Run(() => _service.CreateLibraryAsync(name, roots));
             DialogResult = true;
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
