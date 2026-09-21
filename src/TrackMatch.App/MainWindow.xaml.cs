@@ -365,6 +365,38 @@ public partial class MainWindow : Window
         return false;
     }
 
+    /// <summary>
+    /// 候補行を右クリックした時点でその行を選択し、表示中の詳細とコンテキストメニューの操作対象を一致させる。
+    /// </summary>
+    private void CandidateGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var row = FindVisualAncestor<DataGridRow>(e.OriginalSource as DependencyObject);
+        if (row is null)
+        {
+            return;
+        }
+
+        CandidateGrid.SelectedItem = row.Item;
+        row.Focus();
+    }
+
+    /// <summary>
+    /// 指定したVisual要素から親方向へ探索し、最初に見つかった指定型の要素を返す。
+    /// </summary>
+    private static T? FindVisualAncestor<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is T target)
+            {
+                return target;
+            }
+        }
+
+        return null;
+    }
+
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
         => await _viewModel.ExecuteReviewWithUndoAsync(
             () => ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync));
