@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 1;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -48,7 +48,7 @@ public sealed class SqliteDatabase
         await connection.ExecuteAsync(new CommandDefinition("PRAGMA synchronous = NORMAL;", cancellationToken: cancellationToken));
 
         // Schema作成前にVersion管理状態を確認する。
-        // 既存の旧DBへSchemaInfoだけを後付けすると、旧構造をVersion 2と誤認して以後の障害原因になるため、
+        // 既存の旧DBへSchemaInfoだけを後付けすると、旧構造を現行Versionと誤認して以後の障害原因になるため、
         // Version管理前のTrackMatchテーブルが存在するDBはMigrationせず明示的に拒否する。
         var hasSchemaInfo = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SchemaInfo';",
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 7)
+            VALUES (1, 1)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
