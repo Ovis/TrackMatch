@@ -2,7 +2,7 @@
 
 [日本語](README.ja.md)
 
-TrackMatch is a Windows desktop application for finding acoustically duplicate or closely related audio tracks in a music library and helping you decide which file to keep.
+TrackMatch is a Windows desktop application for finding duplicate files that appear to contain the same audio, as well as very similar audio tracks, and helping you decide which file to keep.
 
 TrackMatch compares audio using Chromaprint fingerprints, so tracks can still be matched when file names, tags, loudness, mastering, or leading/trailing silence differ. It currently supports FLAC and MP3 files.
 
@@ -39,7 +39,7 @@ The Windows release archive includes the required Chromaprint `fpcalc` files and
 6. Check the resulting duplicate groups and the file selected to remain.
 7. If necessary, configure the Trash folder and explicitly move files selected for removal.
 
-Moving files to Trash is never performed merely by reviewing a candidate. File organization is a separate explicit operation.
+Marking files as duplicates does not immediately delete or move them. At that point, TrackMatch only records the duplicate decision. The actual files are moved only when you later explicitly run the Move to Trash operation.
 
 ## How TrackMatch organizes duplicates
 
@@ -100,4 +100,4 @@ dotnet run --project src/TrackMatch.App
 
 TrackMatch is distributed under the MIT License. See [LICENSE](LICENSE).
 
-The Windows release also contains third-party components with their own license terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+ZIP archives distributed through GitHub Releases include the third-party components required to run TrackMatch. Each of these components is subject to its own license terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
