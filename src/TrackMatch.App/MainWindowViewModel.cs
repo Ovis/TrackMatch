@@ -47,10 +47,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>候補レビュー画面のViewModelを生成する。</summary>
     /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
     /// <param name="loggerFactory">Application層を含む診断Loggerを生成するFactory</param>
-    public MainWindowViewModel(ISynchronizedPlaybackService playbackService, ILoggerFactory loggerFactory)
+    public MainWindowViewModel(ISynchronizedPlaybackService playbackService, ILoggerFactory? loggerFactory = null)
     {
         Playback = new SynchronizedPlaybackControlsViewModel(playbackService ?? throw new ArgumentNullException(nameof(playbackService)));
-        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<MainWindowViewModel>();
     }
 
