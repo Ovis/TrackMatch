@@ -73,14 +73,9 @@ public sealed partial class CandidateReviewItemViewModel
                 return ReviewSkipReason ?? string.Empty;
             }
 
-            if (Row.ReviewDecision is null)
-            {
-                return Row.IsSupplementalCandidate ? "残すファイルを決定するために追加された比較候補" : string.Empty;
-            }
-
-            return string.IsNullOrWhiteSpace(Row.ReviewSourceLibraryName)
-                ? "判定元: 不明"
-                : $"判定元: {Row.ReviewSourceLibraryName}";
+            return Row.ReviewDecision is null && Row.IsSupplementalCandidate
+                ? "残すファイルを決定するために追加された比較候補"
+                : string.Empty;
         }
     }
 
