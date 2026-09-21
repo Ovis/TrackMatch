@@ -1,4 +1,7 @@
-﻿using TrackMatch.Core.Candidates;
+﻿using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
@@ -19,6 +22,7 @@ public sealed class LibraryAnalysisWorkflow
     private readonly string _databasePath;
     private readonly string _fpcalcPath;
     private readonly int _fingerprintAlgorithm;
+    private readonly ILogger<LibraryAnalysisWorkflow> _logger;
 
     /// <summary>
     /// Library分析Workflowを生成する。
@@ -29,7 +33,8 @@ public sealed class LibraryAnalysisWorkflow
     public LibraryAnalysisWorkflow(
         string databasePath,
         string fpcalcPath = "fpcalc",
-        int fingerprintAlgorithm = 2)
+        int fingerprintAlgorithm = 2,
+        ILogger<LibraryAnalysisWorkflow>? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(fpcalcPath);
@@ -41,6 +46,7 @@ public sealed class LibraryAnalysisWorkflow
         _databasePath = databasePath;
         _fpcalcPath = fpcalcPath;
         _fingerprintAlgorithm = fingerprintAlgorithm;
+        _logger = logger ?? NullLogger<LibraryAnalysisWorkflow>.Instance;
     }
 
     /// <summary>
@@ -179,6 +185,8 @@ public sealed class LibraryAnalysisWorkflow
         IProgress<LibraryAnalysisProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        var workflowStopwatch = Stopwatch.StartNew();
+        _logger.LogInformation("分析Workflow開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
         progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.Scanning, 0, null, null));
         var scanProgress = new Progress<LibraryScanBatchProgress>(value =>
             progress?.Report(new LibraryAnalysisProgress(
@@ -189,12 +197,17 @@ public sealed class LibraryAnalysisWorkflow
         LibraryRootScanBatchResult scan;
         try
         {
+            var stageStopwatch = Stopwatch.StartNew();
+            _logger.LogInformation("スキャン開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
+            _logger.LogInformation("スキャン完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, stageStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             // Content Changed確定でHuman Verdictが削除された時点から旧Groupを表示・利用し続けない。
             // Candidate再評価は長時間化し得るため、その完了を待たず残存Verdictだけで派生状態を更新する。
             var scanDatabase = await OpenDatabaseAsync(CancellationToken.None);
+            _logger.LogDebug("スキャン後Duplicate Group再同期開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             await SynchronizeDuplicateGroupsAsync(scanDatabase, CancellationToken.None);
+            _logger.LogDebug("スキャン後Duplicate Group再同期完了 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
         }
         catch
         {
@@ -218,6 +231,8 @@ public sealed class LibraryAnalysisWorkflow
             var reevaluationDatabase = await OpenDatabaseAsync(cancellationToken);
             await new SqliteTrackRepository(reevaluationDatabase).MarkReevaluationStartedAsync(libraryId, cancellationToken);
 
+            var generationStopwatch = Stopwatch.StartNew();
+            _logger.LogInformation("候補生成開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.GeneratingCandidates, 0, null, null));
             var generationProgress = new Progress<CandidateGenerationProgress>(value =>
                 progress?.Report(new LibraryAnalysisProgress(
@@ -229,7 +244,10 @@ public sealed class LibraryAnalysisWorkflow
                 libraryId,
                 cancellationToken: cancellationToken,
                 progress: generationProgress);
+            _logger.LogInformation("候補生成完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, generationStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
+            var analysisStopwatch = Stopwatch.StartNew();
+            _logger.LogInformation("詳細比較開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
             var analysisProgress = new Progress<CandidateAnalysisProgress>(value =>
                 progress?.Report(new LibraryAnalysisProgress(
@@ -238,13 +256,18 @@ public sealed class LibraryAnalysisWorkflow
                     value.TotalPairs,
                     null)));
             var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+            _logger.LogInformation("詳細比較完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, analysisStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
+            var classificationStopwatch = Stopwatch.StartNew();
+            _logger.LogInformation("自動分類開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
             await ClassifyCandidatesAsync(libraryId, cancellationToken);
+            _logger.LogInformation("自動分類完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, classificationStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             var database = await OpenDatabaseAsync(CancellationToken.None);
             await new SqliteTrackRepository(database).MarkReevaluationCompletedAsync(libraryId, CancellationToken.None);
             await SynchronizeDuplicateGroupsAsync(database, CancellationToken.None);
+            _logger.LogInformation("分析Workflow完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, workflowStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
             return new LibraryScopedAnalysisWorkflowResult(scan, generation, analysis);
         }
         catch (OperationCanceledException)
