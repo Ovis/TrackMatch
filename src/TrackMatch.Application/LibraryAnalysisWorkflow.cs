@@ -97,7 +97,13 @@ public sealed class LibraryAnalysisWorkflow
                     scanMayHaveCommittedChanges = true;
                     var rootStopwatch = Stopwatch.StartNew();
                     _logger.LogInformation("Rootスキャン開始 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Path={Path}", library.Id, root.Id, index + 1, library.Roots.Count, root.Path);
-                    var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
+                    var rootResult = await service.ScanAsync(
+                        library.Id,
+                        root.Id,
+                        root.Path,
+                        cancellationToken,
+                        rootProgress,
+                        value => LogScanDiagnostic(library.Id, root.Id, index + 1, value));
                     results.Add(rootResult);
                     _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
                 }
@@ -303,6 +309,41 @@ public sealed class LibraryAnalysisWorkflow
             await TrySynchronizeDuplicateGroupsAsync(database);
             throw;
         }
+    }
+
+    /// <summary>
+    /// UI Dispatcherを経由しないScan診断通知を、その場でログへ記録する。
+    /// </summary>
+    private void LogScanDiagnostic(
+        long libraryId,
+        long rootId,
+        int rootIndex,
+        IncrementalScanDiagnostic diagnostic)
+    {
+        var stage = diagnostic.Stage switch
+        {
+            IncrementalScanDiagnosticStage.CountingFilesStarted => "事前ファイル数カウント開始",
+            IncrementalScanDiagnosticStage.CountingFilesCompleted => "事前ファイル数カウント完了",
+            IncrementalScanDiagnosticStage.LoadingStoredTracksStarted => "保存済みTrack読込開始",
+            IncrementalScanDiagnosticStage.LoadingStoredTracksCompleted => "保存済みTrack読込完了",
+            IncrementalScanDiagnosticStage.EnumeratingFilesStarted => "実ファイル列挙開始",
+            IncrementalScanDiagnosticStage.EnumeratingFilesProgress => "実ファイル処理進捗",
+            IncrementalScanDiagnosticStage.EnumeratingFilesCompleted => "実ファイル列挙完了",
+            IncrementalScanDiagnosticStage.MarkingMissingStarted => "Missing確定開始",
+            IncrementalScanDiagnosticStage.MarkingMissingCompleted => "Missing確定完了",
+            _ => diagnostic.Stage.ToString(),
+        };
+
+        _logger.LogDebug(
+            "{Stage} LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex} Completed={Completed} Count={Count} ElapsedMs={ElapsedMs} ThreadId={ThreadId}",
+            stage,
+            libraryId,
+            rootId,
+            rootIndex,
+            diagnostic.CompletedFiles,
+            diagnostic.Count,
+            diagnostic.ElapsedMilliseconds,
+            Environment.CurrentManagedThreadId);
     }
 
     private IncrementalLibraryScanService CreateScanService(SqliteDatabase database)
