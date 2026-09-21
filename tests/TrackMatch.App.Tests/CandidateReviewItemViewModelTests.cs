@@ -5,7 +5,7 @@ using Xunit;
 namespace TrackMatch.App.Tests;
 
 /// <summary>
-/// Candidate一覧でGlobal Human Verdictと永続化しないレビュー省略状態を正しく表示することを検証する。
+/// 候補一覧で共有レビュー判定と永続化しないレビュー省略状態を正しく表示することを検証する。
 /// </summary>
 public sealed class CandidateReviewItemViewModelTests
 {
@@ -44,7 +44,7 @@ public sealed class CandidateReviewItemViewModelTests
         Assert.True(viewModel.IsReviewSkipped);
         Assert.False(viewModel.IsReviewed);
         Assert.Equal("レビュー省略", viewModel.ReviewResult);
-        Assert.Contains("Keep決定に不要", viewModel.ReviewOriginText);
+        Assert.Contains("残すファイルの決定には不要", viewModel.ReviewOriginText);
     }
 
     [Fact]
