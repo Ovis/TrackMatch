@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
 
 permissions:
   contents: write
@@ -29,17 +29,59 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
+            Write-Error 'Tag must use v<major>.<minor>.<patch> or v<major>.<minor>.<patch>-<prerelease>.'
+            exit 1
+          }
+
+          "value=$version" >> $env:GITHUB_OUTPUT
+          if ($version.Contains('-')) {
+            'prerelease=true' >> $env:GITHUB_OUTPUT
+          }
+          else {
+            'prerelease=false' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Restore tools
+        run: dotnet tool restore
+
       - name: Restore
         run: dotnet restore TrackMatch.slnx
 
-      - name: Test
-        run: dotnet test --solution TrackMatch.slnx --configuration Release
+      - name: Verify C# formatting
+        run: dotnet format TrackMatch.slnx --no-restore --verify-no-changes
 
-      - name: Publish Windows x64
+      - name: Verify XAML formatting
+        run: dotnet xstyler -c Settings.XamlStyler -r -d ./src --passive
+
+      - name: Build
+        run: dotnet build TrackMatch.slnx --configuration Release --no-restore -p:ContinuousIntegrationBuild=true -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Test Core
+        timeout-minutes: 10
+        run: dotnet test --project tests/TrackMatch.Core.Tests/TrackMatch.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Test Infrastructure
+        timeout-minutes: 15
+        run: dotnet test --project tests/TrackMatch.Infrastructure.Tests/TrackMatch.Infrastructure.Tests.csproj --configuration Release --no-build
+
+      - name: Test App
+        timeout-minutes: 10
+        run: dotnet test --project tests/TrackMatch.App.Tests/TrackMatch.App.Tests.csproj --configuration Release --no-build
+
+      - name: Restore Windows x64 runtime
+        run: dotnet restore src/TrackMatch.App/TrackMatch.App.csproj --runtime win-x64
+
+      - name: Publish Windows x64 self-contained
         shell: pwsh
         run: |
-          # 配布対象はWPFアプリのみ。fpcalcとnative依存は同じ配布ディレクトリへまとめる。
-          dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained false -o artifacts/package
+          # 利用者側で.NET Runtimeを別途用意しなくても起動できるよう、Windows x64向けランタイムを同梱する。
+          dotnet publish src/TrackMatch.App/TrackMatch.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/package -p:Version=${{ steps.version.outputs.value }} -p:InformationalVersion=${{ steps.version.outputs.value }} -p:ContinuousIntegrationBuild=true -p:RepositoryCommit=${{ github.sha }}
           Copy-Item THIRD_PARTY_NOTICES.md artifacts/package/THIRD_PARTY_NOTICES.md
 
       - name: Download and verify libsndfile
@@ -144,8 +186,8 @@ jobs:
       - name: Create release archive
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          $archive = "TrackMatch-$tag-win-x64.zip"
+          $version = '${{ steps.version.outputs.value }}'
+          $archive = "TrackMatch-v$version-win-x64.zip"
           Compress-Archive -Path artifacts/package/* -DestinationPath "artifacts/$archive" -CompressionLevel Optimal
           "RELEASE_ARCHIVE=artifacts/$archive" >> $env:GITHUB_ENV
 
@@ -154,11 +196,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create '${{ github.ref_name }}' `
-            $env:RELEASE_ARCHIVE `
-            $env:CHROMAPRINT_SOURCE `
-            $env:FFMPEG_SOURCE `
-            $env:FFMPEG_BUILD_SOURCE `
-            $env:LIBSNDFILE_SOURCE `
-            --generate-notes `
-            --title 'TrackMatch ${{ github.ref_name }}'
+          $arguments = @(
+            'release', 'create', '${{ github.ref_name }}',
+            $env:RELEASE_ARCHIVE,
+            $env:CHROMAPRINT_SOURCE,
+            $env:FFMPEG_SOURCE,
+            $env:FFMPEG_BUILD_SOURCE,
+            $env:LIBSNDFILE_SOURCE,
+            '--generate-notes',
+            '--title', 'TrackMatch ${{ github.ref_name }}'
+          )
+          if ('${{ steps.version.outputs.prerelease }}' -eq 'true') {
+            $arguments += '--prerelease'
+          }
+          & gh @arguments
