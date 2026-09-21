@@ -60,25 +60,30 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(CanUndoLastReview));
         try
         {
-            var database = new SqliteDatabase(DatabasePath);
-            await database.InitializeAsync();
-            var reviews = new SqliteCandidateReviewRepository(database);
-            var tracks = new SqliteTrackLookupRepository(database);
-            var groups = new SqliteDuplicateGroupRepository(database);
-            var service = new DuplicateGroupService(reviews, tracks, groups);
-
-            // Undoの正本はHuman Verdictだけである。Keepやレビュー省略は復元後のVerdict集合から再導出する。
-            if (snapshot.Review is null)
+            // UndoはHuman Verdict復元後にGlobal Group再同期と補完Candidate生成まで行うため、
+            // 一連の派生状態更新をUI Thread外で完結させる。
+            await Task.Run(async () =>
             {
-                await service.DeleteReviewAsync(snapshot.LibraryId, snapshot.Pair);
-            }
-            else
-            {
-                await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review);
-            }
+                var database = new SqliteDatabase(DatabasePath);
+                await database.InitializeAsync();
+                var reviews = new SqliteCandidateReviewRepository(database);
+                var tracks = new SqliteTrackLookupRepository(database);
+                var groups = new SqliteDuplicateGroupRepository(database);
+                var service = new DuplicateGroupService(reviews, tracks, groups);
 
-            // UndoでKeep候補が再び複数になった場合も、通常レビュー後と同じく仕分けを完遂できる比較手段を補完する。
-            await EnsureSupplementalCandidatesAsync(database, snapshot.LibraryId);
+                // Undoの正本はHuman Verdictだけである。Keepやレビュー省略は復元後のVerdict集合から再導出する。
+                if (snapshot.Review is null)
+                {
+                    await service.DeleteReviewAsync(snapshot.LibraryId, snapshot.Pair);
+                }
+                else
+                {
+                    await service.SaveReviewAsync(snapshot.LibraryId, snapshot.Review);
+                }
+
+                // UndoでKeep候補が再び複数になった場合も、通常レビュー後と同じく仕分けを完遂できる比較手段を補完する。
+                await EnsureSupplementalCandidatesAsync(database, snapshot.LibraryId);
+            });
 
             // Undo自体を再Undoする履歴は持たない。復元に成功してから1段履歴を消費する。
             _lastReviewUndo = null;
@@ -94,11 +99,15 @@ public sealed partial class MainWindowViewModel
 
     private async Task<ReviewUndoSnapshot> CaptureReviewUndoSnapshotAsync(long libraryId, CandidatePairKey pair)
     {
-        var database = new SqliteDatabase(DatabasePath);
-        await database.InitializeAsync();
-        var reviews = new SqliteCandidateReviewRepository(database);
-        var review = (await reviews.GetAllAsync()).SingleOrDefault(item => item.Pair == pair);
-        return new ReviewUndoSnapshot(libraryId, pair, review);
+        // Snapshot取得もレビュー件数に比例するDB読込を伴うため、UI Threadを占有させない。
+        return await Task.Run(async () =>
+        {
+            var database = new SqliteDatabase(DatabasePath);
+            await database.InitializeAsync();
+            var reviews = new SqliteCandidateReviewRepository(database);
+            var review = (await reviews.GetAllAsync()).SingleOrDefault(item => item.Pair == pair);
+            return new ReviewUndoSnapshot(libraryId, pair, review);
+        });
     }
 
     /// <summary>
