@@ -23,9 +23,7 @@ TrackMatchは無保証で提供されます。適用法令で認められる範�
 ### リリース版を利用する場合
 
 - Windows 10 または Windows 11
-- .NET 10 Desktop Runtime（x64）
-
-GitHub Releasesで配布しているZIPファイルには、TrackMatchの動作に必要なChromaprint `fpcalc`やネイティブ音声ライブラリなどがあらかじめ同梱されています。
+GitHub Releasesで配布しているZIPファイルには、.NETランタイムを含むTrackMatchの動作に必要なファイルと、Chromaprint `fpcalc`やネイティブ音声ライブラリなどがあらかじめ同梱されています。追加のランタイムをインストールする必要はありません。
 
 ### 開発する場合
 
