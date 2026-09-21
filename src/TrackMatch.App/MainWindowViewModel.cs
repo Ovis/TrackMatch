@@ -612,7 +612,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var count = progress.TotalCount is { } total ? $" — {progress.CompletedCount:N0} / {total:N0}" : progress.CompletedCount > 0 ? $" — {progress.CompletedCount:N0}件処理済み" : string.Empty;
         return progress.Stage switch
         {
-            LibraryAnalysisStage.Scanning => $"スキャン中:{detail}{count}{(progress.TotalCount is not null ? "曲" : string.Empty)}",
+            LibraryAnalysisStage.Scanning => FormatScanProgress(progress),
             LibraryAnalysisStage.GeneratingCandidates => $"候補生成中:{detail}{count}",
             LibraryAnalysisStage.AnalyzingCandidates => $"詳細比較中:{detail}{count}{(progress.TotalCount is not null ? "件" : string.Empty)}",
             _ => "分析中...",
