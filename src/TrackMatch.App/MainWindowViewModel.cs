@@ -612,11 +612,27 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var count = progress.TotalCount is { } total ? $" — {progress.CompletedCount:N0} / {total:N0}" : progress.CompletedCount > 0 ? $" — {progress.CompletedCount:N0}件処理済み" : string.Empty;
         return progress.Stage switch
         {
-            LibraryAnalysisStage.Scanning => $"スキャン中:{detail}{count}{(progress.TotalCount is not null ? "曲" : string.Empty)}",
+            LibraryAnalysisStage.Scanning => FormatScanProgress(progress),
             LibraryAnalysisStage.GeneratingCandidates => $"候補生成中:{detail}{count}",
             LibraryAnalysisStage.AnalyzingCandidates => $"詳細比較中:{detail}{count}{(progress.TotalCount is not null ? "件" : string.Empty)}",
             _ => "分析中...",
         };
+    }
+
+    /// <summary>
+    /// スキャン中のフォルダー位置と、そのフォルダー内の曲処理数を区別して表示する。
+    /// </summary>
+    private static string FormatScanProgress(LibraryAnalysisProgress progress)
+    {
+        var folder = string.IsNullOrWhiteSpace(progress.Detail)
+            ? string.Empty
+            : $" {progress.Detail.Replace("対象フォルダ ", "フォルダー ", StringComparison.Ordinal)}";
+        var tracks = progress.TotalCount is { } total
+            ? $"　曲 {progress.CompletedCount:N0}/{total:N0}"
+            : progress.CompletedCount > 0
+                ? $"　{progress.CompletedCount:N0}曲処理済み"
+                : string.Empty;
+        return $"スキャン中:{folder}{tracks}";
     }
 
     private string FormatAnalysisSummary(string prefix, IReadOnlyCollection<ScanSessionSummary> summaries)
