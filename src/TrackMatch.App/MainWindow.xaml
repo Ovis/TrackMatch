@@ -161,10 +161,10 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   ItemsSource="{Binding Candidates}"
+                                  PreviewMouseRightButtonDown="CandidateGrid_PreviewMouseRightButtonDown"
                                   SelectedItem="{Binding SelectedCandidate}"
                                   SelectionMode="Single"
-                                  SelectionUnit="FullRow"
-                                  PreviewMouseRightButtonDown="CandidateGrid_PreviewMouseRightButtonDown">
+                                  SelectionUnit="FullRow">
                             <DataGrid.ContextMenu>
                                 <ContextMenu>
                                     <MenuItem Click="NotDuplicate_Click"
