@@ -119,6 +119,44 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<RootScanTrackState>> GetRootScanStateAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        const string sql = """
+            SELECT lt.LibraryId, lt.TrackId, lt.RootId, lt.RelativePath,
+                   lt.CandidateGenerationPending,
+                   t.Id, t.Path, t.FileSize, t.LastWriteTimeUtcTicks, t.DurationTicks,
+                   t.ArtistsJson, t.Title, t.Album, t.TrackNumber, t.DiscNumber, t.GenresJson, t.Year,
+                   t.Format, t.Codec, t.BitrateKbps, t.SampleRateHz, t.BitDepth, t.Channels, t.IsMissing,
+                   CASE WHEN f.TrackId IS NULL THEN 0 ELSE 1 END AS HasFingerprint,
+                   CASE WHEN t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed')
+                        THEN 1 ELSE 0 END AS VerificationPending
+            FROM LibraryTracks lt
+            INNER JOIN Tracks t ON t.Id = lt.TrackId
+            LEFT JOIN Fingerprints f ON f.TrackId = lt.TrackId
+            WHERE lt.LibraryId = @LibraryId AND lt.RootId = @RootId
+            ORDER BY lt.RelativePath COLLATE NOCASE;
+            """;
+        var rows = await connection.QueryAsync<RootScanTrackRow>(new CommandDefinition(
+            sql,
+            new { LibraryId = libraryId, RootId = rootId },
+            cancellationToken: cancellationToken));
+        return rows.Select(row => new RootScanTrackState(
+            new StoredLibraryTrack(
+                row.LibraryId,
+                row.TrackId,
+                row.RootId,
+                row.RelativePath,
+                row.CandidateGenerationPending != 0),
+            ToStoredTrack(row),
+            row.HasFingerprint != 0,
+            row.VerificationPending != 0)).ToArray();
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>> GetByRootAsync(
         long libraryId,
         long rootId,
@@ -801,6 +839,37 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         long? BitDepth,
         long? Channels,
         long IsMissing) : TrackRow(
+            Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+            ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
+            Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing);
+
+    private sealed record RootScanTrackRow(
+        long LibraryId,
+        long TrackId,
+        long RootId,
+        string RelativePath,
+        long CandidateGenerationPending,
+        long Id,
+        string Path,
+        long FileSize,
+        long LastWriteTimeUtcTicks,
+        long DurationTicks,
+        string ArtistsJson,
+        string? Title,
+        string? Album,
+        long? TrackNumber,
+        long? DiscNumber,
+        string GenresJson,
+        long? Year,
+        string? Format,
+        string? Codec,
+        long? BitrateKbps,
+        long? SampleRateHz,
+        long? BitDepth,
+        long? Channels,
+        long IsMissing,
+        long HasFingerprint,
+        long VerificationPending) : TrackRow(
             Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
             ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
             Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing);
