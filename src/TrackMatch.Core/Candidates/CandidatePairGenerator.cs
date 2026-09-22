@@ -126,7 +126,7 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
                 // upper indexで見つかったPairがlower側でも距離1以内なら、lower探索ですでに同じhitを集計済み。
                 // 全Segment PairのHashSetを保持せず、この局所判定で二重計上だけを除外して大規模Libraryのメモリを抑える。
                 if (skipWhenLowerHalfAlreadyMatched
-                    && BitOperations.PopCount(unchecked((ushort)current.Hash) ^ unchecked((ushort)other.Hash)) <= 1)
+                    && BitOperations.PopCount(unchecked((uint)((ushort)current.Hash ^ (ushort)other.Hash))) <= 1)
                 {
                     continue;
                 }
