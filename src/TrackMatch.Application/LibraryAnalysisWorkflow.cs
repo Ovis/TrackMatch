@@ -85,6 +85,7 @@ public sealed class LibraryAnalysisWorkflow
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var root = library.Roots[index];
+                    scanTiming.Reset();
                     var rootStopwatch = Stopwatch.StartNew();
                     var rootProgress = new Progress<IncrementalScanProgress>(value =>
                     {
@@ -462,6 +463,14 @@ public sealed class LibraryAnalysisWorkflow
         {
             Interlocked.Increment(ref _fingerprintCount);
             Interlocked.Add(ref _fingerprintElapsedTicks, elapsedTicks);
+        }
+
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _metadataCount, 0);
+            Interlocked.Exchange(ref _metadataElapsedTicks, 0);
+            Interlocked.Exchange(ref _fingerprintCount, 0);
+            Interlocked.Exchange(ref _fingerprintElapsedTicks, 0);
         }
 
         public ScanTimingSnapshot Snapshot()
