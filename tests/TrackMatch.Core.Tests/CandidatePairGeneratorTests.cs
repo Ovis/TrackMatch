@@ -197,6 +197,24 @@ public sealed class CandidatePairGeneratorTests
         Assert.Equal(2, pair.TrackIdB);
     }
 
+    [Fact]
+    public void GenerateFromSketches_CanceledTokenStopsCpuBoundSearch()
+    {
+        var sketches = Enumerable.Range(0, 1000)
+            .Select(index => new FingerprintSegmentSketch(index + 1, 0, 0u))
+            .ToArray();
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            generator.GenerateFromSketches(
+                sketches,
+                null,
+                new CandidateGenerationOptions(),
+                cancellationToken: cancellation.Token));
+    }
+
     private static StoredFingerprint CreateFingerprint(long trackId, uint value)
         => new(
             trackId,
