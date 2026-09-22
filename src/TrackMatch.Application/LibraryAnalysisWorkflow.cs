@@ -326,7 +326,8 @@ public sealed class LibraryAnalysisWorkflow
             reviewRepository,
             sketcher,
             new CandidatePairGenerator(sketcher),
-            new SqliteCandidateGenerationWorkRepository(database, libraryId));
+            new SqliteCandidateGenerationWorkRepository(database, libraryId),
+            new SqliteCandidateGenerationStateRepository(database, libraryId));
     }
 
     private static CandidateAnalysisService CreateCandidateAnalysisService(
