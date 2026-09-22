@@ -114,7 +114,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(1, pair.TrackIdA);
         Assert.Equal(2, pair.TrackIdB);
@@ -145,7 +145,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(1, pair.MinimumSegmentHashDistance);
     }
@@ -172,7 +172,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(1, pair.MinimumSegmentHashDistance);
     }
@@ -191,7 +191,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(1, pair.TrackIdA);
         Assert.Equal(2, pair.TrackIdB);
