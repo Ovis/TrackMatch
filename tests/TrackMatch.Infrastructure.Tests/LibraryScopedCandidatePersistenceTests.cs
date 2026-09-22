@@ -325,6 +325,28 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateGenerationCommit_ConfigChangeInvalidatesOtherLibraryCompletionState()
+    {
+        var originalState = CandidateGenerationState.Create(2, new CandidateGenerationOptions());
+        var libraryAState = new SqliteCandidateGenerationStateRepository(_database, _libraryAId);
+        var libraryBState = new SqliteCandidateGenerationStateRepository(_database, _libraryBId);
+        await libraryAState.SaveAsync(originalState, TestContext.Current.CancellationToken);
+        await libraryBState.SaveAsync(originalState, TestContext.Current.CancellationToken);
+
+        var changedState = originalState with { MinimumDominantOffsetHits = 4 };
+        await new SqliteCandidatePairRepository(_database, _libraryAId).CommitAsync(
+            fullRebuild: true,
+            affectedTrackIds: [_a1, _a2],
+            pairs: [],
+            completedPendingTrackIds: [_a1, _a2],
+            changedState,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(changedState, await libraryAState.GetAsync(TestContext.Current.CancellationToken));
+        Assert.Null(await libraryBState.GetAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_RejectsCrossLibraryPair()
     {
         var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
