@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 1;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 2)
+            VALUES (1, 1)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
