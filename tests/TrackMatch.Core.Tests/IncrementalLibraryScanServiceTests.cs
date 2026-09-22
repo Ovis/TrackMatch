@@ -546,6 +546,12 @@ public sealed class IncrementalLibraryScanServiceTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlySet<long>>(MissingFingerprintIds);
 
+        public Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<long>>(verificationPendingTrackIds?.ToHashSet() ?? []);
+
         public Task EnsureMembershipAsync(
             long libraryId,
             long rootId,
