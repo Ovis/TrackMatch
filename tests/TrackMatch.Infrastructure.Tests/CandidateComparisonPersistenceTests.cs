@@ -1,6 +1,7 @@
 ﻿using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
@@ -26,6 +27,8 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         var trackRepository = new SqliteTrackRepository(_database);
         _trackIdA = await trackRepository.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         _trackIdB = await trackRepository.UpsertMetadataAsync(CreateMetadata("b.flac"), TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(_trackIdA, CreateFingerprint("a.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(_trackIdB, CreateFingerprint("b.flac"), 2, TestContext.Current.CancellationToken);
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
             [new CandidatePair(_trackIdA, _trackIdB, 1)],
             TestContext.Current.CancellationToken);
@@ -39,7 +42,7 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CandidateComparisonRepository_ReplacesMeasurementsAndCascadeDeletesThem()
+    public async Task CandidateComparisonRepository_PreservesCacheWhenCandidateIsRemoved()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
         var comparison = CreateComparison(0.987);
@@ -56,7 +59,8 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
 
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync([], TestContext.Current.CancellationToken);
         count = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM CandidateComparisons;");
-        Assert.Equal(0, count);
+        Assert.Equal(1, count);
+        Assert.Empty(await repository.GetAllAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -161,6 +165,9 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
             0.9,
             0.8,
             0.95);
+
+    private AudioFingerprint CreateFingerprint(string fileName)
+        => new(Path.Combine(_directory, fileName), TimeSpan.FromMinutes(4), [0x12345678u, 0x23456789u]);
 
     private AudioTrackMetadata CreateMetadata(string fileName)
         => new(
