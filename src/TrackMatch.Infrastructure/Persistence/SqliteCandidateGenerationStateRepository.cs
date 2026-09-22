@@ -40,6 +40,35 @@ public sealed class SqliteCandidateGenerationStateRepository(SqliteDatabase data
     {
         ArgumentNullException.ThrowIfNull(state);
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // CandidatePairsはGlobalなので、別構成のLibrary Stateを残すと同じGlobal集合を
+        // 複数の設定で正常生成済みと誤認する。現在構成と不一致の完了マーカーは先に失効させる。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM CandidateGenerationStates
+            WHERE LibraryId <> @LibraryId
+              AND (
+                    CandidateGenerationAlgorithmVersion <> @CandidateGenerationAlgorithmVersion
+                 OR FingerprintAlgorithm <> @FingerprintAlgorithm
+                 OR SegmentLengthItems <> @SegmentLengthItems
+                 OR SegmentStrideItems <> @SegmentStrideItems
+                 OR MaximumSegmentHashHammingDistance <> @MaximumSegmentHashHammingDistance
+                 OR MinimumDominantOffsetHits <> @MinimumDominantOffsetHits);
+            """,
+            new
+            {
+                LibraryId = libraryId,
+                state.CandidateGenerationAlgorithmVersion,
+                state.FingerprintAlgorithm,
+                state.SegmentLengthItems,
+                state.SegmentStrideItems,
+                state.MaximumSegmentHashHammingDistance,
+                state.MinimumDominantOffsetHits,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO CandidateGenerationStates (
@@ -70,7 +99,9 @@ public sealed class SqliteCandidateGenerationStateRepository(SqliteDatabase data
                 state.MinimumDominantOffsetHits,
                 CompletedAtUtcTicks = DateTime.UtcNow.Ticks,
             },
+            transaction,
             cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private sealed record CandidateGenerationStateRow(
