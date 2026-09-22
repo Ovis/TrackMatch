@@ -11,55 +11,13 @@ public sealed class SqliteCandidateComparisonRepository(
     SqliteDatabase database,
     long? libraryId = null) : ICandidateComparisonRepository
 {
-    public async Task ReplaceAllAsync(
+    public Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateComparison> comparisons,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(comparisons);
-
-        await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        if (libraryId is null)
-        {
-            // Missing Trackを含むComparisonは今回の比較対象ではないため、Active Pairだけを置換する。
-            // 同Content復帰時に再利用できるMachine Cacheを、全件置換APIが誤って削除しないようにする。
-            await connection.ExecuteAsync(new CommandDefinition(
-                """
-                DELETE FROM CandidateComparisons
-                WHERE EXISTS (
-                        SELECT 1 FROM Tracks a
-                        WHERE a.Id = CandidateComparisons.TrackIdA AND a.IsMissing = 0)
-                  AND EXISTS (
-                        SELECT 1 FROM Tracks b
-                        WHERE b.Id = CandidateComparisons.TrackIdB AND b.IsMissing = 0);
-                """,
-                transaction: transaction,
-                cancellationToken: cancellationToken));
-        }
-        else
-        {
-            // Library MembershipはMissing後も残るため、Membership条件だけで削除するとMissing Cacheまで失われる。
-            // 現在利用可能なPairだけを今回の置換対象とする。
-            await connection.ExecuteAsync(new CommandDefinition(
-                """
-                DELETE FROM CandidateComparisons
-                WHERE EXISTS (
-                        SELECT 1 FROM LibraryTracks a
-                        INNER JOIN Tracks ta ON ta.Id = a.TrackId AND ta.IsMissing = 0
-                        WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidateComparisons.TrackIdA)
-                  AND EXISTS (
-                        SELECT 1 FROM LibraryTracks b
-                        INNER JOIN Tracks tb ON tb.Id = b.TrackId AND tb.IsMissing = 0
-                        WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidateComparisons.TrackIdB);
-                """,
-                new { LibraryId = libraryId },
-                transaction,
-                cancellationToken: cancellationToken));
-        }
-
-        await EnsureComparisonsInScopeAsync(connection, transaction, comparisons, cancellationToken);
-        await UpsertCoreAsync(connection, transaction, comparisons, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        // ComparisonはCandidate集合より長寿命のCacheとして扱うため、全件置換でも過去結果は削除しない。
+        // Current判定はCandidate membership・Fingerprint世代・Comparison Versionを読み出し時に検証する。
+        return UpsertAsync(comparisons, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -95,8 +53,13 @@ public sealed class SqliteCandidateComparisonRepository(
             SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
                    c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
             FROM CandidateComparisons c
+            INNER JOIN CandidatePairs p ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
             INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
             INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = c.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = c.FingerprintBExtractedAtUtcTicks
             WHERE c.ComparisonVersion = @ComparisonVersion
               AND (
                     @LibraryId IS NULL
@@ -125,8 +88,13 @@ public sealed class SqliteCandidateComparisonRepository(
         const string sql = """
             SELECT c.TrackIdA, c.TrackIdB, c.ComparedAtUtcTicks
             FROM CandidateComparisons c
+            INNER JOIN CandidatePairs p ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
             INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
             INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = c.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = c.FingerprintBExtractedAtUtcTicks
             WHERE c.ComparisonVersion = @ComparisonVersion
               AND (
                     @LibraryId IS NULL
@@ -202,11 +170,14 @@ public sealed class SqliteCandidateComparisonRepository(
             INSERT INTO CandidateComparisons (
                 TrackIdA, TrackIdB, Similarity, BestOffsetItems, BestOffsetTicks,
                 MatchedItems, MatchedDurationTicks, CoverageA, CoverageB, DurationRatio,
-                ComparisonVersion, ComparedAtUtcTicks)
-            VALUES (
+                ComparisonVersion, FingerprintAExtractedAtUtcTicks, FingerprintBExtractedAtUtcTicks,
+                ComparedAtUtcTicks)
+            SELECT
                 @TrackIdA, @TrackIdB, @Similarity, @BestOffsetItems, @BestOffsetTicks,
                 @MatchedItems, @MatchedDurationTicks, @CoverageA, @CoverageB, @DurationRatio,
-                @ComparisonVersion, @ComparedAtUtcTicks)
+                @ComparisonVersion, fa.ExtractedAtUtcTicks, fb.ExtractedAtUtcTicks, @ComparedAtUtcTicks
+            FROM Fingerprints fa, Fingerprints fb
+            WHERE fa.TrackId = @TrackIdA AND fb.TrackId = @TrackIdB
             ON CONFLICT (TrackIdA, TrackIdB) DO UPDATE SET
                 Similarity = excluded.Similarity,
                 BestOffsetItems = excluded.BestOffsetItems,
@@ -217,6 +188,8 @@ public sealed class SqliteCandidateComparisonRepository(
                 CoverageB = excluded.CoverageB,
                 DurationRatio = excluded.DurationRatio,
                 ComparisonVersion = excluded.ComparisonVersion,
+                FingerprintAExtractedAtUtcTicks = excluded.FingerprintAExtractedAtUtcTicks,
+                FingerprintBExtractedAtUtcTicks = excluded.FingerprintBExtractedAtUtcTicks,
                 ComparedAtUtcTicks = excluded.ComparedAtUtcTicks;
             """;
         var comparedAt = DateTime.UtcNow.Ticks;
