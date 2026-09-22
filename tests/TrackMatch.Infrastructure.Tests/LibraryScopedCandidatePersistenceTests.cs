@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.Sqlite;
+﻿using Dapper;
+using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
