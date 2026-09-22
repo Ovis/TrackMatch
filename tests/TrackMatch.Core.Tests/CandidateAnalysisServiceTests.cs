@@ -90,6 +90,33 @@ public sealed class CandidateAnalysisServiceTests
         Assert.Single(comparisonRepository.Comparisons);
     }
 
+
+    [Fact]
+    public async Task AnalyzeAsync_CheckpointsCompletedComparisonsBeforeLaterCancellation()
+    {
+        const int checkpointSize = 500;
+        var extractedAt = new DateTime(2026, 9, 11, 0, 0, 0, DateTimeKind.Utc);
+        var pairs = Enumerable.Range(2, checkpointSize + 1)
+            .Select(trackId => new CandidatePair(1, trackId, 0))
+            .ToArray();
+        var fingerprints = Enumerable.Range(1, checkpointSize + 2)
+            .Select(trackId => Stored(trackId, [1u, 2u, 3u, 4u], extractedAt))
+            .ToArray();
+        using var cancellation = new CancellationTokenSource();
+        var comparisonRepository = new CancellingComparisonRepository(cancellation, checkpointSize);
+        var service = new CandidateAnalysisService(
+            new FakeFingerprintCatalogRepository(fingerprints),
+            new FakeCandidatePairRepository(pairs),
+            comparisonRepository,
+            new FingerprintComparer());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.AnalyzeAsync(2, cancellation.Token));
+
+        Assert.Equal(checkpointSize, comparisonRepository.Comparisons.Count);
+        Assert.Equal(1, comparisonRepository.UpsertCount);
+    }
+
     private static StoredFingerprint Stored(long id, IReadOnlyList<uint> values, DateTime extractedAt)
         => new(id, 2, new AudioFingerprint($"{id}.flac", TimeSpan.FromMinutes(4), values), extractedAt);
 
@@ -107,6 +134,46 @@ public sealed class CandidateAnalysisServiceTests
 
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(pairs);
+    }
+
+
+    /// <summary>
+    /// 最初のCheckpoint保存直後にCancelし、そこまでの比較結果が永続化境界へ渡されたことを検証する。
+    /// </summary>
+    private sealed class CancellingComparisonRepository(
+        CancellationTokenSource cancellation,
+        int expectedCheckpointSize) : ICandidateComparisonRepository
+    {
+        public List<CandidateComparison> Comparisons { get; } = [];
+
+        public int UpsertCount { get; private set; }
+
+        public Task ReplaceAllAsync(
+            IReadOnlyCollection<CandidateComparison> comparisons,
+            CancellationToken cancellationToken = default)
+            => UpsertAsync(comparisons, cancellationToken);
+
+        public Task UpsertAsync(
+            IReadOnlyCollection<CandidateComparison> comparisons,
+            CancellationToken cancellationToken = default)
+        {
+            Comparisons.AddRange(comparisons);
+            UpsertCount++;
+            if (comparisons.Count == expectedCheckpointSize)
+            {
+                cancellation.Cancel();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<CandidateComparison>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidateComparison>>(Comparisons);
+
+        public Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<CandidatePairKey, DateTime>>(
+                new Dictionary<CandidatePairKey, DateTime>());
     }
 
     private sealed class FakeComparisonRepository(
