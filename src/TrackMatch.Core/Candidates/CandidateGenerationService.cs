@@ -123,7 +123,7 @@ public sealed class CandidateGenerationService(
         }
         else
         {
-            // PendingはFingerprint/Sketchが既知でも、新しいLibrary MembershipやGeneration Version変更によって
+            // PendingはFingerprint/Sketchが既知でも、新しいLibrary Membershipなどによって
             // このLibrary内の組合せ探索だけが未完了なTrackを表すため、changed Trackと同じ起点集合へ含める。
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
