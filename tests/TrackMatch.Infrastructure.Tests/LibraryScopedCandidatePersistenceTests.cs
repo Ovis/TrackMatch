@@ -233,7 +233,7 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CandidatePairRepository_RegenerationPreservesReviewedPairAndComparison()
+    public async Task CandidatePairRepository_RegenerationRemovesCandidateButPreservesReviewAndComparisonCache()
     {
         var pair = CandidatePairKey.Create(_a1, _a2);
         var pairs = new SqliteCandidatePairRepository(_database, _libraryAId);
@@ -247,21 +247,25 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
             new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
             TestContext.Current.CancellationToken);
 
-        // Generation Version更新などで新GeneratorがこのPairを候補に返さなくても、
-        // Human Verdictとそれを表示するMachine Current Stateは保持する。
+        // 新GeneratorがこのPairを候補に返さなくても、Candidate行だけを現在集合から外し、
+        // Human Verdictと再利用可能なMachine Comparison Cache自体は保持する。
         await pairs.ReplaceForTracksAsync(
             [_a1, _a2],
             [],
             TestContext.Current.CancellationToken);
 
-        var persistedPair = Assert.Single(await pairs.GetAllAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(pair, CandidatePairKey.Create(persistedPair.TrackIdA, persistedPair.TrackIdB));
-        var persistedComparison = Assert.Single(await new SqliteCandidateComparisonRepository(_database, _libraryAId)
+        Assert.Empty(await pairs.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await new SqliteCandidateComparisonRepository(_database, _libraryAId)
             .GetAllAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(pair, CandidatePairKey.Create(persistedComparison.TrackIdA, persistedComparison.TrackIdB));
-        var report = Assert.Single(await new SqliteCandidateReviewReportRepository(_database)
-            .GetAsync(_libraryAId, TestContext.Current.CancellationToken));
-        Assert.Equal(CandidateReviewDecision.NotDuplicate, report.ReviewDecision);
+
+        await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var comparisonCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM CandidateComparisons WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
+            new { pair.TrackIdA, pair.TrackIdB });
+        Assert.Equal(1, comparisonCount);
+        var reviewed = await new SqliteCandidateReviewRepository(_database, _libraryAId)
+            .GetExcludedPairKeysAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(pair, reviewed);
     }
 
     [Fact]
