@@ -136,6 +136,7 @@ public sealed class SqliteCandidateComparisonRepository(
             """
             SELECT COUNT(*)
             FROM Tracks t
+            INNER JOIN Fingerprints f ON f.TrackId = t.Id
             WHERE t.Id IN @TrackIds
               AND t.IsMissing = 0
               AND (
@@ -151,7 +152,7 @@ public sealed class SqliteCandidateComparisonRepository(
         {
             // Missing中の既存Comparison Cacheは保持するが、新しいCurrent結果を書き込むことは許可しない。
             // Scan/Trash等と解析処理が競合しても、古い音源に対する結果が復帰後のCurrentへ混入しないための境界である。
-            throw new InvalidOperationException("Missingまたは現在LibraryのMembership外TrackをCandidate Comparisonとして保存できません。");
+            throw new InvalidOperationException("Fingerprintが存在しない、Missing、または現在LibraryのMembership外TrackをCandidate Comparisonとして保存できません。");
         }
     }
 
