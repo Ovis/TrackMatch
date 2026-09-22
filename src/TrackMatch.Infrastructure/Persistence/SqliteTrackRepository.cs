@@ -173,6 +173,28 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        const string sql = """
+            SELECT lt.TrackId
+            FROM LibraryTracks lt
+            INNER JOIN Tracks t ON t.Id = lt.TrackId
+            WHERE lt.LibraryId = @LibraryId
+              AND lt.RootId = @RootId
+              AND t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed');
+            """;
+        var ids = await connection.QueryAsync<long>(new CommandDefinition(
+            sql,
+            new { LibraryId = libraryId, RootId = rootId },
+            cancellationToken: cancellationToken));
+        return ids.ToHashSet();
+    }
+
+    /// <inheritdoc />
     public async Task EnsureMembershipAsync(
         long libraryId,
         long rootId,
