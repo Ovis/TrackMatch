@@ -77,7 +77,7 @@ public sealed class MissingTrackResurrectionTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>>(
             [
-                (new StoredLibraryTrack(libraryId, stored.Id, rootId, Path.Combine("Album", "01.flac"), false, null), stored),
+                (new StoredLibraryTrack(libraryId, stored.Id, rootId, Path.Combine("Album", "01.flac"), false), stored),
             ]);
 
         public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootAsync(
