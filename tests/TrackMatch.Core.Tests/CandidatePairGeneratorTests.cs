@@ -122,31 +122,32 @@ public sealed class CandidatePairGeneratorTests
     }
 
     [Fact]
-    public void GenerateFromSketches_DominantOffsetUsesMostHitsThenMinimumDistance()
+    public void GenerateFromSketches_DominantOffsetUsesMostHitsBeforeMinimumDistance()
     {
         var sketches = new[]
         {
-            new FingerprintSegmentSketch(1, 0, 3u),
-            new FingerprintSegmentSketch(1, 1, 3u),
-            new FingerprintSegmentSketch(1, 2, 3u),
-            new FingerprintSegmentSketch(1, 10, 0u),
-            new FingerprintSegmentSketch(1, 11, 0u),
-            new FingerprintSegmentSketch(1, 12, 0u),
-            new FingerprintSegmentSketch(1, 13, 0u),
-            new FingerprintSegmentSketch(2, 0, 0u),
-            new FingerprintSegmentSketch(2, 1, 0u),
-            new FingerprintSegmentSketch(2, 2, 0u),
-            new FingerprintSegmentSketch(2, 5, 0u),
-            new FingerprintSegmentSketch(2, 6, 0u),
-            new FingerprintSegmentSketch(2, 7, 0u),
-            new FingerprintSegmentSketch(2, 8, 0u),
+            // offset=0は3hitかつ最小距離0。
+            new FingerprintSegmentSketch(1, 0, 0x00000000u),
+            new FingerprintSegmentSketch(1, 1, 0xffffffffu),
+            new FingerprintSegmentSketch(1, 2, 0xaaaaaaaau),
+            new FingerprintSegmentSketch(2, 0, 0x00000000u),
+            new FingerprintSegmentSketch(2, 1, 0xfffffffcu),
+            new FingerprintSegmentSketch(2, 2, 0xaaaaaaa9u),
+            // offset=5は4hitで、すべて距離1。hit数を優先してこちらを採用する。
+            new FingerprintSegmentSketch(1, 10, 0x55555554u),
+            new FingerprintSegmentSketch(1, 11, 0xcccccccdu),
+            new FingerprintSegmentSketch(1, 12, 0x33333332u),
+            new FingerprintSegmentSketch(1, 13, 0xf0f0f0f1u),
+            new FingerprintSegmentSketch(2, 5, 0x55555555u),
+            new FingerprintSegmentSketch(2, 6, 0xccccccccu),
+            new FingerprintSegmentSketch(2, 7, 0x33333333u),
+            new FingerprintSegmentSketch(2, 8, 0xf0f0f0f0u),
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
         var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
 
-        // offset=5は4hit、offset=0は3hitなので、距離が小さいoffset=0ではなくhit数の多いoffsetを採用する。
-        Assert.Equal(0, pair.MinimumSegmentHashDistance);
+        Assert.Equal(1, pair.MinimumSegmentHashDistance);
     }
 
     [Fact]
