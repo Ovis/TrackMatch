@@ -41,11 +41,11 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         var idA = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "A.flac"), "Artist A", "Title A", "Album A", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idA, Fingerprint("A.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idA, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "A.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var idB = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "B.flac"), "Artist B", "Title B", "Album B", "Soundtrack"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idB, Fingerprint("B.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idB, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "B.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
 
         var pairRepository = new SqliteCandidatePairRepository(_database);
         await pairRepository.ReplaceAllAsync(
@@ -82,11 +82,11 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         var idA = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "stable-A.flac"), "Artist", "A", "Album", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idA, Fingerprint("A.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idA, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "A.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var idB = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "stable-B.flac"), "Artist", "B", "Album", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idB, Fingerprint("B.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idB, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "B.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var pair = CandidatePairKey.Create(idA, idB);
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
             [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
@@ -134,11 +134,11 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         var idA = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "old-A.flac"), "Artist", "A", "Album", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idA, Fingerprint("A.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idA, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "A.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var idB = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "old-B.flac"), "Artist", "B", "Album", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idB, Fingerprint("B.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idB, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "B.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var pair = CandidatePairKey.Create(idA, idB);
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
             [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
@@ -173,11 +173,11 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
         var idA = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "unclassified-a.flac"), "Artist", "Same", "Album 1", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idA, Fingerprint("A.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idA, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "A.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         var idB = await trackRepository.UpsertMetadataAsync(
             Metadata(Path.Combine(_directory, "unclassified-b.flac"), "Artist", "Same", "Album 2", "J-POPS"),
             TestContext.Current.CancellationToken);
-        await trackRepository.SaveFingerprintAsync(idB, Fingerprint("B.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(idB, new TrackMatch.Core.Fingerprinting.AudioFingerprint(Path.Combine(_directory, "B.flac"), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         await trackRepository.EnsureMembershipAsync(
             _libraryId,
             _rootId,
