@@ -87,6 +87,9 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         Assert.Empty(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1L, await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM CandidateComparisons WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB;",
+            new { trackIdA = pair.TrackIdA, trackIdB = pair.TrackIdB }));
         Assert.Equal(1L, await ScalarAsync(
             connection,
             "SELECT COUNT(*) FROM CandidateReviewHistory WHERE TrackIdA = $id OR TrackIdB = $id;",
