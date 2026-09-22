@@ -12,6 +12,9 @@ public sealed class CandidateAnalysisService(
     ICandidateComparisonRepository comparisonRepository,
     FingerprintComparer comparer)
 {
+    // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
+    // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
+    private const int ComparisonCheckpointSize = 500;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
     /// </summary>
@@ -77,10 +80,17 @@ public sealed class CandidateAnalysisService(
                 CalculateDurationRatio(a.Fingerprint.Duration, b.Fingerprint.Duration)));
             completed++;
             progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
+
+            if (changedComparisons.Count >= ComparisonCheckpointSize)
+            {
+                await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+                changedComparisons.Clear();
+            }
         }
 
+        var analyzed = completed - reused - skipped;
         await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
-        return new CandidateAnalysisResult(pairs.Count, changedComparisons.Count, reused, skipped);
+        return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
     }
 
     private static double CalculateDurationRatio(TimeSpan a, TimeSpan b)
