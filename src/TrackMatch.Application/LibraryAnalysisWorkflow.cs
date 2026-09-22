@@ -100,7 +100,7 @@ public sealed class LibraryAnalysisWorkflow
                         {
                             var timing = scanTiming.Snapshot();
                             _logger.LogInformation(
-                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
+                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
                                 library.Id,
                                 root.Id,
                                 value.CompletedFiles,
@@ -129,7 +129,7 @@ public sealed class LibraryAnalysisWorkflow
                     _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
                     var timing = scanTiming.Snapshot();
                     _logger.LogInformation(
-                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
+                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
                         library.Id,
                         root.Id,
                         timing.MetadataCount,
