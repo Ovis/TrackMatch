@@ -293,6 +293,30 @@ public sealed class IncrementalLibraryScanServiceTests
         Assert.Equal([false], repository.MissingBatchCancellationStates);
     }
 
+    [Fact]
+    public async Task ScanAsync_LimitsConcurrentFingerprintExtractions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var results = Enumerable.Range(1, 6)
+            .Select(index => LibraryScanResult.Success(Metadata(Path.Combine(root, $"track-{index}.flac"), 100 + index, index)))
+            .ToArray();
+        var extractor = new ConcurrencyTrackingFingerprintExtractor(expectedConcurrency: 3);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner(results),
+            new FakeTrackRepository([]),
+            new FakeScanSessionRepository(),
+            extractor,
+            2,
+            maxConcurrentFingerprintExtractions: 3);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var result = await service.ScanAsync(1, 1, root, timeout.Token);
+
+        Assert.Equal(3, extractor.MaximumConcurrency);
+        Assert.Equal(6, result.Summary.ProcessedFiles);
+        Assert.Equal(6, extractor.CompletedCount);
+    }
+
     private static StoredTrack Stored(long id, AudioTrackMetadata metadata)
         => new(id, metadata, false);
 
@@ -331,6 +355,54 @@ public sealed class IncrementalLibraryScanServiceTests
         {
             yield return first;
             throw new IOException("enumeration failed");
+        }
+    }
+
+    /// <summary>
+    /// 指定数のFingerprint生成が同時実行されるまで完了を待機し、bounded並列数を決定的に検証する。
+    /// </summary>
+    private sealed class ConcurrencyTrackingFingerprintExtractor(int expectedConcurrency) : IFingerprintExtractor
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _currentConcurrency;
+        private int _maximumConcurrency;
+        private int _completedCount;
+
+        public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+        public int CompletedCount => Volatile.Read(ref _completedCount);
+
+        public async Task<AudioFingerprint> ExtractAsync(string path, CancellationToken cancellationToken = default)
+        {
+            var current = Interlocked.Increment(ref _currentConcurrency);
+            UpdateMaximum(current);
+            if (current >= expectedConcurrency)
+            {
+                _release.TrySetResult();
+            }
+
+            try
+            {
+                await _release.Task.WaitAsync(cancellationToken);
+                return new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _currentConcurrency);
+                Interlocked.Increment(ref _completedCount);
+            }
+        }
+
+        private void UpdateMaximum(int current)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref _maximumConcurrency);
+                if (current <= observed || Interlocked.CompareExchange(ref _maximumConcurrency, current, observed) == observed)
+                {
+                    return;
+                }
+            }
         }
     }
 
