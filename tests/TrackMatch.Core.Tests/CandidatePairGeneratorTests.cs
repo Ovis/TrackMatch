@@ -76,7 +76,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions());
+        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(pairs);
     }
@@ -95,7 +95,7 @@ public sealed class CandidatePairGeneratorTests
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
-        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions());
+        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions(), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(pairs);
     }
