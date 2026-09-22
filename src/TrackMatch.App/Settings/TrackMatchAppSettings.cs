@@ -7,7 +7,8 @@ public sealed record TrackMatchAppSettings(
     long? LastSelectedLibraryId,
     int SimilarityDisplayLowerBoundPercent,
     string? TrashRoot,
-    bool DetailedLogging)
+    bool DetailedLogging,
+    int MaxConcurrentFingerprintExtractions)
 {
     /// <summary>
     /// 初期設定を生成する。
@@ -16,5 +17,6 @@ public sealed record TrackMatchAppSettings(
         LastSelectedLibraryId: null,
         SimilarityDisplayLowerBoundPercent: 70,
         TrashRoot: null,
-        DetailedLogging: false);
+        DetailedLogging: false,
+        MaxConcurrentFingerprintExtractions: 4);
 }
