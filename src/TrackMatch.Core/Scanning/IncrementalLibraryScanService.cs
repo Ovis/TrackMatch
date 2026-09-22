@@ -62,6 +62,7 @@ public sealed class IncrementalLibraryScanService(
         var removed = 0;
         var errors = new List<IncrementalScanError>();
         var contentChanges = new List<ContentChangeNotice>();
+        var pendingFingerprints = new List<PendingFingerprintExtraction>(maxConcurrentFingerprintExtractions);
 
         try
         {
@@ -71,8 +72,6 @@ public sealed class IncrementalLibraryScanService(
                 entry => Path.GetFullPath(entry.Track.Metadata.Path),
                 StringComparer.OrdinalIgnoreCase);
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            var pendingFingerprints = new List<PendingFingerprintExtraction>(maxConcurrentFingerprintExtractions);
 
             foreach (var result in scanner.Scan(fullRootPath, cancellationToken))
             {
@@ -186,9 +185,30 @@ public sealed class IncrementalLibraryScanService(
         }
         catch
         {
+            // 呼び出し元へ元の失敗理由を返す前に、同じCancellationTokenで停止中のfpcalc Taskをすべて観測する。
+            // 観測せずにScanを抜けると、並列Taskの例外が後から未観測例外として残る可能性がある。
+            await ObservePendingFingerprintTasksAsync(pendingFingerprints);
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.FailAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 中断時に残っているFingerprint生成Taskをすべて観測する。
+    /// </summary>
+    private static async Task ObservePendingFingerprintTasksAsync(IReadOnlyCollection<PendingFingerprintExtraction> pending)
+    {
+        foreach (var item in pending)
+        {
+            try
+            {
+                await item.Task;
+            }
+            catch
+            {
+                // Scanを中断させた元の例外を優先するため、並列Task側の後続例外は観測だけ行う。
+            }
         }
     }
 
