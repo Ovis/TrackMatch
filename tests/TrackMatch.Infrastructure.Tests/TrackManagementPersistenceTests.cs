@@ -75,6 +75,21 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         await new SqliteCandidateComparisonRepository(_database, _libraryId).UpsertAsync(
             [CreateComparison(trackA, trackB)],
             TestContext.Current.CancellationToken);
+        await using (var seedConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        await using (var seedCommand = seedConnection.CreateCommand())
+        {
+            seedCommand.CommandText = """
+                INSERT INTO CandidateQualityComparisons (
+                    TrackIdA, TrackIdB, ComparisonVersion, Status,
+                    ComparedAtUtcTicks)
+                VALUES ($trackIdA, $trackIdB, 1, 'Completed', $ticks);
+                """;
+            seedCommand.Parameters.AddWithValue("$trackIdA", pair.TrackIdA);
+            seedCommand.Parameters.AddWithValue("$trackIdB", pair.TrackIdB);
+            seedCommand.Parameters.AddWithValue("$ticks", DateTime.UtcNow.Ticks);
+            await seedCommand.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
         var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
         await reviews.SaveAsync(
             new CandidateReview(
@@ -97,6 +112,10 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         Assert.Equal(1L, await ScalarPairAsync(
             connection,
             "SELECT COUNT(*) FROM CandidateComparisons WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB;",
+            pair));
+        Assert.Equal(0L, await ScalarPairAsync(
+            connection,
+            "SELECT COUNT(*) FROM CandidateQualityComparisons WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB;",
             pair));
         Assert.Equal(1L, await ScalarAsync(
             connection,
