@@ -521,6 +521,26 @@ public sealed class IncrementalLibraryScanServiceTests
         public List<long> VerifiedTrackIds { get; } = [];
         public List<long> ContentChangedTrackIds { get; } = [];
 
+        public async Task<PreparedTrackScanState> PrepareTrackForScanAsync(
+            AudioTrackMetadata metadata,
+            long libraryId,
+            long rootId,
+            string relativePath,
+            CancellationToken cancellationToken = default)
+        {
+            var trackId = await UpsertMetadataAsync(metadata, cancellationToken);
+            await EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+
+            // Production実装と同じく、既存Fingerprintの有無とVerification状態をまとめて返す。
+            // Test Doubleでもこの状態を再現しないと、既存Fingerprintがすべて欠落扱いになってしまう。
+            var hasFingerprint = !MissingFingerprintIds.Contains(trackId)
+                && (initialTracks.Any(track => track.Id == trackId) || existingFingerprint is not null);
+            return new PreparedTrackScanState(
+                trackId,
+                hasFingerprint,
+                verificationPendingTrackIds?.Contains(trackId) == true);
+        }
+
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
         {
             UpsertedPaths.Add(metadata.Path);
