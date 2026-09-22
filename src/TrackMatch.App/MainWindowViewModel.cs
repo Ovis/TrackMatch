@@ -224,7 +224,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         try
         {
             var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
-            var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath, logger: _loggerFactory.CreateLogger<LibraryAnalysisWorkflow>());
+            var workflow = new LibraryAnalysisWorkflow(
+                DatabasePath,
+                fpcalcPath,
+                maxConcurrentFingerprintExtractions: _settings.MaxConcurrentFingerprintExtractions,
+                logger: _loggerFactory.CreateLogger<LibraryAnalysisWorkflow>());
             var progress = new Progress<LibraryAnalysisProgress>(value => AnalysisStatusText = FormatAnalysisProgress(value));
             _logger.LogInformation("ライブラリ分析を開始する LibraryId={LibraryId} ThreadId={ThreadId}", library.Id, Environment.CurrentManagedThreadId);
             // Workflow内部には同期ファイル列挙やCPU処理が含まれる。asyncメソッドをUI Threadから直接呼ぶだけでは
@@ -682,7 +686,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
-        _settings = new TrackMatchAppSettings(SelectedLibrary?.Id, SimilarityDisplayLowerBoundPercent, string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot, _settings.DetailedLogging);
+        _settings = new TrackMatchAppSettings(
+            SelectedLibrary?.Id,
+            SimilarityDisplayLowerBoundPercent,
+            string.IsNullOrWhiteSpace(TrashRoot) ? null : TrashRoot,
+            _settings.DetailedLogging,
+            _settings.MaxConcurrentFingerprintExtractions);
         try { await _settingsStore.SaveAsync(_settings); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { StatusText = $"設定保存失敗: {exception.Message}"; }
     }
