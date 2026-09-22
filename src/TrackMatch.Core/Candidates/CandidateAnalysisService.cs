@@ -1,4 +1,7 @@
-﻿using TrackMatch.Core.Comparison;
+﻿using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Candidates;
@@ -10,11 +13,13 @@ public sealed class CandidateAnalysisService(
     IFingerprintCatalogRepository fingerprintCatalog,
     ICandidatePairRepository candidatePairRepository,
     ICandidateComparisonRepository comparisonRepository,
-    FingerprintComparer comparer)
+    FingerprintComparer comparer,
+    ILogger<CandidateAnalysisService>? logger = null)
 {
     // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
     // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
     private const int ComparisonCheckpointSize = 500;
+    private readonly ILogger<CandidateAnalysisService> _logger = logger ?? NullLogger<CandidateAnalysisService>.Instance;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
     /// </summary>
@@ -36,6 +41,10 @@ public sealed class CandidateAnalysisService(
         var fingerprintsByTrackId = fingerprints.ToDictionary(item => item.TrackId);
         var comparedAtByPair = await comparisonRepository.GetComparedAtUtcAsync(cancellationToken);
         var changedComparisons = new List<CandidateComparison>();
+        var checkpointStopwatch = Stopwatch.StartNew();
+        var checkpointComparisonElapsed = TimeSpan.Zero;
+        var checkpointCompared = 0;
+        var checkpointMaximumComparisonElapsed = TimeSpan.Zero;
         var reused = 0;
         var skipped = 0;
         var completed = 0;
@@ -66,7 +75,15 @@ public sealed class CandidateAnalysisService(
                 continue;
             }
 
+            var comparisonStopwatch = Stopwatch.StartNew();
             var result = comparer.Compare(a.Fingerprint, b.Fingerprint);
+            comparisonStopwatch.Stop();
+            checkpointComparisonElapsed += comparisonStopwatch.Elapsed;
+            checkpointCompared++;
+            if (comparisonStopwatch.Elapsed > checkpointMaximumComparisonElapsed)
+            {
+                checkpointMaximumComparisonElapsed = comparisonStopwatch.Elapsed;
+            }
             changedComparisons.Add(new CandidateComparison(
                 pair.TrackIdA,
                 pair.TrackIdB,
@@ -83,13 +100,55 @@ public sealed class CandidateAnalysisService(
 
             if (changedComparisons.Count >= ComparisonCheckpointSize)
             {
+                var persistenceStopwatch = Stopwatch.StartNew();
                 await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+                persistenceStopwatch.Stop();
+                checkpointStopwatch.Stop();
+
+                _logger.LogInformation(
+                    "Candidate detail comparison checkpoint. Completed={Completed}/{Total}, Compared={Compared}, " +
+                    "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
+                    "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
+                    "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+                    completed,
+                    pairs.Count,
+                    checkpointCompared,
+                    checkpointComparisonElapsed.TotalMilliseconds,
+                    checkpointCompared == 0 ? 0d : checkpointComparisonElapsed.TotalMilliseconds / checkpointCompared,
+                    checkpointMaximumComparisonElapsed.TotalMilliseconds,
+                    persistenceStopwatch.Elapsed.TotalMilliseconds,
+                    checkpointStopwatch.Elapsed.TotalMilliseconds);
+
                 changedComparisons.Clear();
+                checkpointStopwatch.Restart();
+                checkpointComparisonElapsed = TimeSpan.Zero;
+                checkpointCompared = 0;
+                checkpointMaximumComparisonElapsed = TimeSpan.Zero;
             }
         }
 
         var analyzed = completed - reused - skipped;
-        await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+        if (changedComparisons.Count != 0)
+        {
+            var persistenceStopwatch = Stopwatch.StartNew();
+            await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+            persistenceStopwatch.Stop();
+            checkpointStopwatch.Stop();
+            _logger.LogInformation(
+                "Candidate detail comparison final checkpoint. Completed={Completed}/{Total}, Compared={Compared}, " +
+                "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
+                "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
+                "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+                completed,
+                pairs.Count,
+                checkpointCompared,
+                checkpointComparisonElapsed.TotalMilliseconds,
+                checkpointCompared == 0 ? 0d : checkpointComparisonElapsed.TotalMilliseconds / checkpointCompared,
+                checkpointMaximumComparisonElapsed.TotalMilliseconds,
+                persistenceStopwatch.Elapsed.TotalMilliseconds,
+                checkpointStopwatch.Elapsed.TotalMilliseconds);
+        }
+
         return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
     }
 
