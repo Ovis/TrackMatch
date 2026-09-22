@@ -231,6 +231,33 @@ public sealed class SqliteCandidatePairRepository(
                 cancellationToken: cancellationToken));
         }
 
+        // CandidatePairsはGlobalなので、異なる生成構成のLibraryを同時に「完了」とは扱えない。
+        // 設定変更を現在Libraryへ適用した時点で他Libraryの不一致Stateを外し、次回解析時にFull Rebuildさせる。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM CandidateGenerationStates
+            WHERE LibraryId <> @LibraryId
+              AND (
+                    CandidateGenerationAlgorithmVersion <> @CandidateGenerationAlgorithmVersion
+                 OR FingerprintAlgorithm <> @FingerprintAlgorithm
+                 OR SegmentLengthItems <> @SegmentLengthItems
+                 OR SegmentStrideItems <> @SegmentStrideItems
+                 OR MaximumSegmentHashHammingDistance <> @MaximumSegmentHashHammingDistance
+                 OR MinimumDominantOffsetHits <> @MinimumDominantOffsetHits);
+            """,
+            new
+            {
+                LibraryId = libraryId,
+                state.CandidateGenerationAlgorithmVersion,
+                state.FingerprintAlgorithm,
+                state.SegmentLengthItems,
+                state.SegmentStrideItems,
+                state.MaximumSegmentHashHammingDistance,
+                state.MinimumDominantOffsetHits,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+
         await connection.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO CandidateGenerationStates (
