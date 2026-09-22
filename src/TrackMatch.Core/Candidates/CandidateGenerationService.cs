@@ -12,7 +12,8 @@ public sealed class CandidateGenerationService(
     ICandidateReviewRepository reviewRepository,
     FingerprintSegmentSketcher sketcher,
     CandidatePairGenerator pairGenerator,
-    ICandidateGenerationWorkRepository? workRepository = null)
+    ICandidateGenerationWorkRepository? workRepository = null,
+    ICandidateGenerationStateRepository? stateRepository = null)
 {
     /// <summary>
     /// 保存済みFingerprintから候補ペアを生成する。
@@ -41,6 +42,10 @@ public sealed class CandidateGenerationService(
         var pendingTrackIds = workRepository is null
             ? new HashSet<long>()
             : (await workRepository.GetPendingTrackIdsAsync(cancellationToken)).ToHashSet();
+        var desiredState = CandidateGenerationState.Create(fingerprintAlgorithm, options);
+        var completedState = stateRepository is null
+            ? desiredState
+            : await stateRepository.GetAsync(cancellationToken);
 
         var changedTrackIds = fingerprintStates
             .Where(item => !cachedStates.TryGetValue(item.TrackId, out var cachedAt)
@@ -48,9 +53,14 @@ public sealed class CandidateGenerationService(
             .Select(item => item.TrackId)
             .ToHashSet();
 
-        // キャッシュがない初回や候補生成パラメータ変更時は全Trackを索引対象にし、候補集合も全再構築する。
-        var fullRebuild = cachedStates.Count == 0;
-        if (fullRebuild)
+        // Sketch生成条件とCandidate判定条件を分離し、Candidate条件だけの変更では高価なSketch再生成を避ける。
+        var sketchConfigurationChanged = completedState is null
+            || completedState.FingerprintAlgorithm != fingerprintAlgorithm
+            || completedState.SegmentLengthItems != options.SegmentLengthItems
+            || completedState.SegmentStrideItems != options.SegmentStrideItems;
+        var sketchFullRebuild = cachedStates.Count == 0 || sketchConfigurationChanged;
+        var fullRebuild = completedState != desiredState || sketchFullRebuild;
+        if (sketchFullRebuild)
         {
             changedTrackIds.UnionWith(activeByTrackId.Keys);
         }
@@ -149,6 +159,13 @@ public sealed class CandidateGenerationService(
                 .Where(affectedTrackIds.Contains)
                 .ToArray();
             await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
+        }
+
+        if (stateRepository is not null && (fullRebuild || completedState != desiredState))
+        {
+            // 完了マーカーはCandidatePairs永続化とPending完了の後にだけ更新する。
+            // 途中失敗時に新構成を正常完了済みと誤認しないための順序である。
+            await stateRepository.SaveAsync(desiredState, cancellationToken);
         }
 
         return new CandidateGenerationResult(
