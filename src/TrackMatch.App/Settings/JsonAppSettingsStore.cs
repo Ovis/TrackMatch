@@ -101,6 +101,8 @@ public sealed class JsonAppSettingsStore
         {
             SimilarityDisplayLowerBoundPercent = Math.Clamp(settings.SimilarityDisplayLowerBoundPercent, 0, 100),
             TrashRoot = string.IsNullOrWhiteSpace(settings.TrashRoot) ? null : settings.TrashRoot.Trim(),
-            MaxConcurrentFingerprintExtractions = Math.Clamp(settings.MaxConcurrentFingerprintExtractions, 1, 16),
+            MaxConcurrentFingerprintExtractions = settings.MaxConcurrentFingerprintExtractions <= 0
+                ? TrackMatchAppSettings.Default.MaxConcurrentFingerprintExtractions
+                : Math.Clamp(settings.MaxConcurrentFingerprintExtractions, 1, 16),
         };
 }
