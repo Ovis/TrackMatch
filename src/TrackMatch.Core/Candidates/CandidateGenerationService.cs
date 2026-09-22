@@ -55,11 +55,9 @@ public sealed class CandidateGenerationService(
             .ToHashSet();
 
         // Sketch生成条件とCandidate判定条件を分離し、Candidate条件だけの変更では高価なSketch再生成を避ける。
-        var sketchConfigurationChanged = completedState is null
-            || completedState.FingerprintAlgorithm != fingerprintAlgorithm
-            || completedState.SegmentLengthItems != options.SegmentLengthItems
-            || completedState.SegmentStrideItems != options.SegmentStrideItems;
-        var sketchFullRebuild = cachedStates.Count == 0 || sketchConfigurationChanged;
+        // Repositoryは現在のAlgorithm/Segment設定に一致するSketchだけを返すため、Cacheが存在すれば再利用できる。
+        // Generation Stateが無い・古い場合でも、Candidate判定設定の変更だけでSketchを作り直さない。
+        var sketchFullRebuild = cachedStates.Count == 0;
         var fullRebuild = completedState != desiredState || sketchFullRebuild;
         if (sketchFullRebuild)
         {
