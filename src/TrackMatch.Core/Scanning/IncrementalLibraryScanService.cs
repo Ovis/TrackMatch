@@ -50,7 +50,9 @@ public sealed class IncrementalLibraryScanService(
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
-        var totalFiles = scanner.GetSupportedFileCount(fullRootPath, cancellationToken);
+        // 件数表示のためだけにNAS全体を事前走査すると大規模Libraryでは列挙コストが二重になる。
+        // 進捗総数は未確定(null)として開始し、実処理と同じ1回の列挙だけを行う。
+        int? totalFiles = null;
         progress?.Report(new IncrementalScanProgress(0, totalFiles, null));
 
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
