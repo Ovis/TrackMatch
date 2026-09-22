@@ -282,6 +282,13 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
+        // Comparison Cache本体はFingerprint世代で再利用可否を判定できるが、音質比較Cacheは
+        // TrackQualityAnalysesの再解析結果に依存するため、Force Reanalysis対象を含むPairだけ明示的に破棄する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM CandidateQualityComparisons WHERE TrackIdA IN @TrackIds OR TrackIdB IN @TrackIds;",
+            new { TrackIds = ids },
+            transaction,
+            cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM Fingerprints WHERE TrackId IN @TrackIds;",
             new { TrackIds = ids },
