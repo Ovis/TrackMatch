@@ -14,6 +14,24 @@ public interface ITrackRepository
     Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Metadata更新とLibrary Membership確立を1つのScan操作として実行し、後続判定に必要な状態を返す。
+    /// </summary>
+    async Task<PreparedTrackScanState> PrepareTrackForScanAsync(
+        AudioTrackMetadata metadata,
+        long libraryId,
+        long rootId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var trackId = await UpsertMetadataAsync(metadata, cancellationToken);
+        await EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+        return new PreparedTrackScanState(
+            trackId,
+            await GetFingerprintAsync(trackId, cancellationToken) is not null,
+            await IsContentVerificationPendingAsync(trackId, cancellationToken));
+    }
+
+    /// <summary>
     /// 指定PathのGlobal Trackを取得する。
     /// </summary>
     Task<StoredTrack?> GetByPathAsync(string path, CancellationToken cancellationToken = default);
@@ -141,3 +159,8 @@ public sealed record RootScanTrackState(
     StoredTrack Track,
     bool HasFingerprint,
     bool VerificationPending);
+
+/// <summary>
+/// Scan用のMetadata/Membership更新後に必要なTrack状態を表す。
+/// </summary>
+public sealed record PreparedTrackScanState(long TrackId, bool HasFingerprint, bool VerificationPending);
