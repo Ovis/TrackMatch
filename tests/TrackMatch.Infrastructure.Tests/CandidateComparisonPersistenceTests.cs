@@ -64,6 +64,43 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateComparisonRepository_ReusesCacheWhenCandidateReturns()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        var pairs = new SqliteCandidatePairRepository(_database);
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        await pairs.ReplaceAllAsync([], TestContext.Current.CancellationToken);
+        Assert.Empty(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+
+        await pairs.ReplaceAllAsync(
+            [new CandidatePair(_trackIdA, _trackIdB, 2)],
+            TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0.987, restored.Similarity, 6);
+    }
+
+    [Fact]
+    public async Task CandidateComparisonRepository_DoesNotExposeDifferentFingerprintGenerationAsCurrent()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                "UPDATE Fingerprints SET ExtractedAtUtcTicks = ExtractedAtUtcTicks + 1 WHERE TrackId = @TrackId;",
+                new { TrackId = _trackIdB });
+        }
+
+        Assert.Empty(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(
+            CandidatePairKey.Create(_trackIdA, _trackIdB),
+            (await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken)).Keys);
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_PreservesComparisonForUnchangedPair()
     {
         var comparisonRepository = new SqliteCandidateComparisonRepository(_database);
