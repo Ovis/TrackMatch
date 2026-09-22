@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -83,7 +83,7 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 1)
+            VALUES (1, 2)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
@@ -155,7 +155,6 @@ public sealed class SqliteDatabase
                 RootId INTEGER NOT NULL,
                 RelativePath TEXT NOT NULL COLLATE NOCASE,
                 CandidateGenerationPending INTEGER NOT NULL DEFAULT 1 CHECK (CandidateGenerationPending IN (0, 1)),
-                CandidateGenerationVersion INTEGER NULL,
                 PRIMARY KEY (LibraryId, TrackId),
                 UNIQUE (LibraryId, RootId, RelativePath),
                 FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE,
@@ -182,20 +181,30 @@ public sealed class SqliteDatabase
                 Algorithm INTEGER NOT NULL,
                 SegmentLengthItems INTEGER NOT NULL,
                 SegmentStrideItems INTEGER NOT NULL,
-                MaximumSegmentHashDistance INTEGER NOT NULL,
                 SegmentIndex INTEGER NOT NULL,
                 Hash INTEGER NOT NULL,
                 FingerprintExtractedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (
-                    TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
-                    MaximumSegmentHashDistance, SegmentIndex),
+                    TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems, SegmentIndex),
                 FOREIGN KEY (TrackId) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateSegmentSketches_Config
                 ON CandidateSegmentSketches (
-                    Algorithm, SegmentLengthItems, SegmentStrideItems,
-                    MaximumSegmentHashDistance, TrackId);
+                    Algorithm, SegmentLengthItems, SegmentStrideItems, TrackId);
+
+            -- CandidatePairsがどの構成で正常生成されたかをLibrary単位で記録する完了マーカー。
+            CREATE TABLE IF NOT EXISTS CandidateGenerationStates (
+                LibraryId INTEGER PRIMARY KEY,
+                CandidateGenerationAlgorithmVersion INTEGER NOT NULL,
+                FingerprintAlgorithm INTEGER NOT NULL,
+                SegmentLengthItems INTEGER NOT NULL,
+                SegmentStrideItems INTEGER NOT NULL,
+                MaximumSegmentHashHammingDistance INTEGER NOT NULL,
+                MinimumDominantOffsetHits INTEGER NOT NULL,
+                CompletedAtUtcTicks INTEGER NOT NULL,
+                FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE
+            );
 
             CREATE TABLE IF NOT EXISTS CandidatePairs (
                 TrackIdA INTEGER NOT NULL,
@@ -222,10 +231,13 @@ public sealed class SqliteDatabase
                 CoverageB REAL NOT NULL,
                 DurationRatio REAL NOT NULL,
                 ComparisonVersion INTEGER NOT NULL,
+                FingerprintAExtractedAtUtcTicks INTEGER NOT NULL,
+                FingerprintBExtractedAtUtcTicks INTEGER NOT NULL,
                 ComparedAtUtcTicks INTEGER NOT NULL,
                 PRIMARY KEY (TrackIdA, TrackIdB),
-                FOREIGN KEY (TrackIdA, TrackIdB)
-                    REFERENCES CandidatePairs (TrackIdA, TrackIdB) ON DELETE CASCADE
+                CHECK (TrackIdA < TrackIdB),
+                FOREIGN KEY (TrackIdA) REFERENCES Tracks (Id) ON DELETE CASCADE,
+                FOREIGN KEY (TrackIdB) REFERENCES Tracks (Id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS IX_CandidateComparisons_Similarity ON CandidateComparisons (Similarity DESC);
