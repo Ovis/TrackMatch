@@ -14,7 +14,7 @@ public sealed class SqliteCandidateGenerationStateRepository(SqliteDatabase data
     public async Task<CandidateGenerationState?> GetAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        return await connection.QuerySingleOrDefaultAsync<CandidateGenerationState>(new CommandDefinition(
+        var row = await connection.QuerySingleOrDefaultAsync<CandidateGenerationStateRow>(new CommandDefinition(
             """
             SELECT CandidateGenerationAlgorithmVersion, FingerprintAlgorithm,
                    SegmentLengthItems, SegmentStrideItems,
@@ -24,6 +24,15 @@ public sealed class SqliteCandidateGenerationStateRepository(SqliteDatabase data
             """,
             new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
+        return row is null
+            ? null
+            : new CandidateGenerationState(
+                checked((int)row.CandidateGenerationAlgorithmVersion),
+                checked((int)row.FingerprintAlgorithm),
+                checked((int)row.SegmentLengthItems),
+                checked((int)row.SegmentStrideItems),
+                checked((int)row.MaximumSegmentHashHammingDistance),
+                checked((int)row.MinimumDominantOffsetHits));
     }
 
     /// <inheritdoc />
@@ -63,4 +72,12 @@ public sealed class SqliteCandidateGenerationStateRepository(SqliteDatabase data
             },
             cancellationToken: cancellationToken));
     }
+
+    private sealed record CandidateGenerationStateRow(
+        long CandidateGenerationAlgorithmVersion,
+        long FingerprintAlgorithm,
+        long SegmentLengthItems,
+        long SegmentStrideItems,
+        long MaximumSegmentHashHammingDistance,
+        long MinimumDominantOffsetHits);
 }
