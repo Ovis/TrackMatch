@@ -36,7 +36,15 @@ public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : I
 
     /// <inheritdoc />
     public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        => Scan(rootPath, _ => false, cancellationToken);
+
+    /// <inheritdoc />
+    public IEnumerable<LibraryScanResult> Scan(
+        string rootPath,
+        Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(shouldSkipMetadata);
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         EnsureDirectoryExists(rootPath);
 
@@ -53,7 +61,13 @@ public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : I
             LibraryScanResult result;
             try
             {
-                result = LibraryScanResult.Success(_metadataReader.Read(path));
+                // FileSizeとmtimeはDecode不要で取得できるため、既知の未変更FileならTagLib等のMetadata解析を避ける。
+                // 属性取得後にFileが変更される競合は通常経路でも完全には排除できず、次回Scanでmtime差分として再検出する。
+                var fileInfo = new FileInfo(path);
+                var snapshot = new LibraryFileSnapshot(path, fileInfo.Length, fileInfo.LastWriteTimeUtc);
+                result = shouldSkipMetadata(snapshot)
+                    ? LibraryScanResult.SkippedMetadata(snapshot)
+                    : LibraryScanResult.Success(_metadataReader.Read(path));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
