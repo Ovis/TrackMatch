@@ -22,7 +22,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
             WHERE s.Algorithm = @Algorithm
               AND s.SegmentLengthItems = @SegmentLengthItems
               AND s.SegmentStrideItems = @SegmentStrideItems
-              AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
               AND (
                     @LibraryId IS NULL
                  OR EXISTS (
@@ -54,7 +53,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
             WHERE s.Algorithm = @Algorithm
               AND s.SegmentLengthItems = @SegmentLengthItems
               AND s.SegmentStrideItems = @SegmentStrideItems
-              AND s.MaximumSegmentHashDistance = @MaximumSegmentHashDistance
               AND t.IsMissing = 0
               AND (
                     @LibraryId IS NULL
@@ -101,10 +99,10 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
             const string insertSql = """
                 INSERT INTO CandidateSegmentSketches (
                     TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
-                    MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
+                    SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
                 VALUES (
                     @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
-                    @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
+                    @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
                 """;
             var parameters = sketches.Select(sketch => new
             {
@@ -112,7 +110,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
                 fingerprint.Algorithm,
                 options.SegmentLengthItems,
                 options.SegmentStrideItems,
-                MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
                 sketch.SegmentIndex,
                 Hash = unchecked((long)sketch.Hash),
                 FingerprintExtractedAtUtcTicks = fingerprint.ExtractedAtUtc.ToUniversalTime().Ticks,
@@ -144,7 +141,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
               AND (
                     SegmentLengthItems <> @SegmentLengthItems
                  OR SegmentStrideItems <> @SegmentStrideItems
-                 OR MaximumSegmentHashDistance <> @MaximumSegmentHashDistance
                  OR NOT EXISTS (
                         SELECT 1
                         FROM Fingerprints f
@@ -188,7 +184,6 @@ public sealed class SqliteFingerprintSegmentSketchRepository(
             LibraryId = libraryId,
             options.SegmentLengthItems,
             options.SegmentStrideItems,
-            MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
         };
 
     private sealed record SketchStateRow(long TrackId, long FingerprintExtractedAtUtcTicks);

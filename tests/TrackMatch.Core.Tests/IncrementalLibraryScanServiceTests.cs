@@ -386,7 +386,7 @@ public sealed class IncrementalLibraryScanServiceTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>>(
                 initialTracks.Select(track => (
-                    new StoredLibraryTrack(libraryId, track.Id, rootId, Path.GetFileName(track.Metadata.Path), false, null),
+                    new StoredLibraryTrack(libraryId, track.Id, rootId, Path.GetFileName(track.Metadata.Path), false),
                     track)).ToArray());
 
         public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootAsync(

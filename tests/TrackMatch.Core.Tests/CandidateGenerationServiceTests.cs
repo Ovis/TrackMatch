@@ -135,6 +135,42 @@ public sealed class CandidateGenerationServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_CandidateSettingChangeRebuildsPairsWithoutRebuildingSketches()
+    {
+        var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
+        var values = Enumerable.Repeat(0x12345678u, 300).ToArray();
+        var catalog = new MutableFingerprintCatalog(
+        [
+            Stored(1, values, extractedAt),
+            Stored(2, values, extractedAt),
+        ]);
+        var sketches = new FakeSketchRepository();
+        var pairs = new FakePairRepository();
+        var state = new FakeGenerationStateRepository();
+        var sketcher = new FingerprintSegmentSketcher();
+        var service = new CandidateGenerationService(
+            catalog,
+            sketches,
+            pairs,
+            new MutableReviewRepository(),
+            sketcher,
+            new CandidatePairGenerator(sketcher),
+            stateRepository: state);
+
+        await service.GenerateAsync(2, new CandidateGenerationOptions(), TestContext.Current.CancellationToken);
+        var replacementsAfterInitialBuild = sketches.ReplaceCount;
+
+        var result = await service.GenerateAsync(
+            2,
+            new CandidateGenerationOptions { MaximumSegmentHashHammingDistance = 2 },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsFullRebuild);
+        Assert.Equal(replacementsAfterInitialBuild, sketches.ReplaceCount);
+        Assert.Equal(2, state.State?.MaximumSegmentHashHammingDistance);
+    }
+
+    [Fact]
     public async Task GenerateAsync_DoesNotCompletePendingWhenCandidatePersistenceFails()
     {
         var extractedAt = new DateTime(2026, 9, 14, 0, 0, 0, DateTimeKind.Utc);
@@ -179,6 +215,8 @@ public sealed class CandidateGenerationServiceTests
         private readonly Dictionary<long, DateTime> _states = [];
         private readonly Dictionary<long, IReadOnlyList<FingerprintSegmentSketch>> _items = [];
 
+        public int ReplaceCount { get; private set; }
+
         public Task<IReadOnlyDictionary<long, DateTime>> GetTrackStatesAsync(int algorithm, CandidateGenerationOptions options, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyDictionary<long, DateTime>>(_states.ToDictionary());
 
@@ -187,6 +225,7 @@ public sealed class CandidateGenerationServiceTests
 
         public Task ReplaceTrackAsync(StoredFingerprint fingerprint, CandidateGenerationOptions options, IReadOnlyCollection<FingerprintSegmentSketch> sketches, CancellationToken cancellationToken = default)
         {
+            ReplaceCount++;
             _states[fingerprint.TrackId] = fingerprint.ExtractedAtUtc;
             _items[fingerprint.TrackId] = sketches.ToArray();
             return Task.CompletedTask;
@@ -245,6 +284,20 @@ public sealed class CandidateGenerationServiceTests
         public Task MarkCompletedAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
         {
             CompletedTrackIds.AddRange(trackIds);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeGenerationStateRepository : ICandidateGenerationStateRepository
+    {
+        public CandidateGenerationState? State { get; private set; }
+
+        public Task<CandidateGenerationState?> GetAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(State);
+
+        public Task SaveAsync(CandidateGenerationState state, CancellationToken cancellationToken = default)
+        {
+            State = state;
             return Task.CompletedTask;
         }
     }

@@ -132,7 +132,7 @@ public sealed class LibraryAnalysisWorkflow
     /// 指定LibraryのMembershipに属するTrackだけを対象に候補Pairを増分生成する。
     /// </summary>
     /// <param name="libraryId">候補生成対象LibraryのID</param>
-    /// <param name="options">候補生成設定。nullの場合は既定値を使用する</param>
+    /// <param name="options">候補生成設定。Global Candidate集合との整合性を保つため既定値のみ指定可能</param>
     /// <param name="cancellationToken">候補生成のキャンセル要求</param>
     /// <param name="progress">索引更新と候補探索の件数を通知する進捗通知先</param>
     public async Task<CandidateGenerationResult> GenerateCandidatesAsync(
@@ -143,6 +143,11 @@ public sealed class LibraryAnalysisWorkflow
     {
         options ??= new CandidateGenerationOptions();
         options.Validate();
+        if (options != new CandidateGenerationOptions())
+        {
+            throw new InvalidOperationException(
+                "CandidatePairsはGlobal Current Stateのため、Library単位で異なるCandidate生成設定は指定できません。");
+        }
 
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
@@ -319,14 +324,17 @@ public sealed class LibraryAnalysisWorkflow
     {
         var reviewRepository = new SqliteCandidateReviewRepository(database);
         var sketcher = new FingerprintSegmentSketcher();
+        var candidatePairRepository = new SqliteCandidatePairRepository(database, libraryId);
         return new CandidateGenerationService(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteFingerprintSegmentSketchRepository(database, libraryId),
-            new SqliteCandidatePairRepository(database, libraryId),
+            candidatePairRepository,
             reviewRepository,
             sketcher,
             new CandidatePairGenerator(sketcher),
-            new SqliteCandidateGenerationWorkRepository(database, libraryId));
+            new SqliteCandidateGenerationWorkRepository(database, libraryId),
+            new SqliteCandidateGenerationStateRepository(database, libraryId),
+            candidatePairRepository);
     }
 
     private static CandidateAnalysisService CreateCandidateAnalysisService(

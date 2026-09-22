@@ -8,6 +8,9 @@ namespace TrackMatch.Core.Candidates;
 /// </summary>
 public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 {
+    /// <summary>
+    /// FingerprintからSegment Sketchを生成してCandidate Pairを抽出する。
+    /// </summary>
     public CandidateGenerationResult Generate(
         IReadOnlyList<StoredFingerprint> fingerprints,
         CandidateGenerationOptions options)
@@ -19,60 +22,87 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         var sketches = fingerprints
             .SelectMany(fingerprint => sketcher.Create(fingerprint, options))
             .ToArray();
-        var pairs = GenerateFromSketches(sketches, targetTrackIds: null, options.MaximumSegmentHashHammingDistance);
+        var pairs = GenerateFromSketches(sketches, targetTrackIds: null, options);
         return new CandidateGenerationResult(fingerprints.Count, sketches.Length, pairs);
     }
 
     /// <summary>
-    /// 保存済みSegment Sketchから候補ペアを生成する。
+    /// 保存済みSegment Sketchから、同一offsetに十分なhitがあるCandidate Pairを生成する。
     /// </summary>
     /// <param name="sketches">現在有効な全TrackのSegment Sketch</param>
     /// <param name="targetTrackIds">指定した場合、このTrackを一方に含むペアだけを返す</param>
-    /// <param name="maximumDistance">許容する32-bit SimHash Hamming距離</param>
+    /// <param name="options">Candidate判定設定</param>
     /// <param name="progress">探索済みSketch数を通知する進捗通知先</param>
     public IReadOnlyList<CandidatePair> GenerateFromSketches(
         IReadOnlyList<FingerprintSegmentSketch> sketches,
         IReadOnlySet<long>? targetTrackIds,
-        int maximumDistance,
-        IProgress<CandidatePairGenerationProgress>? progress = null)
+        CandidateGenerationOptions options,
+        IProgress<CandidatePairGenerationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sketches);
-        if (maximumDistance is < 0 or > 3)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maximumDistance));
-        }
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
 
         var lowerIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var upperIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
-        var pairDistances = new Dictionary<(long A, long B), int>();
+        var evidence = new Dictionary<CandidatePairKey, Dictionary<int, OffsetEvidence>>();
         var completed = 0;
         progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
 
         foreach (var sketch in sketches)
         {
-            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, pairDistances, targetTrackIds, maximumDistance);
-            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, pairDistances, targetTrackIds, maximumDistance);
+            cancellationToken.ThrowIfCancellationRequested();
+            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: false, cancellationToken);
+            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: true, cancellationToken);
 
             AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
             AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
             completed++;
-            progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
+            // 大規模Libraryでは数十万Sketchになるため、1件ごとの通知でUIキューを埋めない。
+            // 最終件は必ず通知しつつ、途中経過は256件単位に抑える。
+            if (completed == sketches.Count || (completed & 0xff) == 0)
+            {
+                progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
+            }
         }
 
-        return pairDistances
-            .Select(item => new CandidatePair(item.Key.A, item.Key.B, item.Value))
+        return evidence
+            .Select(item => CreateCandidate(item.Key, item.Value, options.MinimumDominantOffsetHits))
+            .Where(pair => pair is not null)
+            .Select(pair => pair!)
             .OrderBy(pair => pair.TrackIdA)
             .ThenBy(pair => pair.TrackIdB)
             .ToArray();
+    }
+
+    private static CandidatePair? CreateCandidate(
+        CandidatePairKey pair,
+        IReadOnlyDictionary<int, OffsetEvidence> offsets,
+        int minimumHits)
+    {
+        var dominant = offsets
+            .Where(item => item.Value.HitCount >= minimumHits)
+            .OrderByDescending(item => item.Value.HitCount)
+            .ThenBy(item => item.Value.MinimumHammingDistance)
+            // 完全同率でも実行順序に依存しないようoffsetを最終tie-breakにする。
+            .ThenBy(item => item.Key)
+            .FirstOrDefault();
+
+        return dominant.Value is null
+            ? null
+            : new CandidatePair(pair.TrackIdA, pair.TrackIdB, dominant.Value.MinimumHammingDistance);
     }
 
     private static void MatchHalf(
         FingerprintSegmentSketch current,
         ushort half,
         IReadOnlyDictionary<ushort, List<FingerprintSegmentSketch>> index,
-        Dictionary<(long A, long B), int> pairDistances,
+        Dictionary<CandidatePairKey, Dictionary<int, OffsetEvidence>> evidence,
         IReadOnlySet<long>? targetTrackIds,
-        int maximumDistance)
+        int maximumDistance,
+        bool skipWhenLowerHalfAlreadyMatched,
+        CancellationToken cancellationToken)
     {
         foreach (var neighbor in EnumerateDistanceOneNeighborhood(half))
         {
@@ -83,6 +113,7 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 
             foreach (var other in indexedSketches)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (other.TrackId == current.TrackId)
                 {
                     continue;
@@ -101,12 +132,34 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
                     continue;
                 }
 
-                var key = current.TrackId < other.TrackId
-                    ? (current.TrackId, other.TrackId)
-                    : (other.TrackId, current.TrackId);
-                if (!pairDistances.TryGetValue(key, out var bestDistance) || distance < bestDistance)
+                // upper indexで見つかったPairがlower側でも距離1以内なら、lower探索ですでに同じhitを集計済み。
+                // 全Segment PairのHashSetを保持せず、この局所判定で二重計上だけを除外して大規模Libraryのメモリを抑える。
+                if (skipWhenLowerHalfAlreadyMatched
+                    && BitOperations.PopCount(unchecked((uint)((ushort)current.Hash ^ (ushort)other.Hash))) <= 1)
                 {
-                    pairDistances[key] = distance;
+                    continue;
+                }
+
+                var currentIsA = current.TrackId < other.TrackId;
+                var a = currentIsA ? current : other;
+                var b = currentIsA ? other : current;
+                var pair = CandidatePairKey.Create(a.TrackId, b.TrackId);
+                var offset = a.SegmentIndex - b.SegmentIndex;
+                if (!evidence.TryGetValue(pair, out var offsets))
+                {
+                    offsets = [];
+                    evidence.Add(pair, offsets);
+                }
+
+                if (!offsets.TryGetValue(offset, out var currentEvidence))
+                {
+                    offsets.Add(offset, new OffsetEvidence(1, distance));
+                }
+                else
+                {
+                    offsets[offset] = new OffsetEvidence(
+                        currentEvidence.HitCount + 1,
+                        Math.Min(currentEvidence.MinimumHammingDistance, distance));
                 }
             }
         }
@@ -134,6 +187,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 
         bucket.Add(sketch);
     }
+
+    private sealed record OffsetEvidence(int HitCount, int MinimumHammingDistance);
 }
 
 /// <summary>

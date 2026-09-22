@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Quality;
 using TrackMatch.Infrastructure.Persistence;
@@ -31,6 +32,8 @@ public sealed class QualityAnalysisCacheInvalidationTests : IAsyncLifetime
         _tracks = new SqliteTrackRepository(_database);
         _trackIdA = await _tracks.UpsertMetadataAsync(CreateMetadata("a.flac", 100, 1), TestContext.Current.CancellationToken);
         _trackIdB = await _tracks.UpsertMetadataAsync(CreateMetadata("b.flac", 100, 1), TestContext.Current.CancellationToken);
+        await _tracks.SaveFingerprintAsync(_trackIdA, CreateFingerprint("a.flac"), 2, TestContext.Current.CancellationToken);
+        await _tracks.SaveFingerprintAsync(_trackIdB, CreateFingerprint("b.flac"), 2, TestContext.Current.CancellationToken);
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
             [new CandidatePair(_trackIdA, _trackIdB, 1)],
             TestContext.Current.CancellationToken);
@@ -125,6 +128,9 @@ public sealed class QualityAnalysisCacheInvalidationTests : IAsyncLifetime
             null,
             DateTime.UtcNow,
             null);
+
+    private AudioFingerprint CreateFingerprint(string fileName)
+        => new(Path.Combine(_directory, fileName), TimeSpan.FromMinutes(4), [0x12345678u, 0x23456789u]);
 
     private AudioTrackMetadata CreateMetadata(string fileName, long fileSize, int lastWriteDay)
         => new(

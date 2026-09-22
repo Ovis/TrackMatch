@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Models;
 using TrackMatch.Core.Quality;
 using TrackMatch.Infrastructure.Persistence;
@@ -30,6 +31,8 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
         var trackRepository = new SqliteTrackRepository(_database);
         _trackIdA = await trackRepository.UpsertMetadataAsync(CreateMetadata("a.flac"), TestContext.Current.CancellationToken);
         _trackIdB = await trackRepository.UpsertMetadataAsync(CreateMetadata("b.flac"), TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(_trackIdA, CreateFingerprint("a.flac"), 2, TestContext.Current.CancellationToken);
+        await trackRepository.SaveFingerprintAsync(_trackIdB, CreateFingerprint("b.flac"), 2, TestContext.Current.CancellationToken);
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
             [new CandidatePair(_trackIdA, _trackIdB, 1)],
             TestContext.Current.CancellationToken);
@@ -166,7 +169,7 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CandidateRemoval_CascadeDeletesQualityComparison()
+    public async Task CandidateRemoval_PreservesQualityComparisonCache()
     {
         var repository = new SqliteCandidateQualityComparisonRepository(_database);
         await repository.UpsertAsync(
@@ -189,7 +192,7 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
         await new SqliteCandidatePairRepository(_database).ReplaceAllAsync([], TestContext.Current.CancellationToken);
 
         var actual = await repository.GetAsync(_trackIdA, _trackIdB, TestContext.Current.CancellationToken);
-        Assert.Null(actual);
+        Assert.NotNull(actual);
     }
 
     private TrackQualityAnalysis CreateTrackState(QualityAnalysisStatus status, DateTime atUtc)
@@ -229,6 +232,9 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
             null,
             atUtc,
             null);
+
+    private AudioFingerprint CreateFingerprint(string fileName)
+        => new(Path.Combine(_directory, fileName), TimeSpan.FromMinutes(4), [0x12345678u, 0x23456789u]);
 
     private AudioTrackMetadata CreateMetadata(string fileName)
         => new(

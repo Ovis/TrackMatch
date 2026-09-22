@@ -78,10 +78,10 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
                 """
                 INSERT INTO CandidateSegmentSketches (
                     TrackId, Algorithm, SegmentLengthItems, SegmentStrideItems,
-                    MaximumSegmentHashDistance, SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
+                    SegmentIndex, Hash, FingerprintExtractedAtUtcTicks)
                 VALUES (
                     @TrackId, @Algorithm, @SegmentLengthItems, @SegmentStrideItems,
-                    @MaximumSegmentHashDistance, @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
+                    @SegmentIndex, @Hash, @FingerprintExtractedAtUtcTicks);
                 """,
                 new
                 {
@@ -89,7 +89,6 @@ public sealed class CandidatePersistenceTests : IAsyncLifetime
                     Algorithm = 2,
                     options.SegmentLengthItems,
                     options.SegmentStrideItems,
-                    MaximumSegmentHashDistance = options.MaximumSegmentHashHammingDistance,
                     SegmentIndex = 99,
                     Hash = 0L,
                     FingerprintExtractedAtUtcTicks = extractedAtUtc.AddMinutes(-1).Ticks,

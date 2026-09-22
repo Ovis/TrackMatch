@@ -1,5 +1,4 @@
 ﻿using Dapper;
-using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Infrastructure.Persistence;
@@ -25,12 +24,9 @@ public sealed class SqliteCandidateGenerationWorkRepository(
             SELECT TrackId
             FROM LibraryTracks
             WHERE LibraryId = @LibraryId
-              AND (
-                    CandidateGenerationPending = 1
-                 OR CandidateGenerationVersion IS NULL
-                 OR CandidateGenerationVersion <> @Version);
+              AND CandidateGenerationPending = 1;
             """,
-            new { LibraryId = libraryId, Version = CandidateGenerationVersion.Current },
+            new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return ids.ToHashSet();
     }
@@ -50,15 +46,13 @@ public sealed class SqliteCandidateGenerationWorkRepository(
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE LibraryTracks
-            SET CandidateGenerationPending = 0,
-                CandidateGenerationVersion = @Version
+            SET CandidateGenerationPending = 0
             WHERE LibraryId = @LibraryId
               AND TrackId IN @TrackIds;
             """,
             new
             {
                 LibraryId = libraryId,
-                Version = CandidateGenerationVersion.Current,
                 TrackIds = trackIds.Distinct().ToArray(),
             },
             cancellationToken: cancellationToken));

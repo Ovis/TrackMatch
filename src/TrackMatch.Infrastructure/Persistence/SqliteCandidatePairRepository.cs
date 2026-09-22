@@ -11,7 +11,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCandidatePairRepository(
     SqliteDatabase database,
-    long? libraryId = null) : ICandidatePairRepository
+    long? libraryId = null) : ICandidatePairRepository, ICandidateGenerationCommitRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidatePair> pairs,
@@ -38,22 +38,13 @@ public sealed class SqliteCandidatePairRepository(
             transaction,
             cancellationToken: cancellationToken))).ToArray();
         var incomingByKey = pairs.ToDictionary(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
-        var reviewedKeys = (await connection.QueryAsync<ReviewPairRow>(new CommandDefinition(
-            "SELECT TrackIdA, TrackIdB FROM CandidateReviews;",
-            transaction: transaction,
-            cancellationToken: cancellationToken)))
-            .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
-            .ToHashSet();
-
-        // Candidate GeneratorはHuman Verdictより低信頼の探索レイヤーである。
-        // 新しい生成ロジックで候補から外れても、レビュー済みPairを削除してComparisonをCASCADE消去してはいけない。
-        // Missingを含むPairも現在の候補探索では評価していないため、同Content復帰時のMachine Cache再利用に備えて保持する。
+        // CandidatePairsは現在のCandidate集合だけを表す。Human VerdictとComparison Cacheは独立して保持する。
         var obsolete = existingRows
             .Where(row =>
             {
                 var key = CandidatePairKey.Create(row.TrackIdA, row.TrackIdB);
                 return row.MinimumSegmentHashDistance >= 0
-                    && !incomingByKey.ContainsKey(key) && !reviewedKeys.Contains(key);
+                    && !incomingByKey.ContainsKey(key);
             })
             .ToArray();
         if (obsolete.Length != 0)
@@ -125,11 +116,7 @@ public sealed class SqliteCandidatePairRepository(
                         WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
                   AND EXISTS (
                         SELECT 1 FROM Tracks tb
-                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0)
-                  AND NOT EXISTS (
-                        SELECT 1 FROM CandidateReviews r
-                        WHERE r.TrackIdA = CandidatePairs.TrackIdA
-                          AND r.TrackIdB = CandidatePairs.TrackIdB);
+                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0);
                 """,
                 transaction: transaction,
                 cancellationToken: cancellationToken));
@@ -137,8 +124,7 @@ public sealed class SqliteCandidatePairRepository(
         else
         {
             // PairはGlobalなので、現在Libraryで評価可能なPairだけを置換する。
-            // Shared Trackの別Library専用Pair、Missingを含む未評価Pair、Human Verdict済みPairを
-            // 現在Libraryの増分生成で消してはいけない。
+            // Shared Trackの別Library専用PairとMissingを含む未評価Pairは、現在Libraryの増分生成で消さない。
             await connection.ExecuteAsync(new CommandDefinition(
                 """
                 DELETE FROM CandidatePairs
@@ -157,11 +143,7 @@ public sealed class SqliteCandidatePairRepository(
                         WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
                   AND EXISTS (
                         SELECT 1 FROM Tracks tb
-                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0)
-                  AND NOT EXISTS (
-                        SELECT 1 FROM CandidateReviews r
-                        WHERE r.TrackIdA = CandidatePairs.TrackIdA
-                          AND r.TrackIdB = CandidatePairs.TrackIdB);
+                        WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0);
                 """,
                 new { LibraryId = libraryId },
                 transaction,
@@ -169,6 +151,146 @@ public sealed class SqliteCandidatePairRepository(
         }
 
         await UpsertAsync(connection, transaction, pairs, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task CommitAsync(
+        bool fullRebuild,
+        IReadOnlyCollection<long> affectedTrackIds,
+        IReadOnlyCollection<CandidatePair> pairs,
+        IReadOnlyCollection<long> completedPendingTrackIds,
+        CandidateGenerationState state,
+        CancellationToken cancellationToken = default)
+    {
+        if (libraryId is null)
+        {
+            throw new InvalidOperationException("Generation CommitにはLibrary scopeが必要です。");
+        }
+
+        ArgumentNullException.ThrowIfNull(affectedTrackIds);
+        ArgumentNullException.ThrowIfNull(pairs);
+        ArgumentNullException.ThrowIfNull(completedPendingTrackIds);
+        ArgumentNullException.ThrowIfNull(state);
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await EnsurePairsInScopeAsync(connection, transaction, pairs, cancellationToken);
+
+        if (fullRebuild)
+        {
+            // Supplemental Candidateは通常Generatorとは別経路なので、負の距離を持つ行は置換対象外にする。
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidatePairs
+                WHERE MinimumSegmentHashDistance >= 0
+                  AND EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = CandidatePairs.TrackIdA)
+                  AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = CandidatePairs.TrackIdB)
+                  AND EXISTS (SELECT 1 FROM Tracks ta WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
+                  AND EXISTS (SELECT 1 FROM Tracks tb WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0);
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+        else if (affectedTrackIds.Count != 0)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "CREATE TEMP TABLE IF NOT EXISTS AffectedCandidateTracks (TrackId INTEGER PRIMARY KEY); DELETE FROM AffectedCandidateTracks;",
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "INSERT INTO AffectedCandidateTracks (TrackId) VALUES (@TrackId);",
+                affectedTrackIds.Distinct().Select(trackId => new { TrackId = trackId }),
+                transaction,
+                cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM CandidatePairs
+                WHERE MinimumSegmentHashDistance >= 0
+                  AND (EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
+                    OR EXISTS (SELECT 1 FROM AffectedCandidateTracks a WHERE a.TrackId = CandidatePairs.TrackIdB))
+                  AND EXISTS (SELECT 1 FROM LibraryTracks la WHERE la.LibraryId = @LibraryId AND la.TrackId = CandidatePairs.TrackIdA)
+                  AND EXISTS (SELECT 1 FROM LibraryTracks lb WHERE lb.LibraryId = @LibraryId AND lb.TrackId = CandidatePairs.TrackIdB)
+                  AND EXISTS (SELECT 1 FROM Tracks ta WHERE ta.Id = CandidatePairs.TrackIdA AND ta.IsMissing = 0)
+                  AND EXISTS (SELECT 1 FROM Tracks tb WHERE tb.Id = CandidatePairs.TrackIdB AND tb.IsMissing = 0);
+                """,
+                new { LibraryId = libraryId },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
+        await UpsertAsync(connection, transaction, pairs, cancellationToken);
+
+        if (completedPendingTrackIds.Count != 0)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "UPDATE LibraryTracks SET CandidateGenerationPending = 0 WHERE LibraryId = @LibraryId AND TrackId IN @TrackIds;",
+                new { LibraryId = libraryId, TrackIds = completedPendingTrackIds.Distinct().ToArray() },
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
+        // CandidatePairsはGlobalなので、異なる生成構成のLibraryを同時に「完了」とは扱えない。
+        // 設定変更を現在Libraryへ適用した時点で他Libraryの不一致Stateを外し、次回解析時にFull Rebuildさせる。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM CandidateGenerationStates
+            WHERE LibraryId <> @LibraryId
+              AND (
+                    CandidateGenerationAlgorithmVersion <> @CandidateGenerationAlgorithmVersion
+                 OR FingerprintAlgorithm <> @FingerprintAlgorithm
+                 OR SegmentLengthItems <> @SegmentLengthItems
+                 OR SegmentStrideItems <> @SegmentStrideItems
+                 OR MaximumSegmentHashHammingDistance <> @MaximumSegmentHashHammingDistance
+                 OR MinimumDominantOffsetHits <> @MinimumDominantOffsetHits);
+            """,
+            new
+            {
+                LibraryId = libraryId,
+                state.CandidateGenerationAlgorithmVersion,
+                state.FingerprintAlgorithm,
+                state.SegmentLengthItems,
+                state.SegmentStrideItems,
+                state.MaximumSegmentHashHammingDistance,
+                state.MinimumDominantOffsetHits,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO CandidateGenerationStates (
+                LibraryId, CandidateGenerationAlgorithmVersion, FingerprintAlgorithm,
+                SegmentLengthItems, SegmentStrideItems, MaximumSegmentHashHammingDistance,
+                MinimumDominantOffsetHits, CompletedAtUtcTicks)
+            VALUES (
+                @LibraryId, @CandidateGenerationAlgorithmVersion, @FingerprintAlgorithm,
+                @SegmentLengthItems, @SegmentStrideItems, @MaximumSegmentHashHammingDistance,
+                @MinimumDominantOffsetHits, @CompletedAtUtcTicks)
+            ON CONFLICT (LibraryId) DO UPDATE SET
+                CandidateGenerationAlgorithmVersion = excluded.CandidateGenerationAlgorithmVersion,
+                FingerprintAlgorithm = excluded.FingerprintAlgorithm,
+                SegmentLengthItems = excluded.SegmentLengthItems,
+                SegmentStrideItems = excluded.SegmentStrideItems,
+                MaximumSegmentHashHammingDistance = excluded.MaximumSegmentHashHammingDistance,
+                MinimumDominantOffsetHits = excluded.MinimumDominantOffsetHits,
+                CompletedAtUtcTicks = excluded.CompletedAtUtcTicks;
+            """,
+            new
+            {
+                LibraryId = libraryId,
+                state.CandidateGenerationAlgorithmVersion,
+                state.FingerprintAlgorithm,
+                state.SegmentLengthItems,
+                state.SegmentStrideItems,
+                state.MaximumSegmentHashHammingDistance,
+                state.MinimumDominantOffsetHits,
+                CompletedAtUtcTicks = DateTime.UtcNow.Ticks,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+
         await transaction.CommitAsync(cancellationToken);
     }
 

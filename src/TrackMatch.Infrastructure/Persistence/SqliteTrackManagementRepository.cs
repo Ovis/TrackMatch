@@ -270,11 +270,8 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM CandidateComparisons WHERE TrackIdA IN @TrackIds OR TrackIdB IN @TrackIds;",
-            new { TrackIds = ids },
-            transaction,
-            cancellationToken: cancellationToken));
+        // Comparison CacheはFingerprint世代で有効性を判定するため、Force Reanalysisでも物理削除しない。
+        // 新Fingerprintが生成されれば旧世代のCacheはCurrent Stateから自動的に外れ、同一世代が復帰した場合は再利用できる。
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateSegmentSketches WHERE TrackId IN @TrackIds;",
             new { TrackIds = ids },
@@ -282,6 +279,13 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             cancellationToken: cancellationToken));
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM TrackQualityAnalyses WHERE TrackId IN @TrackIds;",
+            new { TrackIds = ids },
+            transaction,
+            cancellationToken: cancellationToken));
+        // Comparison Cache本体はFingerprint世代で再利用可否を判定できるが、音質比較Cacheは
+        // TrackQualityAnalysesの再解析結果に依存するため、Force Reanalysis対象を含むPairだけ明示的に破棄する。
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM CandidateQualityComparisons WHERE TrackIdA IN @TrackIds OR TrackIdB IN @TrackIds;",
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
@@ -293,8 +297,7 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE LibraryTracks
-            SET CandidateGenerationPending = 1,
-                CandidateGenerationVersion = NULL
+            SET CandidateGenerationPending = 1
             WHERE TrackId IN @TrackIds;
             """,
             new { TrackIds = ids },

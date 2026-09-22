@@ -12,7 +12,9 @@ public sealed class CandidateGenerationService(
     ICandidateReviewRepository reviewRepository,
     FingerprintSegmentSketcher sketcher,
     CandidatePairGenerator pairGenerator,
-    ICandidateGenerationWorkRepository? workRepository = null)
+    ICandidateGenerationWorkRepository? workRepository = null,
+    ICandidateGenerationStateRepository? stateRepository = null,
+    ICandidateGenerationCommitRepository? commitRepository = null)
 {
     /// <summary>
     /// 保存済みFingerprintから候補ペアを生成する。
@@ -41,6 +43,10 @@ public sealed class CandidateGenerationService(
         var pendingTrackIds = workRepository is null
             ? new HashSet<long>()
             : (await workRepository.GetPendingTrackIdsAsync(cancellationToken)).ToHashSet();
+        var desiredState = CandidateGenerationState.Create(fingerprintAlgorithm, options);
+        var completedState = stateRepository is null
+            ? desiredState
+            : await stateRepository.GetAsync(cancellationToken);
 
         var changedTrackIds = fingerprintStates
             .Where(item => !cachedStates.TryGetValue(item.TrackId, out var cachedAt)
@@ -48,9 +54,12 @@ public sealed class CandidateGenerationService(
             .Select(item => item.TrackId)
             .ToHashSet();
 
-        // キャッシュがない初回や候補生成パラメータ変更時は全Trackを索引対象にし、候補集合も全再構築する。
-        var fullRebuild = cachedStates.Count == 0;
-        if (fullRebuild)
+        // Sketch生成条件とCandidate判定条件を分離し、Candidate条件だけの変更では高価なSketch再生成を避ける。
+        // Repositoryは現在のAlgorithm/Segment設定に一致するSketchだけを返すため、Cacheが存在すれば再利用できる。
+        // Generation Stateが無い・古い場合でも、Candidate判定設定の変更だけでSketchを作り直さない。
+        var sketchFullRebuild = cachedStates.Count == 0;
+        var fullRebuild = completedState != desiredState || sketchFullRebuild;
+        if (sketchFullRebuild)
         {
             changedTrackIds.UnionWith(activeByTrackId.Keys);
         }
@@ -101,8 +110,9 @@ public sealed class CandidateGenerationService(
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
                 targetTrackIds: null,
-                options.MaximumSegmentHashHammingDistance,
-                pairProgress);
+                options,
+                pairProgress,
+                cancellationToken);
         }
         else if (affectedTrackIds.Count == 0)
         {
@@ -114,13 +124,14 @@ public sealed class CandidateGenerationService(
         }
         else
         {
-            // PendingはFingerprint/Sketchが既知でも、新しいLibrary MembershipやGeneration Version変更によって
+            // PendingはFingerprint/Sketchが既知でも、新しいLibrary Membershipなどによって
             // このLibrary内の組合せ探索だけが未完了なTrackを表すため、changed Trackと同じ起点集合へ含める。
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
                 affectedTrackIds,
-                options.MaximumSegmentHashHammingDistance,
-                pairProgress);
+                options,
+                pairProgress,
+                cancellationToken);
         }
 
         var reviewedPairs = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
@@ -128,27 +139,46 @@ public sealed class CandidateGenerationService(
             .Where(pair => !reviewedPairs.Contains(CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB)))
             .ToArray();
 
-        // Human Verdictが付いたPairもMachine Current StateとしてCandidatePairsへ残す。
-        // ここで削除するとFK CASCADEでComparisonまで失われ、Comparison Algorithm更新後の再計算や
-        // Human Verdictとの矛盾を検出する「再確認推奨」に到達できなくなる。
-        if (fullRebuild)
+        var completedPending = pendingTrackIds
+            .Where(activeByTrackId.ContainsKey)
+            .Where(affectedTrackIds.Contains)
+            .ToArray();
+        var shouldPersistGeneration = fullRebuild || affectedTrackIds.Count != 0;
+
+        if (commitRepository is not null && shouldPersistGeneration)
         {
-            await candidatePairRepository.ReplaceAllAsync(generatedPairs, cancellationToken);
+            // Production SQLiteではCandidate置換、Pending解除、完了マーカー更新を同一Transactionで確定する。
+            // 途中失敗で「新StateだがCandidateは旧状態」のような部分Commitを残さないための境界である。
+            // 変更もPendingも無い通常起動では現在集合を書き換える必要がないため、不要なTransactionとState更新を避ける。
+            await commitRepository.CommitAsync(
+                fullRebuild,
+                affectedTrackIds.ToArray(),
+                generatedPairs,
+                completedPending,
+                desiredState,
+                cancellationToken);
         }
         else
         {
-            await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), generatedPairs, cancellationToken);
-        }
+            // 単体テスト等の汎用Repository構成では従来境界を利用する。
+            if (fullRebuild)
+            {
+                await candidatePairRepository.ReplaceAllAsync(generatedPairs, cancellationToken);
+            }
+            else
+            {
+                await candidatePairRepository.ReplaceForTracksAsync(affectedTrackIds.ToArray(), generatedPairs, cancellationToken);
+            }
 
-        if (workRepository is not null && pendingTrackIds.Count != 0)
-        {
-            // Pendingの完了条件はFingerprintの存在そのものではなく、このGenerate実行で候補探索と
-            // CandidatePairs永続化が正常完了したこと。ここへ到達した時点でのみActiveなPendingを完了扱いにする。
-            var completedPending = pendingTrackIds
-                .Where(activeByTrackId.ContainsKey)
-                .Where(affectedTrackIds.Contains)
-                .ToArray();
-            await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
+            if (workRepository is not null && completedPending.Length != 0)
+            {
+                await workRepository.MarkCompletedAsync(completedPending, cancellationToken);
+            }
+
+            if (stateRepository is not null && (fullRebuild || completedState != desiredState))
+            {
+                await stateRepository.SaveAsync(desiredState, cancellationToken);
+            }
         }
 
         return new CandidateGenerationResult(

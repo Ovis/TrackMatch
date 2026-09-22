@@ -68,10 +68,32 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         var trackB = await AddTrackAsync(tracks, "b.flac", addMembership: true);
         await tracks.SaveFingerprintAsync(trackA, Fingerprint("a.flac"), 2, TestContext.Current.CancellationToken);
         await tracks.SaveFingerprintAsync(trackB, Fingerprint("b.flac"), 2, TestContext.Current.CancellationToken);
+        var pair = CandidatePairKey.Create(trackA, trackB);
+        await new SqliteCandidatePairRepository(_database, _libraryId).ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database, _libraryId).UpsertAsync(
+            [CreateComparison(trackA, trackB)],
+            TestContext.Current.CancellationToken);
+        await using (var seedConnection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        await using (var seedCommand = seedConnection.CreateCommand())
+        {
+            seedCommand.CommandText = """
+                INSERT INTO CandidateQualityComparisons (
+                    TrackIdA, TrackIdB, ComparisonVersion, Status,
+                    ComparedAtUtcTicks)
+                VALUES ($trackIdA, $trackIdB, 1, 'Completed', $ticks);
+                """;
+            seedCommand.Parameters.AddWithValue("$trackIdA", pair.TrackIdA);
+            seedCommand.Parameters.AddWithValue("$trackIdB", pair.TrackIdB);
+            seedCommand.Parameters.AddWithValue("$ticks", DateTime.UtcNow.Ticks);
+            await seedCommand.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
         var reviews = new SqliteCandidateReviewRepository(_database, _libraryId);
         await reviews.SaveAsync(
             new CandidateReview(
-                CandidatePairKey.Create(trackA, trackB),
+                pair,
                 CandidateReviewDecision.ConfirmedDuplicate,
                 trackA,
                 "confirmed"),
@@ -87,6 +109,14 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
         Assert.Empty(await reviews.GetAllAsync(TestContext.Current.CancellationToken));
 
         await using var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1L, await ScalarPairAsync(
+            connection,
+            "SELECT COUNT(*) FROM CandidateComparisons WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB;",
+            pair));
+        Assert.Equal(0L, await ScalarPairAsync(
+            connection,
+            "SELECT COUNT(*) FROM CandidateQualityComparisons WHERE TrackIdA = $trackIdA AND TrackIdB = $trackIdB;",
+            pair));
         Assert.Equal(1L, await ScalarAsync(
             connection,
             "SELECT COUNT(*) FROM CandidateReviewHistory WHERE TrackIdA = $id OR TrackIdB = $id;",
@@ -253,8 +283,33 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
             1,
             ["J-POPS"]);
 
+    private static CandidateComparison CreateComparison(long trackIdA, long trackIdB)
+        => new(
+            Math.Min(trackIdA, trackIdB),
+            Math.Max(trackIdA, trackIdB),
+            0.99,
+            0,
+            TimeSpan.Zero,
+            100,
+            TimeSpan.FromSeconds(10),
+            0.9,
+            0.9,
+            1.0);
+
     private static AudioFingerprint Fingerprint(string path)
         => new(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+
+    private static async Task<long> ScalarPairAsync(
+        SqliteConnection connection,
+        string sql,
+        CandidatePairKey pair)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$trackIdA", pair.TrackIdA);
+        command.Parameters.AddWithValue("$trackIdB", pair.TrackIdB);
+        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+    }
 
     private static async Task<long> ScalarAsync(
         SqliteConnection connection,

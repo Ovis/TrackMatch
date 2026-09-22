@@ -127,7 +127,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         const string sql = """
             SELECT lt.LibraryId, lt.TrackId, lt.RootId, lt.RelativePath,
-                   lt.CandidateGenerationPending, lt.CandidateGenerationVersion,
+                   lt.CandidateGenerationPending,
                    t.Id, t.Path, t.FileSize, t.LastWriteTimeUtcTicks, t.DurationTicks,
                    t.ArtistsJson, t.Title, t.Album, t.TrackNumber, t.DiscNumber, t.GenresJson, t.Year,
                    t.Format, t.Codec, t.BitrateKbps, t.SampleRateHz, t.BitDepth, t.Channels, t.IsMissing
@@ -146,8 +146,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
                 row.TrackId,
                 row.RootId,
                 row.RelativePath,
-                row.CandidateGenerationPending != 0,
-                row.CandidateGenerationVersion is null ? null : checked((int)row.CandidateGenerationVersion.Value)),
+                row.CandidateGenerationPending != 0),
             ToStoredTrack(row))).ToArray();
     }
 
@@ -202,8 +201,8 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         const string sql = """
             INSERT INTO LibraryTracks (
                 LibraryId, TrackId, RootId, RelativePath,
-                CandidateGenerationPending, CandidateGenerationVersion)
-            VALUES (@LibraryId, @TrackId, @RootId, @RelativePath, 1, NULL)
+                CandidateGenerationPending)
+            VALUES (@LibraryId, @TrackId, @RootId, @RelativePath, 1)
             ON CONFLICT(LibraryId, TrackId) DO UPDATE SET
                 RootId = excluded.RootId,
                 RelativePath = excluded.RelativePath;
@@ -606,8 +605,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE LibraryTracks
-            SET CandidateGenerationPending = 1,
-                CandidateGenerationVersion = NULL
+            SET CandidateGenerationPending = 1
             WHERE LibraryId = @LibraryId
               AND TrackId IN (
                     SELECT Id FROM Tracks WHERE ContentVerificationStatus = 'ReevaluationPending');
@@ -661,8 +659,7 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE LibraryTracks
-            SET CandidateGenerationPending = 1,
-                CandidateGenerationVersion = NULL
+            SET CandidateGenerationPending = 1
             WHERE TrackId = @TrackId;
             """,
             new { TrackId = trackId },
@@ -763,7 +760,6 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
         long RootId,
         string RelativePath,
         long CandidateGenerationPending,
-        long? CandidateGenerationVersion,
         long Id,
         string Path,
         long FileSize,

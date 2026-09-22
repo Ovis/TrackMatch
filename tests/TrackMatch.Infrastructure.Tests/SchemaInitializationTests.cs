@@ -58,7 +58,7 @@ public sealed class SchemaInitializationTests : IDisposable
                 CREATE TABLE SchemaInfo (
                     Id INTEGER PRIMARY KEY CHECK (Id = 1),
                     Version INTEGER NOT NULL);
-                INSERT INTO SchemaInfo (Id, Version) VALUES (1, 2);
+                INSERT INTO SchemaInfo (Id, Version) VALUES (1, 999);
                 """;
             await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
@@ -66,7 +66,7 @@ public sealed class SchemaInitializationTests : IDisposable
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             new SqliteDatabase(databasePath).InitializeAsync(TestContext.Current.CancellationToken));
 
-        Assert.Contains("期待値: 1, 実際: 2", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("期待値: 1, 実際: 999", exception.Message, StringComparison.Ordinal);
 
         await using var verifyConnection = new SqliteConnection($"Data Source={databasePath}");
         await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);
