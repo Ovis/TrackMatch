@@ -38,7 +38,8 @@ public sealed class SqliteCandidateClassificationRepository(
             transaction,
             cancellationToken: cancellationToken))).ToArray();
         var existingByPair = existingRows.ToDictionary(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB));
-        // ClassificationもComparison Cacheに従属する派生Cacheとして保持し、Candidate離脱だけでは削除しない。\n        // 同じ入力を再分類しただけでClassifiedAtを更新すると、Human Verdict後の通常Scanまで
+        // ClassificationもComparison Cacheに従属する派生Cacheとして保持し、Candidate離脱だけでは削除しない。
+        // 同じ入力を再分類しただけでClassifiedAtを更新すると、Human Verdict後の通常Scanまで
         // 「Machine Resultが更新された」と誤認する。分類内容またはProfileが実際に変化したPairだけ更新する。
         var changed = classifications
             .Where(item =>
