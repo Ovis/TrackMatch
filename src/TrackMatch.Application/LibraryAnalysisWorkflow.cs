@@ -143,6 +143,11 @@ public sealed class LibraryAnalysisWorkflow
     {
         options ??= new CandidateGenerationOptions();
         options.Validate();
+        if (options != new CandidateGenerationOptions())
+        {
+            throw new InvalidOperationException(
+                "CandidatePairsはGlobal Current Stateのため、Library単位で異なるCandidate生成設定は指定できません。");
+        }
 
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
