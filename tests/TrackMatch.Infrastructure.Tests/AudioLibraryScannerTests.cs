@@ -1,4 +1,5 @@
-﻿using TrackMatch.Infrastructure.Audio;
+﻿using TrackMatch.Core.Scanning;
+using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Scanning;
 using Xunit;
 
