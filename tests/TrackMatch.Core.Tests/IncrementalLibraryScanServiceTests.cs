@@ -410,15 +410,19 @@ public sealed class IncrementalLibraryScanServiceTests
     {
         public List<string> Paths { get; } = [];
 
-        public Task<AudioFingerprint> ExtractAsync(string path, CancellationToken cancellationToken = default)
+        public async Task<AudioFingerprint> ExtractAsync(string path, CancellationToken cancellationToken = default)
         {
             Paths.Add(path);
+
+            // 実際のFingerprint生成は非同期処理中に失敗するため、Task生成前の同期例外ではなく
+            // await時に観測される失敗として再現し、bounded pipelineのエラーハンドリングを検証する。
+            await Task.Yield();
             if (string.Equals(path, failingPath, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("fpcalc failure");
             }
 
-            return Task.FromResult(new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]));
+            return new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
         }
     }
 
