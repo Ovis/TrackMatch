@@ -11,7 +11,8 @@ public sealed class IncrementalLibraryScanService(
     ITrackRepository trackRepository,
     IScanSessionRepository scanSessionRepository,
     IFingerprintExtractor fingerprintExtractor,
-    int fingerprintAlgorithm)
+    int fingerprintAlgorithm,
+    int maxConcurrentFingerprintExtractions = 4)
 {
     /// <summary>
     /// 指定Library Rootを増分走査し、Global Track・Membership・Fingerprintを更新する。
@@ -43,18 +44,25 @@ public sealed class IncrementalLibraryScanService(
             throw new ArgumentOutOfRangeException(nameof(fingerprintAlgorithm));
         }
 
+        if (maxConcurrentFingerprintExtractions <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrentFingerprintExtractions));
+        }
+
         var fullRootPath = Path.GetFullPath(rootPath);
         var totalFiles = scanner.GetSupportedFileCount(fullRootPath, cancellationToken);
         progress?.Report(new IncrementalScanProgress(0, totalFiles, null));
 
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
         var total = 0;
+        var completedFiles = 0;
         var processed = 0;
         var added = 0;
         var updated = 0;
         var removed = 0;
         var errors = new List<IncrementalScanError>();
         var contentChanges = new List<ContentChangeNotice>();
+        var pendingFingerprints = new List<PendingFingerprintExtraction>(maxConcurrentFingerprintExtractions);
 
         try
         {
@@ -76,7 +84,7 @@ public sealed class IncrementalLibraryScanService(
                 if (!result.IsSuccess)
                 {
                     errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗しました。"));
-                    progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
                     continue;
                 }
 
@@ -86,7 +94,8 @@ public sealed class IncrementalLibraryScanService(
                 var wasMissing = hasMembership && storedEntry.Track.IsMissing;
                 var contentChanged = hasMembership && HasChanged(storedEntry.Track, metadata);
 
-                // UpsertはPath Identityを共有するため、別Libraryで既知のTrackなら同じTrackIdを再利用する。
+                // MetadataとSQLite更新は従来どおり直列に保ち、支配的なfpcalcだけを並列化する。
+                // Path Identityを共有するため、別Libraryで既知のTrackなら同じTrackIdを再利用する。
                 var trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
                 var relativePath = Path.GetRelativePath(fullRootPath, fullPath);
                 await trackRepository.EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
@@ -104,58 +113,57 @@ public sealed class IncrementalLibraryScanService(
                 var needsFingerprint = contentChanged || verificationPending || missingFingerprintIds.Contains(trackId);
                 if (!hasMembership && !needsFingerprint)
                 {
-                    // 新Membershipが既知Global Trackを再利用した場合は既存Fingerprintも共有する。
                     needsFingerprint = await trackRepository.GetFingerprintAsync(trackId, cancellationToken) is null;
                 }
 
-                if (needsFingerprint)
+                if (!needsFingerprint)
                 {
-                    var previousFingerprint = contentChanged || verificationPending
-                        ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
-                        : null;
-                    if (contentChanged && !verificationPending)
-                    {
-                        // Metadata更新後に解析がキャンセルされても次回Scanで判定を再開できるよう、
-                        // 長時間Fingerprint解析へ入る前に利用停止と再試行必要状態だけを短いTransactionで確定する。
-                        await trackRepository.MarkContentVerificationPendingAsync(trackId, cancellationToken);
-                    }
-
-                    try
-                    {
-                        // FileSize/mtimeだけではタグ変更と音声変更を区別できないため、Fingerprintを追加解析してから
-                        // Human Verdictを維持するか無効化するかを確定する。解析中はSQLite Transactionを保持しない。
-                        var fingerprint = await fingerprintExtractor.ExtractAsync(fullPath, cancellationToken);
-                        if (contentChanged || verificationPending)
-                        {
-                            if (previousFingerprint is not null && HasSameAudioContent(previousFingerprint, fingerprint))
-                            {
-                                await trackRepository.MarkContentVerifiedAsync(trackId, cancellationToken);
-                            }
-                            else
-                            {
-                                // 旧Fingerprintが無い場合も内容同一を証明できないため、安全側でContent Changedとする。
-                                var invalidatedReviewCount = await trackRepository
-                                    .ConfirmContentChangedAndGetInvalidatedReviewCountAsync(trackId, cancellationToken);
-                                contentChanges.Add(new ContentChangeNotice(fullPath, invalidatedReviewCount));
-                            }
-                        }
-
-                        await trackRepository.SaveFingerprintAsync(trackId, fingerprint, fingerprintAlgorithm, cancellationToken);
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
-                    {
-                        if (contentChanged || verificationPending)
-                        {
-                            // Decoder/I/O失敗はContent Changedと断定せず、Human Verdictを保持したまま派生計算だけ停止する。
-                            await trackRepository.MarkContentVerificationFailedAsync(trackId, CancellationToken.None, exception.Message);
-                        }
-
-                        errors.Add(new IncrementalScanError(fullPath, "Fingerprint", exception.Message));
-                    }
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    continue;
                 }
 
-                // Fingerprint生成まで含めて1ファイル分の処理が完了した時点で進捗を進める。
-                progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
+                var previousFingerprint = contentChanged || verificationPending
+                    ? await trackRepository.GetFingerprintAsync(trackId, cancellationToken)
+                    : null;
+                if (contentChanged && !verificationPending)
+                {
+                    // 長時間のFingerprint解析前に利用停止状態だけを確定し、キャンセル後も次回Scanで再試行できるようにする。
+                    await trackRepository.MarkContentVerificationPendingAsync(trackId, cancellationToken);
+                }
+
+                // 全ファイル分のTaskを作らず、実行中fpcalc数だけを小さなbounded pipelineとして保持する。
+                // スロットが埋まったら最初に完了した結果を直列Commitしてから次のfpcalcを開始する。
+                pendingFingerprints.Add(new PendingFingerprintExtraction(
+                    fullPath,
+                    trackId,
+                    contentChanged,
+                    verificationPending,
+                    previousFingerprint,
+                    fingerprintExtractor.ExtractAsync(fullPath, cancellationToken)));
+
+                if (pendingFingerprints.Count >= maxConcurrentFingerprintExtractions)
+                {
+                    var completedPath = await CompleteNextFingerprintAsync(
+                        pendingFingerprints,
+                        trackRepository,
+                        fingerprintAlgorithm,
+                        errors,
+                        contentChanges,
+                        cancellationToken);
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
+                }
+            }
+
+            while (pendingFingerprints.Count != 0)
+            {
+                var completedPath = await CompleteNextFingerprintAsync(
+                    pendingFingerprints,
+                    trackRepository,
+                    fingerprintAlgorithm,
+                    errors,
+                    contentChanges,
+                    cancellationToken);
+                progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
             }
 
             // Missing確定へ入る直前をCancellationの最終受付点とする。
@@ -177,11 +185,88 @@ public sealed class IncrementalLibraryScanService(
         }
         catch
         {
+            // 呼び出し元へ元の失敗理由を返す前に、同じCancellationTokenで停止中のfpcalc Taskをすべて観測する。
+            // 観測せずにScanを抜けると、並列Taskの例外が後から未観測例外として残る可能性がある。
+            await ObservePendingFingerprintTasksAsync(pendingFingerprints);
             var summary = new ScanSessionSummary(total, processed, added, updated, removed, errors.Count);
             await scanSessionRepository.FailAsync(sessionId, DateTime.UtcNow, summary, CancellationToken.None);
             throw;
         }
     }
+
+    /// <summary>
+    /// 中断時に残っているFingerprint生成Taskをすべて観測する。
+    /// </summary>
+    private static async Task ObservePendingFingerprintTasksAsync(IReadOnlyCollection<PendingFingerprintExtraction> pending)
+    {
+        foreach (var item in pending)
+        {
+            try
+            {
+                await item.Task;
+            }
+            catch
+            {
+                // Scanを中断させた元の例外を優先するため、並列Task側の後続例外は観測だけ行う。
+            }
+        }
+    }
+
+    /// <summary>
+    /// 実行中のFingerprint生成から最初に完了した1件を取り出し、DB更新を直列に確定する。
+    /// </summary>
+    private static async Task<string> CompleteNextFingerprintAsync(
+        List<PendingFingerprintExtraction> pending,
+        ITrackRepository trackRepository,
+        int fingerprintAlgorithm,
+        List<IncrementalScanError> errors,
+        List<ContentChangeNotice> contentChanges,
+        CancellationToken cancellationToken)
+    {
+        var completedTask = await Task.WhenAny(pending.Select(item => item.Task));
+        var itemIndex = pending.FindIndex(item => ReferenceEquals(item.Task, completedTask));
+        var item = pending[itemIndex];
+        pending.RemoveAt(itemIndex);
+
+        try
+        {
+            var fingerprint = await item.Task;
+            if (item.ContentChanged || item.VerificationPending)
+            {
+                if (item.PreviousFingerprint is not null && HasSameAudioContent(item.PreviousFingerprint, fingerprint))
+                {
+                    await trackRepository.MarkContentVerifiedAsync(item.TrackId, cancellationToken);
+                }
+                else
+                {
+                    var invalidatedReviewCount = await trackRepository
+                        .ConfirmContentChangedAndGetInvalidatedReviewCountAsync(item.TrackId, cancellationToken);
+                    contentChanges.Add(new ContentChangeNotice(item.Path, invalidatedReviewCount));
+                }
+            }
+
+            await trackRepository.SaveFingerprintAsync(item.TrackId, fingerprint, fingerprintAlgorithm, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            if (item.ContentChanged || item.VerificationPending)
+            {
+                await trackRepository.MarkContentVerificationFailedAsync(item.TrackId, CancellationToken.None, exception.Message);
+            }
+
+            errors.Add(new IncrementalScanError(item.Path, "Fingerprint", exception.Message));
+        }
+
+        return item.Path;
+    }
+
+    private sealed record PendingFingerprintExtraction(
+        string Path,
+        long TrackId,
+        bool ContentChanged,
+        bool VerificationPending,
+        AudioFingerprint? PreviousFingerprint,
+        Task<AudioFingerprint> Task);
 
     private static bool HasSameAudioContent(AudioFingerprint previous, AudioFingerprint current)
         => previous.Duration == current.Duration
