@@ -270,11 +270,8 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
             new { TrackIds = ids },
             transaction,
             cancellationToken: cancellationToken));
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM CandidateComparisons WHERE TrackIdA IN @TrackIds OR TrackIdB IN @TrackIds;",
-            new { TrackIds = ids },
-            transaction,
-            cancellationToken: cancellationToken));
+        // Comparison CacheはFingerprint世代で有効性を判定するため、Force Reanalysisでも物理削除しない。
+        // 新Fingerprintが生成されれば旧世代のCacheはCurrent Stateから自動的に外れ、同一世代が復帰した場合は再利用できる。
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM CandidateSegmentSketches WHERE TrackId IN @TrackIds;",
             new { TrackIds = ids },
