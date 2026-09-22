@@ -129,11 +129,16 @@ public sealed class IncrementalLibraryScanService(
                 var wasMissing = hasMembership && storedEntry.Track.IsMissing;
                 var contentChanged = hasMembership && HasChanged(storedEntry.Track, metadata);
 
-                // MetadataとSQLite更新は従来どおり直列に保ち、支配的なfpcalcだけを並列化する。
-                // Path Identityを共有するため、別Libraryで既知のTrackなら同じTrackIdを再利用する。
-                var trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                // Metadata更新・Membership確立・Fingerprint/Verification状態取得をRepository側で1操作へ集約する。
+                // SQLite実装では同一接続・Transactionを共有し、初回Scanや変更Fileでの接続/Commit往復を削減する。
                 var relativePath = Path.GetRelativePath(fullRootPath, fullPath);
-                await trackRepository.EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+                var prepared = await trackRepository.PrepareTrackForScanAsync(
+                    metadata,
+                    libraryId,
+                    rootId,
+                    relativePath,
+                    cancellationToken);
+                var trackId = prepared.TrackId;
 
                 if (!hasMembership)
                 {
@@ -144,12 +149,8 @@ public sealed class IncrementalLibraryScanService(
                     updated++;
                 }
 
-                var verificationPending = await trackRepository.IsContentVerificationPendingAsync(trackId, cancellationToken);
-                var needsFingerprint = contentChanged || verificationPending || missingFingerprintIds.Contains(trackId);
-                if (!hasMembership && !needsFingerprint)
-                {
-                    needsFingerprint = await trackRepository.GetFingerprintAsync(trackId, cancellationToken) is null;
-                }
+                var verificationPending = prepared.VerificationPending;
+                var needsFingerprint = contentChanged || verificationPending || !prepared.HasFingerprint;
 
                 if (!needsFingerprint)
                 {
