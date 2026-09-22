@@ -151,6 +151,33 @@ public sealed class CandidatePairGeneratorTests
     }
 
     [Fact]
+    public void GenerateFromSketches_DominantOffsetTieUsesSmallerMinimumDistance()
+    {
+        var sketches = new[]
+        {
+            // offset=0は3hit、最小距離2。
+            new FingerprintSegmentSketch(1, 0, 0x00000003u),
+            new FingerprintSegmentSketch(1, 1, 0x0000000cu),
+            new FingerprintSegmentSketch(1, 2, 0x00000030u),
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 1, 0u),
+            new FingerprintSegmentSketch(2, 2, 0u),
+            // offset=10も3hitだが最小距離1なので、こちらをdominant offsetとして採用する。
+            new FingerprintSegmentSketch(1, 20, 0x00000100u),
+            new FingerprintSegmentSketch(1, 21, 0x00000600u),
+            new FingerprintSegmentSketch(1, 22, 0x00001800u),
+            new FingerprintSegmentSketch(2, 10, 0u),
+            new FingerprintSegmentSketch(2, 11, 0u),
+            new FingerprintSegmentSketch(2, 12, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+
+        Assert.Equal(1, pair.MinimumSegmentHashDistance);
+    }
+
+    [Fact]
     public void GenerateFromSketches_ReversedTrackInputKeepsOffsetSignCanonical()
     {
         var sketches = new[]
