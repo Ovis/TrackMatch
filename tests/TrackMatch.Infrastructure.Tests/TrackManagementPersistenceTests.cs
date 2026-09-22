@@ -264,6 +264,19 @@ public sealed class TrackManagementPersistenceTests : IAsyncLifetime
             1,
             ["J-POPS"]);
 
+    private static CandidateComparison CreateComparison(long trackIdA, long trackIdB)
+        => new(
+            Math.Min(trackIdA, trackIdB),
+            Math.Max(trackIdA, trackIdB),
+            0.99,
+            0,
+            TimeSpan.Zero,
+            100,
+            TimeSpan.FromSeconds(10),
+            0.9,
+            0.9,
+            1.0);
+
     private static AudioFingerprint Fingerprint(string path)
         => new(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
 
