@@ -68,11 +68,23 @@ public sealed class IncrementalLibraryScanService(
 
         try
         {
-            var storedEntries = await trackRepository.GetByRootAsync(libraryId, rootId, cancellationToken);
-            var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootAsync(libraryId, rootId, cancellationToken);
-            var verificationPendingTrackIds = await trackRepository.GetContentVerificationPendingTrackIdsByRootAsync(libraryId, rootId, cancellationToken);
-            var storedByPath = storedEntries.ToDictionary(
-                entry => Path.GetFullPath(entry.Track.Metadata.Path),
+            // Root内Track・Fingerprint有無・Verification状態を1回のRepository readで取得し、
+            // 大規模LibraryのScan開始時に同じ集合を複数回SQLiteへ問い合わせない。
+            var rootScanStates = await trackRepository.GetRootScanStateAsync(libraryId, rootId, cancellationToken);
+            var storedEntries = rootScanStates
+                .Select(state => (state.Membership, state.Track))
+                .ToArray();
+            var missingFingerprintIds = rootScanStates
+                .Where(state => !state.HasFingerprint)
+                .Select(state => state.Track.Id)
+                .ToHashSet();
+            var verificationPendingTrackIds = rootScanStates
+                .Where(state => state.VerificationPending)
+                .Select(state => state.Track.Id)
+                .ToHashSet();
+            var storedByPath = rootScanStates.ToDictionary(
+                state => Path.GetFullPath(state.Track.Metadata.Path),
+                state => (state.Membership, state.Track),
                 StringComparer.OrdinalIgnoreCase);
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
