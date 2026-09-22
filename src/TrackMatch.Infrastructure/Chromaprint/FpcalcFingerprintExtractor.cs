@@ -57,7 +57,23 @@ public sealed class FpcalcFingerprintExtractor(string fpcalcPath = "fpcalc") : I
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsyncのキャンセルだけでは外部fpcalc自体は終了しないため、
+            // スキャン停止後に複数の解析プロセスがNASを読み続けないよう子プロセスごと明示的に終了する。
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
         var stdout = await stdoutTask.ConfigureAwait(false);
         var stderr = await stderrTask.ConfigureAwait(false);
 
