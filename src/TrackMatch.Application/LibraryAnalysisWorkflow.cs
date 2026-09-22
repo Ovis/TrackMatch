@@ -100,7 +100,7 @@ public sealed class LibraryAnalysisWorkflow
                         {
                             var timing = scanTiming.Snapshot();
                             _logger.LogInformation(
-                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataElapsedMs={MetadataElapsedMs} FingerprintCount={FingerprintCount} FingerprintElapsedMs={FingerprintElapsedMs} OtherElapsedMs={OtherElapsedMs}",
+                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
                                 library.Id,
                                 root.Id,
                                 value.CompletedFiles,
@@ -109,8 +109,7 @@ public sealed class LibraryAnalysisWorkflow
                                 timing.MetadataCount,
                                 timing.MetadataElapsedMilliseconds,
                                 timing.FingerprintCount,
-                                timing.FingerprintElapsedMilliseconds,
-                                Math.Max(0, rootStopwatch.ElapsedMilliseconds - timing.MetadataElapsedMilliseconds - timing.FingerprintElapsedMilliseconds));
+                                timing.FingerprintElapsedMilliseconds);
                         }
 
                         progress?.Report(new LibraryScanBatchProgress(
@@ -130,14 +129,13 @@ public sealed class LibraryAnalysisWorkflow
                     _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
                     var timing = scanTiming.Snapshot();
                     _logger.LogInformation(
-                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataElapsedMs={MetadataElapsedMs} FingerprintCount={FingerprintCount} FingerprintElapsedMs={FingerprintElapsedMs} OtherElapsedMs={OtherElapsedMs}",
+                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
                         library.Id,
                         root.Id,
                         timing.MetadataCount,
                         timing.MetadataElapsedMilliseconds,
                         timing.FingerprintCount,
-                        timing.FingerprintElapsedMilliseconds,
-                        Math.Max(0, rootStopwatch.ElapsedMilliseconds - timing.MetadataElapsedMilliseconds - timing.FingerprintElapsedMilliseconds));
+                        timing.FingerprintElapsedMilliseconds);
                 }
 
                 // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
@@ -444,7 +442,8 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// スキャン高速化の判断材料としてMetadata解析とFingerprint生成の累積時間を収集する。
+    /// スキャン高速化の判断材料としてMetadata解析とFingerprint生成の累積Worker時間を収集する。
+    /// 並列処理ではWorker時間の合計がWall-clock時間を超えるため、工程別の内訳時間としては扱わない。
     /// </summary>
     private sealed class ScanTimingDiagnostics
     {
@@ -503,7 +502,8 @@ public sealed class LibraryAnalysisWorkflow
     }
 
     /// <summary>
-    /// fpcalcによるFingerprint生成時間を計測するDecorator。
+    /// fpcalcによるFingerprint生成のWorker時間を計測するDecorator。
+    /// 並列実行中の各処理時間を合算するため、Wall-clock時間との差分計算には使用しない。
     /// </summary>
     private sealed class TimingFingerprintExtractor(
         TrackMatch.Core.Fingerprinting.IFingerprintExtractor inner,
