@@ -63,6 +63,112 @@ public sealed class CandidatePairGeneratorTests
         Assert.Equal(3, sketches.Count);
     }
 
+    [Fact]
+    public void GenerateFromSketches_RequiresThreeHitsAtSameOffset()
+    {
+        var sketches = new[]
+        {
+            new FingerprintSegmentSketch(1, 0, 0u),
+            new FingerprintSegmentSketch(1, 1, 0u),
+            new FingerprintSegmentSketch(1, 2, 0u),
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 1, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions());
+
+        Assert.Empty(pairs);
+    }
+
+    [Fact]
+    public void GenerateFromSketches_DispersedHitsAcrossOffsetsDoNotFormCandidate()
+    {
+        var sketches = new[]
+        {
+            new FingerprintSegmentSketch(1, 0, 0u),
+            new FingerprintSegmentSketch(1, 10, 0u),
+            new FingerprintSegmentSketch(1, 20, 0u),
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 9, 0u),
+            new FingerprintSegmentSketch(2, 18, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pairs = generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions());
+
+        Assert.Empty(pairs);
+    }
+
+    [Fact]
+    public void GenerateFromSketches_NonConsecutiveThreeHitsAtSameOffsetFormCandidate()
+    {
+        var sketches = new[]
+        {
+            new FingerprintSegmentSketch(1, 2, 0u),
+            new FingerprintSegmentSketch(1, 10, 1u),
+            new FingerprintSegmentSketch(1, 18, 3u),
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 8, 0u),
+            new FingerprintSegmentSketch(2, 16, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+
+        Assert.Equal(1, pair.TrackIdA);
+        Assert.Equal(2, pair.TrackIdB);
+        Assert.Equal(0, pair.MinimumSegmentHashDistance);
+    }
+
+    [Fact]
+    public void GenerateFromSketches_DominantOffsetUsesMostHitsThenMinimumDistance()
+    {
+        var sketches = new[]
+        {
+            new FingerprintSegmentSketch(1, 0, 3u),
+            new FingerprintSegmentSketch(1, 1, 3u),
+            new FingerprintSegmentSketch(1, 2, 3u),
+            new FingerprintSegmentSketch(1, 10, 0u),
+            new FingerprintSegmentSketch(1, 11, 0u),
+            new FingerprintSegmentSketch(1, 12, 0u),
+            new FingerprintSegmentSketch(1, 13, 0u),
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 1, 0u),
+            new FingerprintSegmentSketch(2, 2, 0u),
+            new FingerprintSegmentSketch(2, 5, 0u),
+            new FingerprintSegmentSketch(2, 6, 0u),
+            new FingerprintSegmentSketch(2, 7, 0u),
+            new FingerprintSegmentSketch(2, 8, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+
+        // offset=5は4hit、offset=0は3hitなので、距離が小さいoffset=0ではなくhit数の多いoffsetを採用する。
+        Assert.Equal(0, pair.MinimumSegmentHashDistance);
+    }
+
+    [Fact]
+    public void GenerateFromSketches_ReversedTrackInputKeepsOffsetSignCanonical()
+    {
+        var sketches = new[]
+        {
+            new FingerprintSegmentSketch(2, 0, 0u),
+            new FingerprintSegmentSketch(2, 8, 0u),
+            new FingerprintSegmentSketch(2, 16, 0u),
+            new FingerprintSegmentSketch(1, 2, 0u),
+            new FingerprintSegmentSketch(1, 10, 0u),
+            new FingerprintSegmentSketch(1, 18, 0u),
+        };
+        var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
+
+        var pair = Assert.Single(generator.GenerateFromSketches(sketches, null, new CandidateGenerationOptions()));
+
+        Assert.Equal(1, pair.TrackIdA);
+        Assert.Equal(2, pair.TrackIdB);
+    }
+
     private static StoredFingerprint CreateFingerprint(long trackId, uint value)
         => new(
             trackId,
