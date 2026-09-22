@@ -207,7 +207,7 @@ public sealed class IncrementalLibraryScanServiceTests
 
         var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
 
-        Assert.Equal(new ScanSessionSummary(1, 0, 0, 0, 0), result.Summary);
+        Assert.Equal(new ScanSessionSummary(1, 0, 0, 0, 0, 1), result.Summary);
         Assert.Empty(repository.MissingTrackIds);
         Assert.Equal("Metadata", Assert.Single(result.Errors).Stage);
     }
@@ -386,7 +386,7 @@ public sealed class IncrementalLibraryScanServiceTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<(StoredLibraryTrack Membership, StoredTrack Track)>>(
                 initialTracks.Select(track => (
-                    new StoredLibraryTrack(libraryId, track.Id, rootId, Path.GetFileName(track.Metadata.Path), false, null),
+                    new StoredLibraryTrack(libraryId, track.Id, rootId, Path.GetFileName(track.Metadata.Path), false),
                     track)).ToArray());
 
         public Task<IReadOnlySet<long>> GetTrackIdsWithoutFingerprintByRootAsync(
