@@ -46,14 +46,13 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         var lowerIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var upperIndex = new Dictionary<ushort, List<FingerprintSegmentSketch>>();
         var evidence = new Dictionary<CandidatePairKey, Dictionary<int, OffsetEvidence>>();
-        var matchedSegmentPairs = new HashSet<SegmentPairKey>();
         var completed = 0;
         progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
 
         foreach (var sketch in sketches)
         {
-            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, evidence, matchedSegmentPairs, targetTrackIds, options.MaximumSegmentHashHammingDistance);
-            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, evidence, matchedSegmentPairs, targetTrackIds, options.MaximumSegmentHashHammingDistance);
+            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: false);
+            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: true);
 
             AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
             AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
@@ -93,9 +92,9 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         ushort half,
         IReadOnlyDictionary<ushort, List<FingerprintSegmentSketch>> index,
         Dictionary<CandidatePairKey, Dictionary<int, OffsetEvidence>> evidence,
-        HashSet<SegmentPairKey> matchedSegmentPairs,
         IReadOnlySet<long>? targetTrackIds,
-        int maximumDistance)
+        int maximumDistance,
+        bool skipWhenLowerHalfAlreadyMatched)
     {
         foreach (var neighbor in EnumerateDistanceOneNeighborhood(half))
         {
@@ -124,17 +123,17 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
                     continue;
                 }
 
-                var currentIsA = current.TrackId < other.TrackId;
-                var a = currentIsA ? current : other;
-                var b = currentIsA ? other : current;
-                var segmentPair = new SegmentPairKey(a.TrackId, a.SegmentIndex, b.TrackId, b.SegmentIndex);
-
-                // 同じSegment Pairはlower/upper双方のindexから発見され得るため、Candidate hitは一度だけ数える。
-                if (!matchedSegmentPairs.Add(segmentPair))
+                // upper indexで見つかったPairがlower側でも距離1以内なら、lower探索ですでに同じhitを集計済み。
+                // 全Segment PairのHashSetを保持せず、この局所判定で二重計上だけを除外して大規模Libraryのメモリを抑える。
+                if (skipWhenLowerHalfAlreadyMatched
+                    && BitOperations.PopCount(unchecked((ushort)current.Hash) ^ unchecked((ushort)other.Hash)) <= 1)
                 {
                     continue;
                 }
 
+                var currentIsA = current.TrackId < other.TrackId;
+                var a = currentIsA ? current : other;
+                var b = currentIsA ? other : current;
                 var pair = CandidatePairKey.Create(a.TrackId, b.TrackId);
                 var offset = a.SegmentIndex - b.SegmentIndex;
                 if (!evidence.TryGetValue(pair, out var offsets))
@@ -181,7 +180,6 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
     }
 
     private sealed record OffsetEvidence(int HitCount, int MinimumHammingDistance);
-    private readonly record struct SegmentPairKey(long TrackIdA, int SegmentIndexA, long TrackIdB, int SegmentIndexB);
 }
 
 /// <summary>
