@@ -55,6 +55,7 @@ public sealed class IncrementalLibraryScanService(
 
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
         var total = 0;
+        var completedFiles = 0;
         var processed = 0;
         var added = 0;
         var updated = 0;
@@ -84,7 +85,7 @@ public sealed class IncrementalLibraryScanService(
                 if (!result.IsSuccess)
                 {
                     errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗しました。"));
-                    progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
                     continue;
                 }
 
@@ -118,7 +119,7 @@ public sealed class IncrementalLibraryScanService(
 
                 if (!needsFingerprint)
                 {
-                    progress?.Report(new IncrementalScanProgress(total, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
                     continue;
                 }
 
@@ -143,29 +144,27 @@ public sealed class IncrementalLibraryScanService(
 
                 if (pendingFingerprints.Count >= maxConcurrentFingerprintExtractions)
                 {
-                    await CompleteNextFingerprintAsync(
+                    var completedPath = await CompleteNextFingerprintAsync(
                         pendingFingerprints,
                         trackRepository,
                         fingerprintAlgorithm,
                         errors,
                         contentChanges,
-                        totalFiles,
-                        progress,
                         cancellationToken);
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
                 }
             }
 
             while (pendingFingerprints.Count != 0)
             {
-                await CompleteNextFingerprintAsync(
+                var completedPath = await CompleteNextFingerprintAsync(
                     pendingFingerprints,
                     trackRepository,
                     fingerprintAlgorithm,
                     errors,
                     contentChanges,
-                    totalFiles,
-                    progress,
                     cancellationToken);
+                progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
             }
 
             // Missing確定へ入る直前をCancellationの最終受付点とする。
@@ -196,14 +195,12 @@ public sealed class IncrementalLibraryScanService(
     /// <summary>
     /// 実行中のFingerprint生成から最初に完了した1件を取り出し、DB更新を直列に確定する。
     /// </summary>
-    private static async Task CompleteNextFingerprintAsync(
+    private static async Task<string> CompleteNextFingerprintAsync(
         List<PendingFingerprintExtraction> pending,
         ITrackRepository trackRepository,
         int fingerprintAlgorithm,
         List<IncrementalScanError> errors,
         List<ContentChangeNotice> contentChanges,
-        int? totalFiles,
-        IProgress<IncrementalScanProgress>? progress,
         CancellationToken cancellationToken)
     {
         var completedTask = await Task.WhenAny(pending.Select(item => item.Task));
@@ -240,7 +237,7 @@ public sealed class IncrementalLibraryScanService(
             errors.Add(new IncrementalScanError(item.Path, "Fingerprint", exception.Message));
         }
 
-        progress?.Report(new IncrementalScanProgress(1, totalFiles, item.Path));
+        return item.Path;
     }
 
     private sealed record PendingFingerprintExtraction(
