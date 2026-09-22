@@ -270,6 +270,61 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateGenerationCommit_UpdatesPairsPendingAndStateTogether()
+    {
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        var state = CandidateGenerationState.Create(2, new CandidateGenerationOptions());
+
+        await repository.CommitAsync(
+            fullRebuild: true,
+            affectedTrackIds: [_a1, _a2],
+            pairs: [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 1)],
+            completedPendingTrackIds: [_a1, _a2],
+            state,
+            TestContext.Current.CancellationToken);
+
+        var persisted = Assert.Single(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
+        Assert.Empty(await new SqliteCandidateGenerationWorkRepository(_database, _libraryAId)
+            .GetPendingTrackIdsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(
+            state,
+            await new SqliteCandidateGenerationStateRepository(_database, _libraryAId)
+                .GetAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CandidateGenerationCommit_InvalidPairRollsBackWithoutChangingCurrentState()
+    {
+        var originalPair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.ReplaceAllAsync(
+            [new CandidatePair(originalPair.TrackIdA, originalPair.TrackIdB, 1)],
+            TestContext.Current.CancellationToken);
+        var stateRepository = new SqliteCandidateGenerationStateRepository(_database, _libraryAId);
+        var originalState = CandidateGenerationState.Create(2, new CandidateGenerationOptions());
+        await stateRepository.SaveAsync(originalState, TestContext.Current.CancellationToken);
+        var invalidPair = CandidatePairKey.Create(_a1, _b1);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CommitAsync(
+            fullRebuild: true,
+            affectedTrackIds: [_a1],
+            pairs: [new CandidatePair(invalidPair.TrackIdA, invalidPair.TrackIdB, 1)],
+            completedPendingTrackIds: [_a1],
+            originalState with { MinimumDominantOffsetHits = 4 },
+            TestContext.Current.CancellationToken));
+
+        var persisted = Assert.Single(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(originalPair, CandidatePairKey.Create(persisted.TrackIdA, persisted.TrackIdB));
+        Assert.Contains(
+            _a1,
+            await new SqliteCandidateGenerationWorkRepository(_database, _libraryAId)
+                .GetPendingTrackIdsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(originalState, await stateRepository.GetAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_RejectsCrossLibraryPair()
     {
         var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
