@@ -38,21 +38,7 @@ public sealed class SqliteCandidateClassificationRepository(
             transaction,
             cancellationToken: cancellationToken))).ToArray();
         var existingByPair = existingRows.ToDictionary(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB));
-        var incomingByPair = classifications.ToDictionary(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB));
-
-        // Missing Trackを含むClassificationは今回の再分類対象ではないためexistingRowsへ含めない。
-        // Active Pairのうち今回の入力から消えたものだけを削除し、同Content復帰用Machine Cacheは保持する。
-        var obsoletePairs = existingByPair.Keys.Where(key => !incomingByPair.ContainsKey(key)).ToArray();
-        if (obsoletePairs.Length != 0)
-        {
-            await connection.ExecuteAsync(new CommandDefinition(
-                "DELETE FROM CandidateClassifications WHERE TrackIdA = @TrackIdA AND TrackIdB = @TrackIdB;",
-                obsoletePairs.Select(key => new { key.TrackIdA, key.TrackIdB }),
-                transaction,
-                cancellationToken: cancellationToken));
-        }
-
-        // 同じ入力を再分類しただけでClassifiedAtを更新すると、Human Verdict後の通常Scanまで
+        // ClassificationもComparison Cacheに従属する派生Cacheとして保持し、Candidate離脱だけでは削除しない。\n        // 同じ入力を再分類しただけでClassifiedAtを更新すると、Human Verdict後の通常Scanまで
         // 「Machine Resultが更新された」と誤認する。分類内容またはProfileが実際に変化したPairだけ更新する。
         var changed = classifications
             .Where(item =>
@@ -109,6 +95,12 @@ public sealed class SqliteCandidateClassificationRepository(
             INNER JOIN CandidateComparisons x
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
                AND x.ComparisonVersion = @ComparisonVersion
+            INNER JOIN CandidatePairs p
+                ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = x.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = x.FingerprintBExtractedAtUtcTicks
             INNER JOIN Tracks a ON a.Id = c.TrackIdA AND a.IsMissing = 0
             INNER JOIN Tracks b ON b.Id = c.TrackIdB AND b.IsMissing = 0
             WHERE @LibraryId IS NULL
@@ -147,6 +139,12 @@ public sealed class SqliteCandidateClassificationRepository(
             INNER JOIN CandidateComparisons x
                 ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
                AND x.ComparisonVersion = @ComparisonVersion
+            INNER JOIN CandidatePairs p
+                ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = x.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = x.FingerprintBExtractedAtUtcTicks
             INNER JOIN Tracks a ON a.Id = c.TrackIdA AND a.IsMissing = 0
             INNER JOIN Tracks b ON b.Id = c.TrackIdB AND b.IsMissing = 0
             WHERE (
