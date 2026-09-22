@@ -111,7 +111,8 @@ public sealed class CandidateGenerationService(
                 allSketches,
                 targetTrackIds: null,
                 options,
-                pairProgress);
+                pairProgress,
+                cancellationToken);
         }
         else if (affectedTrackIds.Count == 0)
         {
@@ -129,7 +130,8 @@ public sealed class CandidateGenerationService(
                 allSketches,
                 affectedTrackIds,
                 options,
-                pairProgress);
+                pairProgress,
+                cancellationToken);
         }
 
         var reviewedPairs = await reviewRepository.GetExcludedPairKeysAsync(cancellationToken);
