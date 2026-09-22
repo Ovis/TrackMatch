@@ -319,15 +319,17 @@ public sealed class LibraryAnalysisWorkflow
     {
         var reviewRepository = new SqliteCandidateReviewRepository(database);
         var sketcher = new FingerprintSegmentSketcher();
+        var candidatePairRepository = new SqliteCandidatePairRepository(database, libraryId);
         return new CandidateGenerationService(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteFingerprintSegmentSketchRepository(database, libraryId),
-            new SqliteCandidatePairRepository(database, libraryId),
+            candidatePairRepository,
             reviewRepository,
             sketcher,
             new CandidatePairGenerator(sketcher),
             new SqliteCandidateGenerationWorkRepository(database, libraryId),
-            new SqliteCandidateGenerationStateRepository(database, libraryId));
+            new SqliteCandidateGenerationStateRepository(database, libraryId),
+            candidatePairRepository);
     }
 
     private static CandidateAnalysisService CreateCandidateAnalysisService(
