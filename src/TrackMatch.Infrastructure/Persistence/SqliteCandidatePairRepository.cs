@@ -38,7 +38,8 @@ public sealed class SqliteCandidatePairRepository(
             transaction,
             cancellationToken: cancellationToken))).ToArray();
         var incomingByKey = pairs.ToDictionary(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
-        // CandidatePairsは現在のCandidate集合だけを表す。Human VerdictとComparison Cacheは独立して保持する。\n        var obsolete = existingRows
+        // CandidatePairsは現在のCandidate集合だけを表す。Human VerdictとComparison Cacheは独立して保持する。
+        var obsolete = existingRows
             .Where(row =>
             {
                 var key = CandidatePairKey.Create(row.TrackIdA, row.TrackIdB);
