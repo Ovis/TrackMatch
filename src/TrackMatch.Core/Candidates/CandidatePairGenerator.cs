@@ -37,7 +37,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         IReadOnlyList<FingerprintSegmentSketch> sketches,
         IReadOnlySet<long>? targetTrackIds,
         CandidateGenerationOptions options,
-        IProgress<CandidatePairGenerationProgress>? progress = null)
+        IProgress<CandidatePairGenerationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sketches);
         ArgumentNullException.ThrowIfNull(options);
@@ -51,13 +52,19 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 
         foreach (var sketch in sketches)
         {
-            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: false);
-            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            MatchHalf(sketch, unchecked((ushort)sketch.Hash), lowerIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: false, cancellationToken);
+            MatchHalf(sketch, unchecked((ushort)(sketch.Hash >> 16)), upperIndex, evidence, targetTrackIds, options.MaximumSegmentHashHammingDistance, skipWhenLowerHalfAlreadyMatched: true, cancellationToken);
 
             AddToIndex(lowerIndex, unchecked((ushort)sketch.Hash), sketch);
             AddToIndex(upperIndex, unchecked((ushort)(sketch.Hash >> 16)), sketch);
             completed++;
-            progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
+            // 大規模Libraryでは数十万Sketchになるため、1件ごとの通知でUIキューを埋めない。
+            // 最終件は必ず通知しつつ、途中経過は256件単位に抑える。
+            if (completed == sketches.Count || (completed & 0xff) == 0)
+            {
+                progress?.Report(new CandidatePairGenerationProgress(completed, sketches.Count));
+            }
         }
 
         return evidence
@@ -94,7 +101,8 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
         Dictionary<CandidatePairKey, Dictionary<int, OffsetEvidence>> evidence,
         IReadOnlySet<long>? targetTrackIds,
         int maximumDistance,
-        bool skipWhenLowerHalfAlreadyMatched)
+        bool skipWhenLowerHalfAlreadyMatched,
+        CancellationToken cancellationToken)
     {
         foreach (var neighbor in EnumerateDistanceOneNeighborhood(half))
         {
@@ -105,6 +113,7 @@ public sealed class CandidatePairGenerator(FingerprintSegmentSketcher sketcher)
 
             foreach (var other in indexedSketches)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (other.TrackId == current.TrackId)
                 {
                     continue;
