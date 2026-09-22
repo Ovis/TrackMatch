@@ -101,7 +101,7 @@ public sealed class CandidateGenerationService(
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
                 targetTrackIds: null,
-                options.MaximumSegmentHashHammingDistance,
+                options,
                 pairProgress);
         }
         else if (affectedTrackIds.Count == 0)
@@ -119,7 +119,7 @@ public sealed class CandidateGenerationService(
             generatedPairs = pairGenerator.GenerateFromSketches(
                 allSketches,
                 affectedTrackIds,
-                options.MaximumSegmentHashHammingDistance,
+                options,
                 pairProgress);
         }
 
