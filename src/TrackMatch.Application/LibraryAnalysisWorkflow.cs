@@ -22,6 +22,7 @@ public sealed class LibraryAnalysisWorkflow
     private readonly string _databasePath;
     private readonly string _fpcalcPath;
     private readonly int _fingerprintAlgorithm;
+    private readonly int _maxConcurrentFingerprintExtractions;
     private readonly ILogger<LibraryAnalysisWorkflow> _logger;
 
     /// <summary>
@@ -34,6 +35,7 @@ public sealed class LibraryAnalysisWorkflow
         string databasePath,
         string fpcalcPath = "fpcalc",
         int fingerprintAlgorithm = 2,
+        int maxConcurrentFingerprintExtractions = 4,
         ILogger<LibraryAnalysisWorkflow>? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
@@ -43,9 +45,15 @@ public sealed class LibraryAnalysisWorkflow
             throw new ArgumentOutOfRangeException(nameof(fingerprintAlgorithm));
         }
 
+        if (maxConcurrentFingerprintExtractions <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrentFingerprintExtractions));
+        }
+
         _databasePath = databasePath;
         _fpcalcPath = fpcalcPath;
         _fingerprintAlgorithm = fingerprintAlgorithm;
+        _maxConcurrentFingerprintExtractions = maxConcurrentFingerprintExtractions;
         _logger = logger ?? NullLogger<LibraryAnalysisWorkflow>.Instance;
     }
 
@@ -348,7 +356,8 @@ public sealed class LibraryAnalysisWorkflow
                 new SqliteTrackRepository(database),
                 new SqliteScanSessionRepository(database),
                 new TimingFingerprintExtractor(new FpcalcFingerprintExtractor(_fpcalcPath), timing),
-                _fingerprintAlgorithm),
+                _fingerprintAlgorithm,
+                _maxConcurrentFingerprintExtractions),
             timing);
     }
 
