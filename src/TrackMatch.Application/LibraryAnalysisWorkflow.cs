@@ -77,11 +77,31 @@ public sealed class LibraryAnalysisWorkflow
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var root = library.Roots[index];
+                    var rootStopwatch = Stopwatch.StartNew();
                     var rootProgress = new Progress<IncrementalScanProgress>(value =>
                     {
                         if (_logger.IsEnabled(LogLevel.Debug) && (value.CompletedFiles % 100 == 0 || value.CompletedFiles == value.TotalFiles))
                         {
                             _logger.LogDebug("スキャン進捗 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex} Completed={Completed} Total={Total} ThreadId={ThreadId}", library.Id, root.Id, index + 1, value.CompletedFiles, value.TotalFiles, Environment.CurrentManagedThreadId);
+                        }
+
+                        // 数万件の初回スキャンを完走しなくてもボトルネックを判断できるよう、
+                        // 一定件数ごとに現在までの累積時間を出す。計測値自体はResetせずRoot全体の累積を維持する。
+                        if (value.CompletedFiles > 0 && value.CompletedFiles % 500 == 0)
+                        {
+                            var timing = scanTiming.Snapshot();
+                            _logger.LogInformation(
+                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataElapsedMs={MetadataElapsedMs} FingerprintCount={FingerprintCount} FingerprintElapsedMs={FingerprintElapsedMs} OtherElapsedMs={OtherElapsedMs}",
+                                library.Id,
+                                root.Id,
+                                value.CompletedFiles,
+                                value.TotalFiles,
+                                rootStopwatch.ElapsedMilliseconds,
+                                timing.MetadataCount,
+                                timing.MetadataElapsedMilliseconds,
+                                timing.FingerprintCount,
+                                timing.FingerprintElapsedMilliseconds,
+                                Math.Max(0, rootStopwatch.ElapsedMilliseconds - timing.MetadataElapsedMilliseconds - timing.FingerprintElapsedMilliseconds));
                         }
 
                         progress?.Report(new LibraryScanBatchProgress(
@@ -95,12 +115,11 @@ public sealed class LibraryAnalysisWorkflow
                     // Root ScanはTrack単位で完了済み更新を保持するため、呼び出し後に例外となっても
                     // Global Groupの派生状態をCurrent Verdictへ追従させる必要がある。
                     scanMayHaveCommittedChanges = true;
-                    var rootStopwatch = Stopwatch.StartNew();
                     _logger.LogInformation("Rootスキャン開始 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Path={Path}", library.Id, root.Id, index + 1, library.Roots.Count, root.Path);
                     var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
                     results.Add(rootResult);
                     _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
-                    var timing = scanTiming.SnapshotAndReset();
+                    var timing = scanTiming.Snapshot();
                     _logger.LogInformation(
                         "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataElapsedMs={MetadataElapsedMs} FingerprintCount={FingerprintCount} FingerprintElapsedMs={FingerprintElapsedMs} OtherElapsedMs={OtherElapsedMs}",
                         library.Id,
@@ -436,12 +455,12 @@ public sealed class LibraryAnalysisWorkflow
             Interlocked.Add(ref _fingerprintElapsedTicks, elapsedTicks);
         }
 
-        public ScanTimingSnapshot SnapshotAndReset()
+        public ScanTimingSnapshot Snapshot()
             => new(
-                Interlocked.Exchange(ref _metadataCount, 0),
-                Stopwatch.GetElapsedTime(0, Interlocked.Exchange(ref _metadataElapsedTicks, 0)).TotalMilliseconds,
-                Interlocked.Exchange(ref _fingerprintCount, 0),
-                Stopwatch.GetElapsedTime(0, Interlocked.Exchange(ref _fingerprintElapsedTicks, 0)).TotalMilliseconds);
+                Interlocked.Read(ref _metadataCount),
+                Stopwatch.GetElapsedTime(0, Interlocked.Read(ref _metadataElapsedTicks)).TotalMilliseconds,
+                Interlocked.Read(ref _fingerprintCount),
+                Stopwatch.GetElapsedTime(0, Interlocked.Read(ref _fingerprintElapsedTicks)).TotalMilliseconds);
     }
 
     /// <summary>
