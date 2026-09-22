@@ -68,18 +68,39 @@ public sealed class IncrementalLibraryScanService(
         {
             var storedEntries = await trackRepository.GetByRootAsync(libraryId, rootId, cancellationToken);
             var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootAsync(libraryId, rootId, cancellationToken);
+            var verificationPendingTrackIds = await trackRepository.GetContentVerificationPendingTrackIdsByRootAsync(libraryId, rootId, cancellationToken);
             var storedByPath = storedEntries.ToDictionary(
                 entry => Path.GetFullPath(entry.Track.Metadata.Path),
                 StringComparer.OrdinalIgnoreCase);
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var result in scanner.Scan(fullRootPath, cancellationToken))
+            // 未変更・正常状態の既知FileはMetadata Decodeと毎FileのSQLite更新を省略する。
+            // Missing復帰、Fingerprint欠落、Verification再試行は状態更新が必要なので必ず通常経路へ戻す。
+            bool CanSkipMetadata(LibraryFileSnapshot snapshot)
+            {
+                var path = Path.GetFullPath(snapshot.Path);
+                return storedByPath.TryGetValue(path, out var entry)
+                    && !entry.Track.IsMissing
+                    && !missingFingerprintIds.Contains(entry.Track.Id)
+                    && !verificationPendingTrackIds.Contains(entry.Track.Id)
+                    && entry.Track.Metadata.FileSize == snapshot.FileSize
+                    && entry.Track.Metadata.LastWriteTimeUtc == snapshot.LastWriteTimeUtc;
+            }
+
+            foreach (var result in scanner.Scan(fullRootPath, CanSkipMetadata, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 total++;
 
                 var fullPath = Path.GetFullPath(result.Path);
                 seenPaths.Add(fullPath);
+
+                if (result.MetadataSkipped)
+                {
+                    processed++;
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    continue;
+                }
 
                 if (!result.IsSuccess)
                 {
