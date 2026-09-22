@@ -86,12 +86,12 @@ public sealed class CandidatePairGeneratorTests
     {
         var sketches = new[]
         {
-            new FingerprintSegmentSketch(1, 0, 0u),
-            new FingerprintSegmentSketch(1, 10, 0u),
-            new FingerprintSegmentSketch(1, 20, 0u),
-            new FingerprintSegmentSketch(2, 0, 0u),
-            new FingerprintSegmentSketch(2, 9, 0u),
-            new FingerprintSegmentSketch(2, 18, 0u),
+            new FingerprintSegmentSketch(1, 0, 0x00000000u),
+            new FingerprintSegmentSketch(1, 10, 0xffffffffu),
+            new FingerprintSegmentSketch(1, 20, 0xaaaaaaaau),
+            new FingerprintSegmentSketch(2, 0, 0x00000000u),
+            new FingerprintSegmentSketch(2, 9, 0xffffffffu),
+            new FingerprintSegmentSketch(2, 18, 0xaaaaaaaau),
         };
         var generator = new CandidatePairGenerator(new FingerprintSegmentSketcher());
 
