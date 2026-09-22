@@ -451,7 +451,7 @@ public sealed class LibraryAnalysisWorkflow
         IAudioMetadataReader inner,
         ScanTimingDiagnostics timing) : IAudioMetadataReader
     {
-        public Models.AudioTrackMetadata Read(string path)
+        public TrackMatch.Core.Models.AudioTrackMetadata Read(string path)
         {
             var started = Stopwatch.GetTimestamp();
             try
@@ -469,10 +469,10 @@ public sealed class LibraryAnalysisWorkflow
     /// fpcalcによるFingerprint生成時間を計測するDecorator。
     /// </summary>
     private sealed class TimingFingerprintExtractor(
-        Fingerprinting.IFingerprintExtractor inner,
-        ScanTimingDiagnostics timing) : Fingerprinting.IFingerprintExtractor
+        TrackMatch.Core.Fingerprinting.IFingerprintExtractor inner,
+        ScanTimingDiagnostics timing) : TrackMatch.Core.Fingerprinting.IFingerprintExtractor
     {
-        public async Task<Fingerprinting.AudioFingerprint> ExtractAsync(
+        public async Task<TrackMatch.Core.Fingerprinting.AudioFingerprint> ExtractAsync(
             string path,
             CancellationToken cancellationToken = default)
         {
