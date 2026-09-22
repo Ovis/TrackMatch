@@ -68,7 +68,7 @@ public sealed class LibraryAnalysisWorkflow
             try
             {
                 var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
-                var service = CreateScanService(database);
+                var (service, scanTiming) = CreateScanService(database);
                 var results = new List<IncrementalScanResult>(library.Roots.Count);
 
                 // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
@@ -100,6 +100,16 @@ public sealed class LibraryAnalysisWorkflow
                     var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
                     results.Add(rootResult);
                     _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
+                    var timing = scanTiming.SnapshotAndReset();
+                    _logger.LogInformation(
+                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataElapsedMs={MetadataElapsedMs} FingerprintCount={FingerprintCount} FingerprintElapsedMs={FingerprintElapsedMs} OtherElapsedMs={OtherElapsedMs}",
+                        library.Id,
+                        root.Id,
+                        timing.MetadataCount,
+                        timing.MetadataElapsedMilliseconds,
+                        timing.FingerprintCount,
+                        timing.FingerprintElapsedMilliseconds,
+                        Math.Max(0, rootStopwatch.ElapsedMilliseconds - timing.MetadataElapsedMilliseconds - timing.FingerprintElapsedMilliseconds));
                 }
 
                 // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
@@ -310,13 +320,18 @@ public sealed class LibraryAnalysisWorkflow
         }
     }
 
-    private IncrementalLibraryScanService CreateScanService(SqliteDatabase database)
-        => new(
-            new AudioLibraryScanner(new AudioMetadataReaderDispatcher()),
-            new SqliteTrackRepository(database),
-            new SqliteScanSessionRepository(database),
-            new FpcalcFingerprintExtractor(_fpcalcPath),
-            _fingerprintAlgorithm);
+    private (IncrementalLibraryScanService Service, ScanTimingDiagnostics Timing) CreateScanService(SqliteDatabase database)
+    {
+        var timing = new ScanTimingDiagnostics();
+        return (
+            new IncrementalLibraryScanService(
+                new AudioLibraryScanner(new TimingAudioMetadataReader(new AudioMetadataReaderDispatcher(), timing)),
+                new SqliteTrackRepository(database),
+                new SqliteScanSessionRepository(database),
+                new TimingFingerprintExtractor(new FpcalcFingerprintExtractor(_fpcalcPath), timing),
+                _fingerprintAlgorithm),
+            timing);
+    }
 
     private static CandidateGenerationService CreateCandidateGenerationService(
         SqliteDatabase database,
@@ -398,6 +413,86 @@ public sealed class LibraryAnalysisWorkflow
             throw new InvalidOperationException("別のスキャンが既に実行中です。完了またはキャンセルしてから再実行してください。");
         }
     }
+
+    /// <summary>
+    /// スキャン高速化の判断材料としてMetadata解析とFingerprint生成の累積時間を収集する。
+    /// </summary>
+    private sealed class ScanTimingDiagnostics
+    {
+        private long _metadataCount;
+        private long _metadataElapsedTicks;
+        private long _fingerprintCount;
+        private long _fingerprintElapsedTicks;
+
+        public void RecordMetadata(long elapsedTicks)
+        {
+            Interlocked.Increment(ref _metadataCount);
+            Interlocked.Add(ref _metadataElapsedTicks, elapsedTicks);
+        }
+
+        public void RecordFingerprint(long elapsedTicks)
+        {
+            Interlocked.Increment(ref _fingerprintCount);
+            Interlocked.Add(ref _fingerprintElapsedTicks, elapsedTicks);
+        }
+
+        public ScanTimingSnapshot SnapshotAndReset()
+            => new(
+                Interlocked.Exchange(ref _metadataCount, 0),
+                Stopwatch.GetElapsedTime(0, Interlocked.Exchange(ref _metadataElapsedTicks, 0)).TotalMilliseconds,
+                Interlocked.Exchange(ref _fingerprintCount, 0),
+                Stopwatch.GetElapsedTime(0, Interlocked.Exchange(ref _fingerprintElapsedTicks, 0)).TotalMilliseconds);
+    }
+
+    /// <summary>
+    /// Metadata Readerの実処理時間だけを計測し、既存の読み取り処理には影響を与えないDecorator。
+    /// </summary>
+    private sealed class TimingAudioMetadataReader(
+        IAudioMetadataReader inner,
+        ScanTimingDiagnostics timing) : IAudioMetadataReader
+    {
+        public Models.AudioTrackMetadata Read(string path)
+        {
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                return inner.Read(path);
+            }
+            finally
+            {
+                timing.RecordMetadata(Stopwatch.GetTimestamp() - started);
+            }
+        }
+    }
+
+    /// <summary>
+    /// fpcalcによるFingerprint生成時間を計測するDecorator。
+    /// </summary>
+    private sealed class TimingFingerprintExtractor(
+        Fingerprinting.IFingerprintExtractor inner,
+        ScanTimingDiagnostics timing) : Fingerprinting.IFingerprintExtractor
+    {
+        public async Task<Fingerprinting.AudioFingerprint> ExtractAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                return await inner.ExtractAsync(path, cancellationToken);
+            }
+            finally
+            {
+                timing.RecordFingerprint(Stopwatch.GetTimestamp() - started);
+            }
+        }
+    }
+
+    private sealed record ScanTimingSnapshot(
+        long MetadataCount,
+        double MetadataElapsedMilliseconds,
+        long FingerprintCount,
+        double FingerprintElapsedMilliseconds);
 }
 
 /// <summary>
