@@ -35,6 +35,15 @@ public interface ITrackRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 指定RootでContent Verificationの再試行が必要なTrack IDを一括取得する。
+    /// </summary>
+    Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlySet<long>>(new HashSet<long>());
+
+    /// <summary>
     /// 正常なRoot Scanで確認したTrackのMembershipを作成または更新する。
     /// </summary>
     Task EnsureMembershipAsync(
