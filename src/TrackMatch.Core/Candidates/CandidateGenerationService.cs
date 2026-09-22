@@ -141,11 +141,13 @@ public sealed class CandidateGenerationService(
             .Where(activeByTrackId.ContainsKey)
             .Where(affectedTrackIds.Contains)
             .ToArray();
+        var shouldPersistGeneration = fullRebuild || affectedTrackIds.Count != 0;
 
-        if (commitRepository is not null)
+        if (commitRepository is not null && shouldPersistGeneration)
         {
             // Production SQLiteではCandidate置換、Pending解除、完了マーカー更新を同一Transactionで確定する。
             // 途中失敗で「新StateだがCandidateは旧状態」のような部分Commitを残さないための境界である。
+            // 変更もPendingも無い通常起動では現在集合を書き換える必要がないため、不要なTransactionとState更新を避ける。
             await commitRepository.CommitAsync(
                 fullRebuild,
                 affectedTrackIds.ToArray(),
