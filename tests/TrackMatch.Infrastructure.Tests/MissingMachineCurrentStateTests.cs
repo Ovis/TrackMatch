@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Fingerprinting;
 using TrackMatch.Core.Classification;
 using TrackMatch.Core.Models;
 using TrackMatch.Infrastructure.Persistence;
@@ -163,6 +164,7 @@ public sealed class MissingMachineCurrentStateTests : IAsyncLifetime
             trackId,
             fileName,
             TestContext.Current.CancellationToken);
+        await repository.SaveFingerprintAsync(trackId, new AudioFingerprint(Path.Combine(_directory, fileName), TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]), 2, TestContext.Current.CancellationToken);
         return trackId;
     }
 
