@@ -293,8 +293,7 @@ public sealed class SqliteTrackManagementRepository(SqliteDatabase database)
         await connection.ExecuteAsync(new CommandDefinition(
             """
             UPDATE LibraryTracks
-            SET CandidateGenerationPending = 1,
-                CandidateGenerationVersion = NULL
+            SET CandidateGenerationPending = 1
             WHERE TrackId IN @TrackIds;
             """,
             new { TrackIds = ids },
