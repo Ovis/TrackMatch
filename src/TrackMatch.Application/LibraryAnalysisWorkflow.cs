@@ -379,14 +379,15 @@ public sealed class LibraryAnalysisWorkflow
             candidatePairRepository);
     }
 
-    private static CandidateAnalysisService CreateCandidateAnalysisService(
+    private CandidateAnalysisService CreateCandidateAnalysisService(
         SqliteDatabase database,
         long libraryId)
         => new(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteCandidatePairRepository(database, libraryId),
             new SqliteCandidateComparisonRepository(database, libraryId),
-            new FingerprintComparer());
+            new FingerprintComparer(),
+            new ForwardingLogger<CandidateAnalysisService>(_logger));
 
     private static async Task<Library> GetRequiredLibraryAsync(
         SqliteDatabase database,
