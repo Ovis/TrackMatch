@@ -207,7 +207,7 @@ public sealed class IncrementalLibraryScanServiceTests
 
         var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
 
-        Assert.Equal(new ScanSessionSummary(1, 0, 0, 0, 0, 1), result.Summary);
+        Assert.Equal(new ScanSessionSummary(1, 0, 0, 0, 0), result.Summary);
         Assert.Empty(repository.MissingTrackIds);
         Assert.Equal("Metadata", Assert.Single(result.Errors).Stage);
     }
