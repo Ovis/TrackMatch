@@ -50,6 +50,10 @@ public sealed class IncrementalLibraryScanService(
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
+        // 対象Pathを1回だけ列挙して保持し、今回の正確な総件数を確定してからMetadata/Fingerprint処理へ進む。
+        // 件数取得のための2回目のファイルシステム走査は行わない。
+        var scanPlan = scanner.PrepareScan(fullRootPath, cancellationToken);
+        progress?.Report(new IncrementalScanProgress(0, scanPlan.TotalFiles, null));
 
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
         var total = 0;
@@ -67,11 +71,6 @@ public sealed class IncrementalLibraryScanService(
             // Root内Track・Fingerprint有無・Verification状態を1回のRepository readで取得し、
             // 大規模LibraryのScan開始時に同じ集合を複数回SQLiteへ問い合わせない。
             var rootScanStates = await trackRepository.GetRootScanStateAsync(libraryId, rootId, cancellationToken);
-            // NAS全体を件数取得のためだけに事前走査すると列挙コストが二重になるため、
-            // 前回ScanでDBへ記録済みのRoot所属Track数を今回の進捗総数として再利用する。
-            // 新規追加・削除があるScanでは実際の件数と差が出るが、完了時刻の目安を高速化を損なわず表示することを優先する。
-            int? totalFiles = rootScanStates.Count == 0 ? null : rootScanStates.Count;
-            progress?.Report(new IncrementalScanProgress(0, totalFiles, null));
             var storedEntries = rootScanStates
                 .Select(state => (state.Membership, state.Track))
                 .ToArray();
@@ -102,7 +101,7 @@ public sealed class IncrementalLibraryScanService(
                     && entry.Track.Metadata.LastWriteTimeUtc == snapshot.LastWriteTimeUtc;
             }
 
-            foreach (var result in scanner.Scan(fullRootPath, CanSkipMetadata, cancellationToken))
+            foreach (var result in scanner.Scan(scanPlan, CanSkipMetadata, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 total++;
@@ -113,14 +112,14 @@ public sealed class IncrementalLibraryScanService(
                 if (result.MetadataSkipped)
                 {
                     processed++;
-                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, scanPlan.TotalFiles, fullPath));
                     continue;
                 }
 
                 if (!result.IsSuccess)
                 {
                     errors.Add(new IncrementalScanError(fullPath, "Metadata", result.ErrorMessage ?? "メタデータ読み取りに失敗しました。"));
-                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, scanPlan.TotalFiles, fullPath));
                     continue;
                 }
 
@@ -155,7 +154,7 @@ public sealed class IncrementalLibraryScanService(
 
                 if (!needsFingerprint)
                 {
-                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, scanPlan.TotalFiles, fullPath));
                     continue;
                 }
 
@@ -187,7 +186,7 @@ public sealed class IncrementalLibraryScanService(
                         errors,
                         contentChanges,
                         cancellationToken);
-                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, scanPlan.TotalFiles, completedPath));
                 }
             }
 
@@ -200,7 +199,7 @@ public sealed class IncrementalLibraryScanService(
                     errors,
                     contentChanges,
                     cancellationToken);
-                progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, completedPath));
+                progress?.Report(new IncrementalScanProgress(++completedFiles, scanPlan.TotalFiles, completedPath));
             }
 
             // Missing確定へ入る直前をCancellationの最終受付点とする。
