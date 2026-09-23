@@ -87,7 +87,7 @@ public sealed class CandidateAnalysisService(
             if (comparisonStopwatch.Elapsed >= SlowComparisonThreshold)
             {
                 // 遅い比較だけ詳細を残し、通常ケースで大量のログを出して計測自体を遅くしない。
-                _timing?.Invoke(CandidateAnalysisTiming.SlowComparison(
+                _timing?.Invoke(CandidateAnalysisTiming.ForSlowComparison(
                     completed + 1,
                     pairs.Count,
                     pair.TrackIdA,
@@ -190,7 +190,7 @@ public sealed record CandidateAnalysisTiming(
     /// <summary>
     /// 閾値を超えた単一比較の診断値を生成する。
     /// </summary>
-    public static CandidateAnalysisTiming SlowComparison(
+    public static CandidateAnalysisTiming ForSlowComparison(
         int completedPairs,
         int totalPairs,
         long trackIdA,
