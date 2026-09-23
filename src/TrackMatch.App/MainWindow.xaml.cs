@@ -370,30 +370,10 @@ public partial class MainWindow : Window
         => RefreshRelativeOffsetText();
 
     /// <summary>
-    /// Aを基準に入力された相対Offsetを、現在のA Offsetを保ったままB Offsetへ変換する。
+    /// Aを基準に入力された相対OffsetをPlayback ViewModelへ確定する。
     /// </summary>
     private void CommitRelativeOffsetText()
-    {
-        var text = RelativeOffsetTextBox.Text.Trim();
-        if (text.EndsWith("s", StringComparison.OrdinalIgnoreCase))
-        {
-            text = text[..^1].Trim();
-        }
-
-        if ((!decimal.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var seconds)
-             && !decimal.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out seconds))
-            || seconds < (decimal)TimeSpan.MinValue.TotalSeconds
-            || seconds > (decimal)TimeSpan.MaxValue.TotalSeconds)
-        {
-            RefreshRelativeOffsetText();
-            return;
-        }
-
-        var relativeOffset = TimeSpan.FromTicks(
-            checked((long)Math.Round(seconds * TimeSpan.TicksPerSecond, MidpointRounding.AwayFromZero)));
-        var targetB = TimeSpan.FromSeconds(_viewModel.Playback.OffsetASeconds) + relativeOffset;
-        _viewModel.Playback.CommitOffsetText(isTrackA: false, targetB.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
-    }
+        => _viewModel.Playback.CommitRelativeOffsetText(RelativeOffsetTextBox.Text);
 
     /// <summary>
     /// 編集中の文字列を破棄し、ViewModelが保持する現在の相対Offset表示へ戻す。
