@@ -61,6 +61,7 @@ public sealed class MainWindowViewModelGenreFilterTests
             [
                 CreateItem(1, 2, ["J-Pop"], ["J-POP"]),
                 CreateItem(2, 3, ["J-POP"], ["j-pop"]),
+                CreateItem(3, 4, ["j-pop"], ["J-POP"]),
             ]);
         RefreshGenreOptions(viewModel);
         viewModel.CandidateListMode = CandidateReviewListMode.All;
