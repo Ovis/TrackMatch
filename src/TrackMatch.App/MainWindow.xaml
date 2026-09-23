@@ -203,8 +203,8 @@
                         <TextBlock Grid.Column="12"
                                    VerticalAlignment="Center"
                                    Text="%" />
-                        <Popup Width="280"
-                               Grid.ColumnSpan="13"
+                        <Popup Grid.ColumnSpan="13"
+                               Width="280"
                                AllowsTransparency="True"
                                IsOpen="{Binding IsChecked, ElementName=GenreFilterToggle}"
                                Placement="Bottom"
