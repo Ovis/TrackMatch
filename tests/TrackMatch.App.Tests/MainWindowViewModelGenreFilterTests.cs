@@ -141,7 +141,7 @@ public sealed class MainWindowViewModelGenreFilterTests
 
     private static void SelectGenre(MainWindowViewModel viewModel, string displayName)
     {
-        var option = Assert.Single(viewModel.GenreOptions.Where(item => item.DisplayName == displayName));
+        var option = Assert.Single(viewModel.GenreOptions, item => item.DisplayName == displayName);
         option.IsSelected = true;
     }
 
