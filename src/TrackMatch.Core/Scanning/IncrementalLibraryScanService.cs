@@ -50,11 +50,6 @@ public sealed class IncrementalLibraryScanService(
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
-        // 対象Pathを1回だけ列挙して保持し、今回の正確な総件数を確定してからMetadata/Fingerprint処理へ進む。
-        // 件数取得のための2回目のファイルシステム走査は行わない。
-        var scanPlan = scanner.PrepareScan(fullRootPath, cancellationToken);
-        progress?.Report(new IncrementalScanProgress(0, scanPlan.TotalFiles, null));
-
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
         var total = 0;
         var completedFiles = 0;
@@ -68,6 +63,11 @@ public sealed class IncrementalLibraryScanService(
 
         try
         {
+            // 対象Pathを1回だけ列挙して保持し、今回の正確な総件数を確定してからMetadata/Fingerprint処理へ進む。
+            // 列挙失敗もScanSessionの失敗として記録できるよう、Session開始後のtry内で準備する。
+            var scanPlan = scanner.PrepareScan(fullRootPath, cancellationToken);
+            progress?.Report(new IncrementalScanProgress(0, scanPlan.TotalFiles, null));
+
             // Root内Track・Fingerprint有無・Verification状態を1回のRepository readで取得し、
             // 大規模LibraryのScan開始時に同じ集合を複数回SQLiteへ問い合わせない。
             var rootScanStates = await trackRepository.GetRootScanStateAsync(libraryId, rootId, cancellationToken);
