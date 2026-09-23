@@ -173,13 +173,13 @@ public sealed class SynchronizedPlaybackControlsViewModelTests : IDisposable
         public bool IsPlaying { get; private set; }
         public bool IsPaused { get; private set; }
 
-        public void Load(string pathA, string pathB, TimeSpan bestOffset)
+        public void Load(string pathA, string pathB, TimeSpan bestOffset, TimeSpan durationA, TimeSpan durationB)
         {
             LoadedPathA = pathA;
             LoadedPathB = pathB;
             LoadedBestOffset = bestOffset;
             Position = TimeSpan.Zero;
-            Duration = TimeSpan.FromSeconds(181) + PlaybackOffsets.Normalize(TimeSpan.Zero, bestOffset).B;
+            Duration = (durationA >= durationB ? durationA : durationB) + PlaybackOffsets.Normalize(TimeSpan.Zero, bestOffset).B;
             Offsets = PlaybackOffsets.Normalize(TimeSpan.Zero, bestOffset);
             VolumeA = 1f;
             VolumeB = 1f;

@@ -33,7 +33,9 @@ public interface ISynchronizedPlaybackService : IDisposable
     /// <param name="pathA">Track AのAudio File</param>
     /// <param name="pathB">Track BのAudio File</param>
     /// <param name="bestOffset">Chromaprint解析で得たBのAに対する相対Offset</param>
-    void Load(string pathA, string pathB, TimeSpan bestOffset);
+    /// <param name="durationA">解析済みメタデータに保持しているTrack Aの再生時間</param>
+    /// <param name="durationB">解析済みメタデータに保持しているTrack Bの再生時間</param>
+    void Load(string pathA, string pathB, TimeSpan bestOffset, TimeSpan durationA, TimeSpan durationB);
 
     void Play();
 

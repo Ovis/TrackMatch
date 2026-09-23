@@ -170,28 +170,36 @@ public sealed class NAudioSynchronizedPlaybackService : ISynchronizedPlaybackSer
     }
 
     /// <inheritdoc />
-    public void Load(string pathA, string pathB, TimeSpan bestOffset)
+    public void Load(
+        string pathA,
+        string pathB,
+        TimeSpan bestOffset,
+        TimeSpan durationA,
+        TimeSpan durationB)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pathA);
         ArgumentException.ThrowIfNullOrWhiteSpace(pathB);
+        if (durationA < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(durationA));
+        }
+
+        if (durationB < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(durationB));
+        }
 
         lock (_gate)
         {
             ThrowIfDisposed();
             DisposePipelineUnsafe();
 
-            // Candidate切替時は前Candidateの一時状態を持ち越さない。
+            // Candidate選択はグリッド操作のホットパスなので、ここでは音声ファイルを開かない。
+            // Durationは詳細比較済みメタデータを利用し、実ファイルへのI/OはPlay時のPipeline構築まで遅延する。
             _pathA = Path.GetFullPath(pathA);
             _pathB = Path.GetFullPath(pathB);
-            using (var streamA = OpenAudioStream(_pathA))
-            using (var streamB = OpenAudioStream(_pathB))
-            using (var readerA = new SoundFileReader(streamA))
-            using (var readerB = new SoundFileReader(streamB))
-            {
-                _durationA = readerA.TotalTime;
-                _durationB = readerB.TotalTime;
-            }
-
+            _durationA = durationA;
+            _durationB = durationB;
             _offsets = PlaybackOffsets.Normalize(TimeSpan.Zero, bestOffset);
             _position = TimeSpan.Zero;
             _volumeA = 1f;
