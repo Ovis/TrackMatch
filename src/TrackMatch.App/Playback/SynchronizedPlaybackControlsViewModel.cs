@@ -178,19 +178,16 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
         _pathA = candidate.Row.PathA;
         _pathB = candidate.Row.PathB;
 
-        // Candidate一覧はスキャン時点のスナップショットなので、表示後にExplorer等からファイルが削除されることがある。
-        // 再生Serviceへ渡す前に確認し、通常の利用不可状態として扱うことでFileNotFoundExceptionを発生させない。
-        if (!TryGetSourceAvailabilityError(out var availabilityError))
-        {
-            IsLoaded = false;
-            ResetDisplay();
-            StatusText = $"再生準備失敗: {availabilityError}";
-            return;
-        }
-
         try
         {
-            _service.Load(_pathA, _pathB, _bestOffset);
+            // Candidate選択時のNASアクセスを避けるため、ファイル存在確認はPlay直前まで遅延する。
+            // Service側も解析済みDurationだけで状態を準備し、実ファイルはこの時点では開かない。
+            _service.Load(
+                _pathA,
+                _pathB,
+                _bestOffset,
+                candidate.Row.DurationA,
+                candidate.Row.DurationB);
             IsLoaded = true;
             _volumeAPercent = 100d;
             _volumeBPercent = 100d;
