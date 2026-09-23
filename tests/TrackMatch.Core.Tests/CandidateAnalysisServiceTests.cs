@@ -104,16 +104,23 @@ public sealed class CandidateAnalysisServiceTests
             .ToArray();
         using var cancellation = new CancellationTokenSource();
         var comparisonRepository = new CancellingComparisonRepository(cancellation, checkpointSize);
+        var checkpointedComparisons = new List<CandidateComparison>();
         var service = new CandidateAnalysisService(
             new FakeFingerprintCatalogRepository(fingerprints),
             new FakeCandidatePairRepository(pairs),
             comparisonRepository,
-            new FingerprintComparer());
+            new FingerprintComparer(),
+            checkpointPersisted: (comparisons, _) =>
+            {
+                checkpointedComparisons.AddRange(comparisons);
+                return Task.CompletedTask;
+            });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => service.AnalyzeAsync(2, cancellation.Token));
 
         Assert.Equal(checkpointSize, comparisonRepository.Comparisons.Count);
+        Assert.Equal(checkpointSize, checkpointedComparisons.Count);
         Assert.Equal(1, comparisonRepository.UpsertCount);
     }
 
