@@ -596,4 +596,9 @@ public partial class MainWindow : Window
             await ExecuteReviewActionAsync(targetDecision: null, _viewModel.ClearReviewAsync);
         }
     }
+
+    /// <summary>ジャンルFilterだけを解除し、レビュー状態など他のFilterは維持する。</summary>
+    private void ClearGenreFilter_Click(object sender, RoutedEventArgs e)
+        => _viewModel.ClearGenreFilter();
+
 }
