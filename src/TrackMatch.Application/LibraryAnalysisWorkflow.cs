@@ -387,20 +387,39 @@ public sealed class LibraryAnalysisWorkflow
             new SqliteCandidatePairRepository(database, libraryId),
             new SqliteCandidateComparisonRepository(database, libraryId),
             new FingerprintComparer(),
-            timing => _logger.LogInformation(
-                "Candidate detail comparison {CheckpointKind}. Completed={Completed}/{Total}, Compared={Compared}, " +
-                "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
-                "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
-                "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
-                timing.IsFinalCheckpoint ? "final checkpoint" : "checkpoint",
-                timing.CompletedPairs,
-                timing.TotalPairs,
-                timing.ComparedPairs,
-                timing.ComparisonElapsed.TotalMilliseconds,
-                timing.AverageComparisonElapsed.TotalMilliseconds,
-                timing.MaximumComparisonElapsed.TotalMilliseconds,
-                timing.PersistenceElapsed.TotalMilliseconds,
-                timing.CheckpointElapsed.TotalMilliseconds));
+            timing =>
+            {
+                if (timing.SlowComparison is { } slow)
+                {
+                    _logger.LogInformation(
+                        "Candidate detail comparison slow pair. Completed={Completed}/{Total}, TrackIdA={TrackIdA}, " +
+                        "TrackIdB={TrackIdB}, FingerprintItemsA={FingerprintItemsA}, FingerprintItemsB={FingerprintItemsB}, " +
+                        "ElapsedMs={ElapsedMs:F1}",
+                        timing.CompletedPairs,
+                        timing.TotalPairs,
+                        slow.TrackIdA,
+                        slow.TrackIdB,
+                        slow.FingerprintItemsA,
+                        slow.FingerprintItemsB,
+                        slow.Elapsed.TotalMilliseconds);
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "Candidate detail comparison {CheckpointKind}. Completed={Completed}/{Total}, Compared={Compared}, " +
+                    "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
+                    "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
+                    "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+                    timing.IsFinalCheckpoint ? "final checkpoint" : "checkpoint",
+                    timing.CompletedPairs,
+                    timing.TotalPairs,
+                    timing.ComparedPairs,
+                    timing.ComparisonElapsed.TotalMilliseconds,
+                    timing.AverageComparisonElapsed.TotalMilliseconds,
+                    timing.MaximumComparisonElapsed.TotalMilliseconds,
+                    timing.PersistenceElapsed.TotalMilliseconds,
+                    timing.CheckpointElapsed.TotalMilliseconds);
+            };
 
     private static async Task<Library> GetRequiredLibraryAsync(
         SqliteDatabase database,
