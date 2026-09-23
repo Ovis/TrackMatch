@@ -139,12 +139,13 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
-                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="130" />
                             <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
+                            <ColumnDefinition Width="48" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock VerticalAlignment="Center"
@@ -153,7 +154,7 @@
                         <ToggleButton x:Name="GenreFilterToggle"
                                       Grid.Column="2"
                                       Height="32"
-                                      Width="220"
+                                      Width="130"
                                       Padding="10,0,34,0"
                                       HorizontalContentAlignment="Left"
                                       Background="White"
@@ -203,7 +204,6 @@
                                    Style="{StaticResource SecondaryTextStyle}"
                                    Text="一致度下限" />
                         <TextBox Grid.Column="7"
-                                 Width="48"
                                  HorizontalContentAlignment="Right"
                                  Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Grid.Column="8"
