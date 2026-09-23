@@ -601,4 +601,10 @@ public partial class MainWindow : Window
     private void ClearGenreFilter_Click(object sender, RoutedEventArgs e)
         => _viewModel.ClearGenreFilter();
 
+    /// <summary>
+    /// 選択内容は操作ごとに即時反映しているため、適用ボタンではPopupを閉じて一覧の確認へ戻す。
+    /// </summary>
+    private void ApplyGenreFilter_Click(object sender, RoutedEventArgs e)
+        => GenreFilterToggle.IsChecked = false;
+
 }
