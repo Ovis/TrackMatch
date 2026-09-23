@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using TrackMatch.App.Playback;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Playback;
