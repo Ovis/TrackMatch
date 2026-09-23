@@ -12,12 +12,14 @@ public sealed class CandidateAnalysisService(
     ICandidatePairRepository candidatePairRepository,
     ICandidateComparisonRepository comparisonRepository,
     FingerprintComparer comparer,
-    Action<CandidateAnalysisTiming>? timing = null)
+    Action<CandidateAnalysisTiming>? timing = null,
+    Func<IReadOnlyCollection<CandidateComparison>, CancellationToken, Task>? checkpointPersisted = null)
 {
     // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
     // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
     private const int ComparisonCheckpointSize = 500;
     private readonly Action<CandidateAnalysisTiming>? _timing = timing;
+    private readonly Func<IReadOnlyCollection<CandidateComparison>, CancellationToken, Task>? _checkpointPersisted = checkpointPersisted;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
     /// </summary>
@@ -100,6 +102,12 @@ public sealed class CandidateAnalysisService(
             {
                 var persistenceStopwatch = Stopwatch.StartNew();
                 await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+                if (_checkpointPersisted is not null)
+                {
+                    // Comparison保存時に旧Classificationは無効化されるため、同じCheckpoint内で新しい分類まで補完する。
+                    // これにより長時間の詳細比較中でも、候補一覧へ分類なしの中間状態を残し続けない。
+                    await _checkpointPersisted(changedComparisons, cancellationToken);
+                }
                 persistenceStopwatch.Stop();
                 checkpointStopwatch.Stop();
 
@@ -127,6 +135,12 @@ public sealed class CandidateAnalysisService(
         {
             var persistenceStopwatch = Stopwatch.StartNew();
             await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+                if (_checkpointPersisted is not null)
+                {
+                    // Comparison保存時に旧Classificationは無効化されるため、同じCheckpoint内で新しい分類まで補完する。
+                    // これにより長時間の詳細比較中でも、候補一覧へ分類なしの中間状態を残し続けない。
+                    await _checkpointPersisted(changedComparisons, cancellationToken);
+                }
             persistenceStopwatch.Stop();
             checkpointStopwatch.Stop();
             _timing?.Invoke(new CandidateAnalysisTiming(
