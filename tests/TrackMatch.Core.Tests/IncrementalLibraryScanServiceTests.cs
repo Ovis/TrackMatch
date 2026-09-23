@@ -51,6 +51,40 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_ReusesStoredRootTrackCountAsProgressTotal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var firstPath = Path.Combine(root, "first.flac");
+        var secondPath = Path.Combine(root, "second.flac");
+        var repository = new FakeTrackRepository(
+        [
+            Stored(1, Metadata(firstPath, 100, 10)),
+            Stored(2, Metadata(secondPath, 100, 10)),
+        ]);
+        var progressValues = new List<IncrementalScanProgress>();
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner(
+            [
+                LibraryScanResult.Success(Metadata(firstPath, 100, 10)),
+                LibraryScanResult.Success(Metadata(secondPath, 100, 10)),
+            ]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
+
+        await service.ScanAsync(
+            1,
+            1,
+            root,
+            TestContext.Current.CancellationToken,
+            new Progress<IncrementalScanProgress>(progressValues.Add));
+
+        Assert.NotEmpty(progressValues);
+        Assert.All(progressValues, value => Assert.Equal(2, value.TotalFiles));
+    }
+
+    [Fact]
     public async Task ScanAsync_MetadataOnlyChange_PreservesVerdictStateAndMarksVerificationCompleted()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
