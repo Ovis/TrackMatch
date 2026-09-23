@@ -36,7 +36,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private CandidateReviewListMode _candidateListMode = CandidateReviewListMode.Unreviewed;
     private string _trashRoot = string.Empty;
     private string _statusText = "候補を読み込んでいます。";
-    private string _analysisStatusText = "未実行";
+    private string _analysisStatusText = "スキャン・分析: 未実行";
     private string _trashStatusText = "未実行";
     private int _similarityDisplayLowerBoundPercent = 70;
     private bool _settingsLoaded;
