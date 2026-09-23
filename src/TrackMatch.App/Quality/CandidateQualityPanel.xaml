@@ -84,7 +84,12 @@
                               RowHeaderWidth="0"
                               VerticalScrollBarVisibility="Disabled">
                         <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
+                            <!--
+                                ToolTip追加のために暗黙Styleを置き換えるとテーマ側の選択色が失われるため、
+                                既存のDataGridRow Styleを継承した上で説明だけを追加する。
+                            -->
+                            <Style BasedOn="{StaticResource {x:Type DataGridRow}}"
+                                   TargetType="DataGridRow">
                                 <Setter Property="ToolTip" Value="{Binding Description}" />
                             </Style>
                         </DataGrid.RowStyle>
