@@ -171,7 +171,7 @@ public sealed class MainWindowViewModelCandidateSkipTests
         public bool IsPlaying { get; private set; }
         public bool IsPaused { get; private set; }
 
-        public void Load(string pathA, string pathB, TimeSpan bestOffset)
+        public void Load(string pathA, string pathB, TimeSpan bestOffset, TimeSpan durationA, TimeSpan durationB)
         {
             Position = TimeSpan.Zero;
             Duration = TimeSpan.FromMinutes(3);
