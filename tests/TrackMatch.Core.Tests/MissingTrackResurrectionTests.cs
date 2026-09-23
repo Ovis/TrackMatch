@@ -51,7 +51,13 @@ public sealed class MissingTrackResurrectionTests
 
     private sealed class FakeLibraryScanner(LibraryScanResult result) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [result.Path]);
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
         {
             yield return result;
         }

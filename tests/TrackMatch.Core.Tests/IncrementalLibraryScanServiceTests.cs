@@ -51,6 +51,63 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_PrepareScanFailure_RecordsFailedSession()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var sessions = new FakeScanSessionRepository();
+        var service = new IncrementalLibraryScanService(
+            new PrepareThrowingLibraryScanner(),
+            new FakeTrackRepository([]),
+            sessions,
+            new FakeFingerprintExtractor(),
+            2);
+
+        await Assert.ThrowsAsync<IOException>(() => service.ScanAsync(
+            1,
+            1,
+            root,
+            TestContext.Current.CancellationToken));
+
+        Assert.NotNull(sessions.FailedSummary);
+        Assert.Null(sessions.CompletedSummary);
+    }
+
+    [Fact]
+    public async Task ScanAsync_ReportsPreparedScanFileCountAsProgressTotal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var firstPath = Path.Combine(root, "first.flac");
+        var secondPath = Path.Combine(root, "second.flac");
+        var repository = new FakeTrackRepository(
+        [
+            Stored(1, Metadata(firstPath, 100, 10)),
+            Stored(2, Metadata(secondPath, 100, 10)),
+        ]);
+        var progressValues = new List<IncrementalScanProgress>();
+        var progress = new SynchronousProgress<IncrementalScanProgress>(progressValues.Add);
+        var service = new IncrementalLibraryScanService(
+            new FakeLibraryScanner(
+            [
+                LibraryScanResult.Success(Metadata(firstPath, 100, 10)),
+                LibraryScanResult.Success(Metadata(secondPath, 100, 10)),
+            ]),
+            repository,
+            new FakeScanSessionRepository(),
+            new FakeFingerprintExtractor(),
+            2);
+
+        await service.ScanAsync(
+            1,
+            1,
+            root,
+            TestContext.Current.CancellationToken,
+            progress);
+
+        Assert.NotEmpty(progressValues);
+        Assert.All(progressValues, value => Assert.Equal(2, value.TotalFiles));
+    }
+
+    [Fact]
     public async Task ScanAsync_MetadataOnlyChange_PreservesVerdictStateAndMarksVerificationCompleted()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -386,17 +443,25 @@ public sealed class IncrementalLibraryScanServiceTests
             ["J-POPS"]);
 
     /// <summary>
+    /// Reportを呼び出し元Threadで即時実行し、非同期dispatchによるTestの競合を避けるProgress実装。
+    /// </summary>
+    private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    /// <summary>
     /// File属性によるfast path判定を実際のScannerと同じ順序で呼び出すTest Double。
     /// </summary>
     private sealed class FastPathFakeLibraryScanner(AudioTrackMetadata metadata) : ILibraryScanner
     {
         public bool MetadataWasSkipped { get; private set; }
 
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
-            => [LibraryScanResult.Success(metadata)];
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [metadata.Path]);
 
         public IEnumerable<LibraryScanResult> Scan(
-            string rootPath,
+            LibraryScanPlan plan,
             Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
             CancellationToken cancellationToken = default)
         {
@@ -410,23 +475,56 @@ public sealed class IncrementalLibraryScanServiceTests
 
     private sealed class FakeLibraryScanner(IReadOnlyList<LibraryScanResult> results) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default) => results;
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), results.Select(result => result.Path).ToArray());
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default) => results;
     }
 
     private sealed class CancellingLibraryScanner(
         LibraryScanResult first,
         CancellationTokenSource cancellation) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [first.Path]);
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
         {
             yield return first;
             cancellation.Cancel();
         }
     }
 
+    /// <summary>
+    /// Scan対象の事前列挙中にI/Oエラーが発生する状況を再現する。
+    /// </summary>
+    private sealed class PrepareThrowingLibraryScanner : ILibraryScanner
+    {
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => throw new IOException("prepare failed");
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("PrepareScan失敗後にScanへ進んではならない。");
+    }
+
     private sealed class ThrowingLibraryScanner(LibraryScanResult first) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [first.Path]);
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
         {
             yield return first;
             throw new IOException("enumeration failed");

@@ -6,28 +6,33 @@
 public interface ILibraryScanner
 {
     /// <summary>
-    /// 走査対象として扱う音声ファイル数を取得する。
+    /// 対象フォルダ以下の正式対応音声ファイルを1回列挙し、後続処理で再利用できるScan計画を作成する。
     /// </summary>
     /// <remarks>
-    /// 件数を事前取得できない実装ではnullを返してよい。進捗表示のための補助情報なので、
-    /// 件数取得のためにメタデータ解析そのものを二重実行しないことを前提とする。
+    /// 総件数表示のためにファイルシステムを再走査しないよう、列挙結果自体を計画へ保持する。
     /// </remarks>
-    int? GetSupportedFileCount(string rootPath, CancellationToken cancellationToken = default) => null;
+    LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 対象フォルダ以下の音声ファイルを走査する。
+    /// 準備済みの対象ファイルを走査する。
     /// </summary>
-    IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// File属性だけでMetadata解析を省略できる場合に、その判定を利用して走査する。
-    /// </summary>
-    /// <remarks>
-    /// 高速化に対応しないScanner実装は通常のScanへフォールバックしてよい。
-    /// </remarks>
     IEnumerable<LibraryScanResult> Scan(
-        string rootPath,
+        LibraryScanPlan plan,
         Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
-        CancellationToken cancellationToken = default)
-        => Scan(rootPath, cancellationToken);
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// 1回のファイルシステム列挙で確定したScan対象を保持する。
+/// </summary>
+/// <param name="RootPath">正規化済みの走査Root</param>
+/// <param name="Paths">正式対応音声ファイルのパス一覧</param>
+public sealed record LibraryScanPlan(
+    string RootPath,
+    IReadOnlyList<string> Paths)
+{
+    /// <summary>
+    /// 今回のScanで処理する正確なファイル総数を取得する。
+    /// </summary>
+    public int TotalFiles => Paths.Count;
 }

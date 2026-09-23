@@ -24,7 +24,7 @@ public sealed class AudioLibraryScannerTests
         try
         {
             var scanner = new AudioLibraryScanner(new AudioMetadataReaderDispatcher());
-            var results = scanner.Scan(root, TestContext.Current.CancellationToken).ToArray();
+            var results = scanner.Scan(scanner.PrepareScan(root, TestContext.Current.CancellationToken), _ => false, TestContext.Current.CancellationToken).ToArray();
 
             Assert.Equal(2, results.Length);
             Assert.All(results, result => Assert.True(result.IsSuccess));
@@ -48,7 +48,7 @@ public sealed class AudioLibraryScannerTests
         try
         {
             var scanner = new AudioLibraryScanner(new AudioMetadataReaderDispatcher());
-            var results = scanner.Scan(root, TestContext.Current.CancellationToken).ToArray();
+            var results = scanner.Scan(scanner.PrepareScan(root, TestContext.Current.CancellationToken), _ => false, TestContext.Current.CancellationToken).ToArray();
 
             Assert.Equal(2, results.Length);
             Assert.Single(results, result => result.IsSuccess);
@@ -59,6 +59,35 @@ public sealed class AudioLibraryScannerTests
             Directory.Delete(root, recursive: true);
         }
     }
+    [Fact]
+    public void PrepareScan_ReportsExactSupportedFileCountAndReusesPreparedPaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"TrackMatch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(Path.Combine(root, "first.flac"), FlacTestFileBuilder.Create());
+        File.WriteAllBytes(Path.Combine(root, "second.mp3"), Mp3TestFileBuilder.Create());
+        File.WriteAllText(Path.Combine(root, "ignored.txt"), "unsupported");
+
+        try
+        {
+            var scanner = new AudioLibraryScanner(new AudioMetadataReaderDispatcher());
+            var plan = scanner.PrepareScan(root, TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, plan.TotalFiles);
+
+            // Prepare後に追加したFileは今回の計画へ混入しないことを確認し、
+            // 後続ScanがRootを再列挙せず準備済みPathだけを使う設計を担保する。
+            File.WriteAllBytes(Path.Combine(root, "added-after-prepare.flac"), FlacTestFileBuilder.Create());
+            var results = scanner.Scan(plan, _ => false, TestContext.Current.CancellationToken).ToArray();
+
+            Assert.Equal(2, results.Length);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void Scan_WhenFastPathMatches_SkipsMetadataReader()
     {
@@ -71,7 +100,7 @@ public sealed class AudioLibraryScannerTests
         {
             var reader = new CountingMetadataReader();
             var scanner = new AudioLibraryScanner(reader);
-            var result = Assert.Single(scanner.Scan(root, _ => true, TestContext.Current.CancellationToken));
+            var result = Assert.Single(scanner.Scan(scanner.PrepareScan(root, TestContext.Current.CancellationToken), _ => true, TestContext.Current.CancellationToken));
 
             Assert.True(result.MetadataSkipped);
             Assert.False(result.IsSuccess);
