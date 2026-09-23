@@ -342,6 +342,68 @@ public partial class MainWindow : Window
 
     private void ResetOffset_Click(object sender, RoutedEventArgs e) => _viewModel.Playback.ResetOffsetToAnalysis();
 
+    /// <summary>
+    /// 相対Offsetの直接入力をEnterで確定し、B側OffsetとしてPlayback Engineへ反映する。
+    /// </summary>
+    private void RelativeOffsetTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitRelativeOffsetText();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            RefreshRelativeOffsetText();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Enterで確定しなかった編集内容は破棄し、現在のEngine値へ表示を戻す。
+    /// </summary>
+    private void RelativeOffsetTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        => RefreshRelativeOffsetText();
+
+    /// <summary>
+    /// Aを基準に入力された相対Offsetを、現在のA Offsetを保ったままB Offsetへ変換する。
+    /// </summary>
+    private void CommitRelativeOffsetText()
+    {
+        var text = RelativeOffsetTextBox.Text.Trim();
+        if (text.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^1].Trim();
+        }
+
+        if ((!decimal.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var seconds)
+             && !decimal.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out seconds))
+            || seconds < (decimal)TimeSpan.MinValue.TotalSeconds
+            || seconds > (decimal)TimeSpan.MaxValue.TotalSeconds)
+        {
+            RefreshRelativeOffsetText();
+            return;
+        }
+
+        var relativeOffset = TimeSpan.FromTicks(
+            checked((long)Math.Round(seconds * TimeSpan.TicksPerSecond, MidpointRounding.AwayFromZero)));
+        var targetB = TimeSpan.FromSeconds(_viewModel.Playback.OffsetASeconds) + relativeOffset;
+        _viewModel.Playback.CommitOffsetText(isTrackA: false, targetB.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// 編集中の文字列を破棄し、ViewModelが保持する現在の相対Offset表示へ戻す。
+    /// </summary>
+    private void RefreshRelativeOffsetText()
+    {
+        var relativeSeconds = _viewModel.Playback.OffsetBSeconds - _viewModel.Playback.OffsetASeconds;
+        RelativeOffsetTextBox.Text = $"{relativeSeconds:+0.000;-0.000;0.000} s";
+    }
+
     private static void EnableMoveToPointForSliders(DependencyObject root)
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
