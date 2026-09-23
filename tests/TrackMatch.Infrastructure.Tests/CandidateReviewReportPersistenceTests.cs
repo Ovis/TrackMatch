@@ -138,6 +138,27 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetByTrackIdsAsync_ReturnsOnlyCandidatesTouchingAffectedTracks()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "delta-a.flac");
+        var trackB = await AddTrackAsync(tracks, "delta-b.flac");
+        var trackC = await AddTrackAsync(tracks, "delta-c.flac");
+        var trackD = await AddTrackAsync(tracks, "delta-d.flac");
+        await AddComparisonAsync(trackA, trackB);
+        await AddComparisonAsync(trackC, trackD);
+
+        var rows = await new SqliteCandidateReviewReportRepository(_database)
+            .GetByTrackIdsAsync(
+                _libraryId,
+                [trackA],
+                TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(CandidatePairKey.Create(trackA, trackB), CandidatePairKey.Create(row.TrackIdA, row.TrackIdB));
+    }
+
+    [Fact]
     public async Task GetAsync_DoesNotExposeOlderComparisonAlgorithmVersion()
     {
         var tracks = new SqliteTrackRepository(_database);
