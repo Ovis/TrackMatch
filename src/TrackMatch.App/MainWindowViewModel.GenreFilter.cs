@@ -241,8 +241,11 @@ public sealed partial class MainWindowViewModel
             return source;
         }
 
-        var trackGenres = BuildTrackGenres(source);
-        var adjacency = BuildCandidateAdjacency(source);
+        // Group境界はレビュー状態タブで変化させない。まず一致度下限内の全CandidateからGroupを構築し、
+        // その後で現在タブのCandidateへ表示Filterを適用する。
+        var groupSource = ReviewTargetCandidates.ToArray();
+        var trackGenres = BuildTrackGenres(groupSource);
+        var adjacency = BuildCandidateAdjacency(groupSource);
         var matchingTrackIds = new HashSet<long>();
         var visited = new HashSet<long>();
 
