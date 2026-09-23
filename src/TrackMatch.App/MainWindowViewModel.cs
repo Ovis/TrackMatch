@@ -488,10 +488,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
         // DB更新にはGroup再構築などが含まれるが、判定済みの行をその完了まで画面へ残す必要はない。
         // 先に現在行だけを非表示にして次候補へ進め、失敗時は既存の全件再読込で正本へ戻す。
-        Candidates.Remove(selected);
-        SelectedCandidate = Candidates.Count == 0
-            ? null
-            : Candidates[Math.Min(Math.Max(selectedIndex, 0), Candidates.Count - 1)];
+        var hideReviewedCandidateImmediately = CandidateListMode is CandidateReviewListMode.Unreviewed
+            or CandidateReviewListMode.ReReviewRecommended;
+        if (hideReviewedCandidateImmediately)
+        {
+            Candidates.Remove(selected);
+            SelectedCandidate = Candidates.Count == 0
+                ? null
+                : Candidates[Math.Min(Math.Max(selectedIndex, 0), Candidates.Count - 1)];
+        }
+
         IsLoading = true;
         try
         {
