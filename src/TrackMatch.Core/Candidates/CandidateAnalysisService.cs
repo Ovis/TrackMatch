@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics;
-using Microsoft.Extensions.Logging;
 using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Persistence;
 
