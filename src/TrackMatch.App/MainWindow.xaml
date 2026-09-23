@@ -139,8 +139,8 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="18" />
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
                             <ColumnDefinition Width="Auto" />
@@ -153,7 +153,7 @@
                         <ToggleButton x:Name="GenreFilterToggle"
                                       Grid.Column="2"
                                       Height="32"
-                                      MinWidth="150"
+                                      Width="220"
                                       Padding="10,0,34,0"
                                       HorizontalContentAlignment="Left"
                                       Background="White"
