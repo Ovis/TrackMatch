@@ -17,7 +17,6 @@ public sealed class CandidateAnalysisService(
     // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
     // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
     private const int ComparisonCheckpointSize = 500;
-    private static readonly TimeSpan SlowComparisonThreshold = TimeSpan.FromMilliseconds(500);
     private readonly Action<CandidateAnalysisTiming>? _timing = timing;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
@@ -83,19 +82,6 @@ public sealed class CandidateAnalysisService(
             {
                 checkpointMaximumComparisonElapsed = comparisonStopwatch.Elapsed;
             }
-
-            if (comparisonStopwatch.Elapsed >= SlowComparisonThreshold)
-            {
-                // 遅い比較だけ詳細を残し、通常ケースで大量のログを出して計測自体を遅くしない。
-                _timing?.Invoke(CandidateAnalysisTiming.ForSlowComparison(
-                    completed + 1,
-                    pairs.Count,
-                    pair.TrackIdA,
-                    pair.TrackIdB,
-                    a.Fingerprint.Values.Count,
-                    b.Fingerprint.Values.Count,
-                    comparisonStopwatch.Elapsed));
-            }
             changedComparisons.Add(new CandidateComparison(
                 pair.TrackIdA,
                 pair.TrackIdB,
@@ -126,8 +112,7 @@ public sealed class CandidateAnalysisService(
                     checkpointMaximumComparisonElapsed,
                     persistenceStopwatch.Elapsed,
                     checkpointStopwatch.Elapsed,
-                    false,
-                    null));
+                    false));
 
                 changedComparisons.Clear();
                 checkpointStopwatch.Restart();
@@ -153,8 +138,7 @@ public sealed class CandidateAnalysisService(
                 checkpointMaximumComparisonElapsed,
                 persistenceStopwatch.Elapsed,
                 checkpointStopwatch.Elapsed,
-                true,
-                null));
+                true));
         }
 
         return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
@@ -184,46 +168,4 @@ public sealed record CandidateAnalysisTiming(
     TimeSpan MaximumComparisonElapsed,
     TimeSpan PersistenceElapsed,
     TimeSpan CheckpointElapsed,
-    bool IsFinalCheckpoint,
-    CandidateSlowComparisonTiming? SlowComparison)
-{
-    /// <summary>
-    /// 閾値を超えた単一比較の診断値を生成する。
-    /// </summary>
-    public static CandidateAnalysisTiming ForSlowComparison(
-        int completedPairs,
-        int totalPairs,
-        long trackIdA,
-        long trackIdB,
-        int fingerprintItemsA,
-        int fingerprintItemsB,
-        TimeSpan elapsed)
-    {
-        return new CandidateAnalysisTiming(
-            completedPairs,
-            totalPairs,
-            1,
-            elapsed,
-            elapsed,
-            elapsed,
-            TimeSpan.Zero,
-            elapsed,
-            false,
-            new CandidateSlowComparisonTiming(
-                trackIdA,
-                trackIdB,
-                fingerprintItemsA,
-                fingerprintItemsB,
-                elapsed));
-    }
-}
-
-/// <summary>
-/// 閾値を超えた単一の詳細比較について、計算量との相関を確認するための診断値を表す。
-/// </summary>
-public sealed record CandidateSlowComparisonTiming(
-    long TrackIdA,
-    long TrackIdB,
-    int FingerprintItemsA,
-    int FingerprintItemsB,
-    TimeSpan Elapsed);
+    bool IsFinalCheckpoint);
