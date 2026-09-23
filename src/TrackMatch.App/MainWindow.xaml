@@ -308,8 +308,10 @@
                                   SelectionMode="Single"
                                   SelectionUnit="FullRow">
                             <DataGrid.ContextMenu>
-                                <!-- ContextMenuはPopup側のVisual Treeに配置されるため、WindowをAncestorとして参照できない。
-                                     PlacementTargetで元のDataGridへ戻し、同じViewModelの操作可否を参照する。 -->
+                                <!--
+                                    ContextMenuはPopup側のVisual Treeに配置されるため、WindowをAncestorとして参照できない。
+                                    PlacementTargetで元のDataGridへ戻し、同じViewModelの操作可否を参照する。
+                                -->
                                 <ContextMenu>
                                     <MenuItem Click="NotDuplicate_Click"
                                               Header="重複ではない"
