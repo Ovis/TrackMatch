@@ -204,6 +204,7 @@
                                    VerticalAlignment="Center"
                                    Text="%" />
                         <Popup Width="280"
+                               Grid.ColumnSpan="13"
                                AllowsTransparency="True"
                                IsOpen="{Binding IsChecked, ElementName=GenreFilterToggle}"
                                Placement="Bottom"
