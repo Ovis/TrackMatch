@@ -51,7 +51,7 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
-    public async Task ScanAsync_ReusesStoredRootTrackCountAsProgressTotal()
+    public async Task ScanAsync_ReportsPreparedScanFileCountAsProgressTotal()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
         var firstPath = Path.Combine(root, "first.flac");
@@ -444,14 +444,26 @@ public sealed class IncrementalLibraryScanServiceTests
 
     private sealed class FakeLibraryScanner(IReadOnlyList<LibraryScanResult> results) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default) => results;
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), results.Select(result => result.Path).ToArray());
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default) => results;
     }
 
     private sealed class CancellingLibraryScanner(
         LibraryScanResult first,
         CancellationTokenSource cancellation) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [first.Path]);
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
         {
             yield return first;
             cancellation.Cancel();
@@ -460,7 +472,13 @@ public sealed class IncrementalLibraryScanServiceTests
 
     private sealed class ThrowingLibraryScanner(LibraryScanResult first) : ILibraryScanner
     {
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [first.Path]);
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
         {
             yield return first;
             throw new IOException("enumeration failed");
