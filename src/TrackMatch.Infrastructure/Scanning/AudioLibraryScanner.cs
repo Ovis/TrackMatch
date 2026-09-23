@@ -16,47 +16,38 @@ public sealed class AudioLibraryScanner(IAudioMetadataReader metadataReader) : I
     private readonly IAudioMetadataReader _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
 
     /// <inheritdoc />
-    public int? GetSupportedFileCount(string rootPath, CancellationToken cancellationToken = default)
+    public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         EnsureDirectoryExists(rootPath);
 
-        var count = 0;
-        foreach (var path in EnumerateFiles(rootPath))
+        var fullRootPath = Path.GetFullPath(rootPath);
+        var paths = new List<string>();
+        foreach (var path in EnumerateFiles(fullRootPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (SupportedExtensions.Contains(Path.GetExtension(path)))
             {
-                count++;
+                paths.Add(path);
             }
         }
 
-        return count;
+        return new LibraryScanPlan(fullRootPath, paths);
     }
 
     /// <inheritdoc />
-    public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
-        => Scan(rootPath, _ => false, cancellationToken);
-
-    /// <inheritdoc />
     public IEnumerable<LibraryScanResult> Scan(
-        string rootPath,
+        LibraryScanPlan plan,
         Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(shouldSkipMetadata);
-        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
-        EnsureDirectoryExists(rootPath);
 
-        foreach (var path in EnumerateFiles(rootPath))
+        // PrepareScanで確定したPathを再利用し、総件数取得のためにNASやRootを再帰列挙し直さない。
+        foreach (var path in plan.Paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            // Backendが偶然DecodeできるFormatを正式対応扱いしないため、Scanner入口でExtensionを固定する。
-            if (!SupportedExtensions.Contains(Path.GetExtension(path)))
-            {
-                continue;
-            }
 
             LibraryScanResult result;
             try
