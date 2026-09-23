@@ -12,12 +12,12 @@ public sealed class CandidateAnalysisService(
     ICandidatePairRepository candidatePairRepository,
     ICandidateComparisonRepository comparisonRepository,
     FingerprintComparer comparer,
-    ILogger<CandidateAnalysisService>? logger = null)
+    Action<CandidateAnalysisTiming>? timing = null)
 {
     // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
     // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
     private const int ComparisonCheckpointSize = 500;
-    private readonly ILogger<CandidateAnalysisService> _logger = logger ?? NullLogger<CandidateAnalysisService>.Instance;
+    private readonly Action<CandidateAnalysisTiming>? _timing = timing;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
     /// </summary>
@@ -103,19 +103,16 @@ public sealed class CandidateAnalysisService(
                 persistenceStopwatch.Stop();
                 checkpointStopwatch.Stop();
 
-                _logger.LogInformation(
-                    "Candidate detail comparison checkpoint. Completed={Completed}/{Total}, Compared={Compared}, " +
-                    "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
-                    "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
-                    "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+                _timing?.Invoke(new CandidateAnalysisTiming(
                     completed,
                     pairs.Count,
                     checkpointCompared,
-                    checkpointComparisonElapsed.TotalMilliseconds,
-                    checkpointCompared == 0 ? 0d : checkpointComparisonElapsed.TotalMilliseconds / checkpointCompared,
-                    checkpointMaximumComparisonElapsed.TotalMilliseconds,
-                    persistenceStopwatch.Elapsed.TotalMilliseconds,
-                    checkpointStopwatch.Elapsed.TotalMilliseconds);
+                    checkpointComparisonElapsed,
+                    checkpointCompared == 0 ? TimeSpan.Zero : checkpointComparisonElapsed / checkpointCompared,
+                    checkpointMaximumComparisonElapsed,
+                    persistenceStopwatch.Elapsed,
+                    checkpointStopwatch.Elapsed,
+                    false));
 
                 changedComparisons.Clear();
                 checkpointStopwatch.Restart();
@@ -132,19 +129,16 @@ public sealed class CandidateAnalysisService(
             await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
             persistenceStopwatch.Stop();
             checkpointStopwatch.Stop();
-            _logger.LogInformation(
-                "Candidate detail comparison final checkpoint. Completed={Completed}/{Total}, Compared={Compared}, " +
-                "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
-                "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
-                "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+            _timing?.Invoke(new CandidateAnalysisTiming(
                 completed,
                 pairs.Count,
                 checkpointCompared,
-                checkpointComparisonElapsed.TotalMilliseconds,
-                checkpointCompared == 0 ? 0d : checkpointComparisonElapsed.TotalMilliseconds / checkpointCompared,
-                checkpointMaximumComparisonElapsed.TotalMilliseconds,
-                persistenceStopwatch.Elapsed.TotalMilliseconds,
-                checkpointStopwatch.Elapsed.TotalMilliseconds);
+                checkpointComparisonElapsed,
+                checkpointCompared == 0 ? TimeSpan.Zero : checkpointComparisonElapsed / checkpointCompared,
+                checkpointMaximumComparisonElapsed,
+                persistenceStopwatch.Elapsed,
+                checkpointStopwatch.Elapsed,
+                true));
         }
 
         return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
@@ -161,3 +155,17 @@ public sealed class CandidateAnalysisService(
 /// 候補ペアの詳細比較進捗を表す。
 /// </summary>
 public sealed record CandidateAnalysisProgress(int CompletedPairs, int TotalPairs);
+
+/// <summary>
+/// 詳細比較Checkpoint単位の処理時間を表す。
+/// </summary>
+public sealed record CandidateAnalysisTiming(
+    int CompletedPairs,
+    int TotalPairs,
+    int ComparedPairs,
+    TimeSpan ComparisonElapsed,
+    TimeSpan AverageComparisonElapsed,
+    TimeSpan MaximumComparisonElapsed,
+    TimeSpan PersistenceElapsed,
+    TimeSpan CheckpointElapsed,
+    bool IsFinalCheckpoint);
