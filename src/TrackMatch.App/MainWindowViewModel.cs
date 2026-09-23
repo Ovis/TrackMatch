@@ -412,6 +412,26 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .ToArray();
     }
 
+    /// <summary>
+    /// 指定Trackに関係するCandidateだけを読み込み、レビュー後の差分更新用ViewModelを構築する。
+    /// </summary>
+    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsByTrackIdsAsync(
+        SqliteDatabase database,
+        long libraryId,
+        IReadOnlyCollection<long> affectedTrackIds)
+    {
+        var rows = await new SqliteCandidateReviewReportRepository(database)
+            .GetByTrackIdsAsync(libraryId, affectedTrackIds);
+        var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var reviews = await GetUsableReviewsAsync(database);
+        var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
+        return rows
+            .Select(row => new CandidateReviewItemViewModel(
+                row,
+                states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
+            .ToArray();
+    }
+
     private void ApplyCandidateFilter()
     {
         var library = SelectedLibrary; var previous = SelectedCandidate;
@@ -462,7 +482,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
-        StopPlayback(); IsLoading = true;
+        var selectedIndex = Candidates.IndexOf(selected);
+        StopPlayback();
+
+        // DB更新にはGroup再構築などが含まれるが、判定済みの行をその完了まで画面へ残す必要はない。
+        // 先に現在行だけを非表示にして次候補へ進め、失敗時は既存の全件再読込で正本へ戻す。
+        Candidates.Remove(selected);
+        SelectedCandidate = Candidates.Count == 0
+            ? null
+            : Candidates[Math.Min(Math.Max(selectedIndex, 0), Candidates.Count - 1)];
+        IsLoading = true;
         try
         {
             var review = new CandidateReview(
@@ -471,26 +500,109 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
                 null);
             // Review保存はGlobal Group再同期と補完Candidate生成を伴うため、UI Threadから分離する。
-            await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review));
+            var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review));
+            ApplyCandidateRefresh(refresh);
+        }
+        catch
+        {
+            // Optimistic UIのままDBとの不整合を残さない。失敗時だけ重い全件読込を許容する。
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+            throw;
         }
         finally { IsLoading = false; }
     }
 
     /// <summary>
-    /// Human Verdictを保存し、そこから派生するGroupと補完CandidateをUI Thread外で更新する。
+    /// Human Verdictを保存し、影響を受けたTrackに関係するCandidateだけを再構築する。
     /// </summary>
-    private async Task SaveReviewAndRefreshDerivedStateAsync(string databasePath, long libraryId, CandidateReview review)
+    private async Task<CandidateRefreshResult> SaveReviewAndRefreshDerivedStateAsync(
+        string databasePath,
+        long libraryId,
+        CandidateReview review)
     {
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
+        var groups = new SqliteDuplicateGroupRepository(database);
+
+        // NotDuplicateでGroupが分割される場合、保存後のGroupだけでは元GroupのTrackを特定できない。
+        // 保存前後の双方を集め、レビューによってPresentation Stateが変わり得る範囲を欠落させない。
+        var affectedTrackIds = GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair);
         var service = new DuplicateGroupService(
             new SqliteCandidateReviewRepository(database),
             new SqliteTrackLookupRepository(database),
-            new SqliteDuplicateGroupRepository(database));
+            groups);
         await service.SaveReviewAsync(libraryId, review);
+        foreach (var trackId in GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair))
+        {
+            affectedTrackIds.Add(trackId);
+        }
+
         await EnsureSupplementalCandidatesAsync(database, libraryId);
+        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, affectedTrackIds);
+        return new CandidateRefreshResult(affectedTrackIds, items);
     }
+
+    /// <summary>
+    /// レビューによって影響を受けるGroupのTrackを抽出する。
+    /// </summary>
+    private static HashSet<long> GetRelatedTrackIds(
+        IReadOnlyCollection<DuplicateGroup> groups,
+        CandidatePairKey pair)
+    {
+        var result = new HashSet<long> { pair.TrackIdA, pair.TrackIdB };
+        foreach (var group in groups.Where(group =>
+                     group.GlobalTrackIds.Contains(pair.TrackIdA)
+                     || group.GlobalTrackIds.Contains(pair.TrackIdB)))
+        {
+            result.UnionWith(group.GlobalTrackIds);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 差分取得したCandidateをメモリ上の一覧へ反映する。
+    /// </summary>
+    private void ApplyCandidateRefresh(CandidateRefreshResult refresh)
+    {
+        _allCandidates.RemoveAll(item =>
+            refresh.AffectedTrackIds.Contains(item.TrackIdA)
+            || refresh.AffectedTrackIds.Contains(item.TrackIdB));
+        _allCandidates.AddRange(refresh.Items);
+
+        // DBの全Candidateは再読込しない。表示順とタブProjectionだけを現在のメモリ状態から再計算する。
+        _allCandidates.Sort(CompareCandidates);
+        NotifyCandidateCountsChanged();
+        ApplyCandidateFilter();
+    }
+
+    private static int CompareCandidates(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
+    {
+        var kind = GetCandidateKindOrder(left.Row.Kind).CompareTo(GetCandidateKindOrder(right.Row.Kind));
+        if (kind != 0)
+        {
+            return kind;
+        }
+
+        var similarity = right.Row.Similarity.CompareTo(left.Row.Similarity);
+        if (similarity != 0)
+        {
+            return similarity;
+        }
+
+        var trackA = left.TrackIdA.CompareTo(right.TrackIdA);
+        return trackA != 0 ? trackA : left.TrackIdB.CompareTo(right.TrackIdB);
+    }
+
+    private static int GetCandidateKindOrder(AudioRelationshipKind? kind)
+        => kind switch
+        {
+            AudioRelationshipKind.DuplicateCandidate => 0,
+            AudioRelationshipKind.ShortVersionCandidate => 1,
+            AudioRelationshipKind.AlternateVersionCandidate => 2,
+            AudioRelationshipKind.NeedsReview => 3,
+            _ => 4,
+        };
 
     /// <summary>
     /// Human Verdictを解除し、残ったVerdictから派生状態と補完CandidateをUI Thread外で再構築する。
@@ -758,6 +870,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
+
+/// <summary>
+/// レビュー後に差分更新するTrack集合とCandidate Projectionを保持する。
+/// </summary>
+internal sealed record CandidateRefreshResult(
+    IReadOnlySet<long> AffectedTrackIds,
+    IReadOnlyList<CandidateReviewItemViewModel> Items);
 
 /// <summary>候補一覧で表示するレビュー状態を表す。</summary>
 public enum CandidateReviewListMode
