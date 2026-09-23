@@ -135,12 +135,12 @@ public sealed class CandidateAnalysisService(
         {
             var persistenceStopwatch = Stopwatch.StartNew();
             await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
-                if (_checkpointPersisted is not null)
-                {
-                    // Comparison保存時に旧Classificationは無効化されるため、同じCheckpoint内で新しい分類まで補完する。
-                    // これにより長時間の詳細比較中でも、候補一覧へ分類なしの中間状態を残し続けない。
-                    await _checkpointPersisted(changedComparisons, cancellationToken);
-                }
+            if (_checkpointPersisted is not null)
+            {
+                // Comparison保存時に旧Classificationは無効化されるため、同じCheckpoint内で新しい分類まで補完する。
+                // これにより長時間の詳細比較中でも、候補一覧へ分類なしの中間状態を残し続けない。
+                await _checkpointPersisted(changedComparisons, cancellationToken);
+            }
             persistenceStopwatch.Stop();
             checkpointStopwatch.Stop();
             _timing?.Invoke(new CandidateAnalysisTiming(
