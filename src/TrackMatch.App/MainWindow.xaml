@@ -137,23 +137,165 @@
                     <Grid Grid.Row="2"
                           Margin="12,8">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="6" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
+                            <ColumnDefinition Width="52" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Margin="0,0,8,0"
-                                   HorizontalAlignment="Right"
+                        <TextBlock VerticalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Text="ジャンル" />
+                        <ToggleButton x:Name="GenreFilterToggle"
+                                      Grid.Column="2"
+                                      Width="130"
+                                      Height="32"
+                                      Padding="10,0,34,0"
+                                      HorizontalContentAlignment="Left"
+                                      Background="White"
+                                      BorderBrush="{StaticResource BorderBrush}"
+                                      BorderThickness="1"
+                                      Content="{Binding GenreFilterSummary}"
+                                      FocusVisualStyle="{x:Null}"
+                                      Foreground="{StaticResource TextPrimaryBrush}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border x:Name="GenreFilterBorder"
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="4">
+                                        <Grid>
+                                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                              VerticalAlignment="Center" />
+                                            <Path Width="8"
+                                                  Height="5"
+                                                  Margin="0,0,12,0"
+                                                  HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center"
+                                                  Data="M 0 0 L 4 4 L 8 0 Z"
+                                                  Fill="{StaticResource TextSecondaryBrush}" />
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="GenreFilterBorder" Property="BorderBrush" Value="#AAB4C0" />
+                                        </Trigger>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter TargetName="GenreFilterBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <TextBlock Grid.Column="4"
                                    VerticalAlignment="Center"
                                    Style="{StaticResource SecondaryTextStyle}"
-                                   Text="レビュー対象の一致度下限" />
-                        <TextBox Grid.Column="1"
-                                 Width="48"
+                                   Text="{Binding CandidateDisplayCountText, Mode=OneWay}" />
+                        <TextBlock Grid.Column="6"
+                                   Margin="0,0,8,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource SecondaryTextStyle}"
+                                   Text="一致度下限" />
+                        <TextBox Grid.Column="8"
                                  HorizontalContentAlignment="Right"
                                  Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Grid.Column="3"
+                        <TextBlock Grid.Column="9"
+                                   Margin="4,0,0,0"
                                    VerticalAlignment="Center"
                                    Text="%" />
+                        <Popup Grid.ColumnSpan="10"
+                               Width="340"
+                               AllowsTransparency="True"
+                               IsOpen="{Binding IsChecked, ElementName=GenreFilterToggle}"
+                               Placement="Bottom"
+                               PlacementTarget="{Binding ElementName=GenreFilterToggle}"
+                               PopupAnimation="Fade"
+                               StaysOpen="False">
+                            <Border Margin="0,2,0,0"
+                                    Padding="12"
+                                    Background="{StaticResource CardBackgroundBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="10" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="10" />
+                                        <RowDefinition Height="220" />
+                                        <RowDefinition Height="10" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock VerticalAlignment="Center"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   Text="ジャンル" />
+                                        <Button Grid.Column="1"
+                                                MinHeight="28"
+                                                Padding="8,2"
+                                                Click="ClearGenreFilter_Click"
+                                                Content="すべて解除" />
+                                    </Grid>
+                                    <TextBox Grid.Row="2"
+                                             Text="{Binding GenreFilterSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="ジャンルを検索" />
+                                    <ScrollViewer Grid.Row="4"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding FilteredGenreOptions}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox MinHeight="28"
+                                                              Padding="4,2"
+                                                              VerticalContentAlignment="Center"
+                                                              Content="{Binding DisplayName}"
+                                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <Grid Grid.Row="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock VerticalAlignment="Center"
+                                                   Text="条件" />
+                                        <ComboBox Grid.Column="2"
+                                                  Width="76"
+                                                  ItemsSource="{Binding GenreFilterModes}"
+                                                  SelectedValue="{Binding SelectedGenreFilterMode}"
+                                                  SelectedValuePath="Mode">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Label}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <Button Grid.Column="4"
+                                                MinWidth="72"
+                                                Click="ApplyGenreFilter_Click"
+                                                Content="適用"
+                                                Style="{StaticResource PrimaryButtonStyle}" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Popup>
                     </Grid>
                     <Grid Grid.Row="3">
                         <DataGrid x:Name="CandidateGrid"

@@ -126,6 +126,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             _similarityDisplayLowerBoundPercent = normalized;
             OnPropertyChanged();
             NotifyCandidateCountsChanged();
+            RefreshGenreOptions();
             ApplyCandidateFilter();
             _ = SaveSettingsSafeAsync();
         }
@@ -364,7 +365,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // UI Threadでは実行しない。ObservableCollectionなどWPFへ公開する状態の更新だけをawait後に行う。
         var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id));
         _allCandidates.AddRange(loadedCandidates);
-        NotifyCandidateCountsChanged(); ApplyCandidateFilter();
+        NotifyCandidateCountsChanged(); RefreshGenreOptions(); ApplyCandidateFilter();
     }
 
     /// <summary>
@@ -436,13 +437,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private void ApplyCandidateFilter()
     {
         var library = SelectedLibrary; var previous = SelectedCandidate;
-        var visible = ReviewTargetCandidates.Where(item => CandidateListMode switch
+        var reviewStateFiltered = ReviewTargetCandidates.Where(item => CandidateListMode switch
         {
             CandidateReviewListMode.Unreviewed => !item.IsReviewed && !item.IsReviewSkipped,
             CandidateReviewListMode.Reviewed => item.IsReviewed,
             CandidateReviewListMode.ReReviewRecommended => item.IsReviewed && !item.IsHumanVerdictSuspended && item.IsReReviewRecommended,
             _ => true,
-        }).ToArray();
+        });
+        // 異なるFilter軸はANDで結合する。ジャンル内のOR/ANDはApplyGenreFilter側だけで解釈する。
+        var visible = ApplyGenreFilter(reviewStateFiltered).ToArray();
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
         {
             StopPlayback();
@@ -468,6 +471,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         if (library is not null)
         {
             StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {UnreviewedCount}件";
+            OnPropertyChanged(nameof(CandidateDisplayCountText));
         }
     }
 
@@ -580,6 +584,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // DBの全Candidateは再読込しない。表示順とタブProjectionだけを現在のメモリ状態から再計算する。
         _allCandidates.Sort(CompareCandidates);
         NotifyCandidateCountsChanged();
+        RefreshGenreOptions();
         ApplyCandidateFilter();
     }
 
