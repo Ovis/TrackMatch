@@ -142,10 +142,10 @@
                             <ColumnDefinition Width="130" />
                             <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="6" />
+                            <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="6" />
-                            <ColumnDefinition Width="48" />
+                            <ColumnDefinition Width="52" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock VerticalAlignment="Center"
@@ -203,13 +203,14 @@
                                    VerticalAlignment="Center"
                                    Style="{StaticResource SecondaryTextStyle}"
                                    Text="一致度下限" />
-                        <TextBox Grid.Column="7"
+                        <TextBox Grid.Column="8"
                                  HorizontalContentAlignment="Right"
                                  Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Grid.Column="8"
+                        <TextBlock Grid.Column="9"
+                                   Margin="4,0,0,0"
                                    VerticalAlignment="Center"
                                    Text="%" />
-                        <Popup Grid.ColumnSpan="9"
+                        <Popup Grid.ColumnSpan="10"
                                Width="340"
                                AllowsTransparency="True"
                                IsOpen="{Binding IsChecked, ElementName=GenreFilterToggle}"
