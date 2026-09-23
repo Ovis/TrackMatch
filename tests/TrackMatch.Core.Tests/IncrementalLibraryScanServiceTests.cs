@@ -421,9 +421,6 @@ public sealed class IncrementalLibraryScanServiceTests
             ["J-POPS"]);
 
     /// <summary>
-    /// File属性によるfast path判定を実際のScannerと同じ順序で呼び出すTest Double。
-    /// </summary>
-    /// <summary>
     /// Reportを呼び出し元Threadで即時実行し、非同期dispatchによるTestの競合を避けるProgress実装。
     /// </summary>
     private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
@@ -431,6 +428,9 @@ public sealed class IncrementalLibraryScanServiceTests
         public void Report(T value) => report(value);
     }
 
+    /// <summary>
+    /// File属性によるfast path判定を実際のScannerと同じ順序で呼び出すTest Double。
+    /// </summary>
     private sealed class FastPathFakeLibraryScanner(AudioTrackMetadata metadata) : ILibraryScanner
     {
         public bool MetadataWasSkipped { get; private set; }
