@@ -43,11 +43,22 @@ public partial class LibraryManagementDialog : Window
     private async Task ReloadAsync(long? preferredId)
     {
         _libraries = await Task.Run(() => _service.GetLibrariesAsync());
-        LibrariesListBox.ItemsSource = _libraries;
         var selected = _libraries.FirstOrDefault(item => item.Id == preferredId) ?? _libraries.FirstOrDefault();
+
+        // ItemsSourceの差し替えではSelectionChangedが同期的に発火する。
+        // 先に選択変更を抑止しないと、古い選択がnullへ変わった瞬間にLoadSelection(null)が走り、
+        // 後続のReloadAsyncが読み直した対象フォルダを空表示で上書きすることがある。
         _revertingSelection = true;
-        LibrariesListBox.SelectedItem = selected;
-        _revertingSelection = false;
+        try
+        {
+            LibrariesListBox.ItemsSource = _libraries;
+            LibrariesListBox.SelectedItem = selected;
+        }
+        finally
+        {
+            _revertingSelection = false;
+        }
+
         LoadSelection(selected);
     }
 
