@@ -88,7 +88,7 @@
                     Click="ExecuteTrash_Click"
                     IsEnabled="{Binding CanProcessTrash}">
                 <StackPanel Orientation="Horizontal">
-                    <!-- 他のツールバーボタンと視覚的な大きさを揃えるため、線画アイコンを14px相当に収める。 -->
+                    <!--  他のツールバーボタンと視覚的な大きさを揃えるため、線画アイコンを14px相当に収める。  -->
                     <Viewbox Width="14"
                              Height="14"
                              Margin="0,0,7,0"
