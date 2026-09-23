@@ -722,22 +722,22 @@
                                     Padding="10,5"
                                     Click="RelativeOffsetMinus_Click"
                                     Content="−10 ms" />
-                            <Border Grid.Column="4"
-                                    Padding="8,5"
-                                    Background="#F3F6F9"
-                                    CornerRadius="4">
-                                <TextBlock HorizontalAlignment="Center"
-                                           FontWeight="SemiBold">
-                                    <TextBlock.Text>
-                                        <MultiBinding Converter="{StaticResource RelativeOffsetConverter}">
-                                            <Binding Mode="OneWay"
-                                                     Path="OffsetASeconds" />
-                                            <Binding Mode="OneWay"
-                                                     Path="OffsetBSeconds" />
-                                        </MultiBinding>
-                                    </TextBlock.Text>
-                                </TextBlock>
-                            </Border>
+                            <TextBox x:Name="RelativeOffsetTextBox"
+                                     Grid.Column="4"
+                                     HorizontalContentAlignment="Center"
+                                     VerticalContentAlignment="Center"
+                                     FontWeight="SemiBold"
+                                     IsEnabled="{Binding CanControl}"
+                                     KeyDown="RelativeOffsetTextBox_KeyDown"
+                                     LostKeyboardFocus="RelativeOffsetTextBox_LostKeyboardFocus">
+                                <TextBox.Text>
+                                    <MultiBinding Converter="{StaticResource RelativeOffsetConverter}"
+                                                  Mode="OneWay">
+                                        <Binding Path="OffsetASeconds" />
+                                        <Binding Path="OffsetBSeconds" />
+                                    </MultiBinding>
+                                </TextBox.Text>
+                            </TextBox>
                             <Button Grid.Column="6"
                                     Padding="10,5"
                                     Click="RelativeOffsetPlus_Click"
