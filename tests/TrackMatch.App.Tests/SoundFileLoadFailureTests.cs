@@ -150,7 +150,7 @@ public sealed class SoundFileLoadFailureTests
         public bool IsPlaying => false;
         public bool IsPaused => false;
 
-        public void Load(string pathA, string pathB, TimeSpan bestOffset)
+        public void Load(string pathA, string pathB, TimeSpan bestOffset, TimeSpan durationA, TimeSpan durationB)
             => throw new SoundFileException(0, "sf_open", "System error");
 
         public void Play() { }
@@ -187,7 +187,7 @@ public sealed class SoundFileLoadFailureTests
         public bool IsPlaying => false;
         public bool IsPaused => false;
 
-        public void Load(string pathA, string pathB, TimeSpan bestOffset)
+        public void Load(string pathA, string pathB, TimeSpan bestOffset, TimeSpan durationA, TimeSpan durationB)
             => LoadCallCount++;
 
         public void Play()
