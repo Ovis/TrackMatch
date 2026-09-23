@@ -308,20 +308,24 @@
                                   SelectionMode="Single"
                                   SelectionUnit="FullRow">
                             <DataGrid.ContextMenu>
+                                <!--
+                                    ContextMenuはPopup側のVisual Treeに配置されるため、WindowをAncestorとして参照できない。
+                                    PlacementTargetで元のDataGridへ戻し、同じViewModelの操作可否を参照する。
+                                -->
                                 <ContextMenu>
                                     <MenuItem Click="NotDuplicate_Click"
                                               Header="重複ではない"
-                                              IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                              IsEnabled="{Binding PlacementTarget.DataContext.CanReview, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                     <MenuItem Click="KeepA_Click"
                                               Header="重複 / Aを残す"
-                                              IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                              IsEnabled="{Binding PlacementTarget.DataContext.CanReview, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                     <MenuItem Click="KeepB_Click"
                                               Header="重複 / Bを残す"
-                                              IsEnabled="{Binding DataContext.CanReview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                              IsEnabled="{Binding PlacementTarget.DataContext.CanReview, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                     <Separator />
                                     <MenuItem Click="ClearReview_Click"
                                               Header="レビュー判定を解除"
-                                              IsEnabled="{Binding DataContext.CanClearReview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                              IsEnabled="{Binding PlacementTarget.DataContext.CanClearReview, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                 </ContextMenu>
                             </DataGrid.ContextMenu>
                             <DataGrid.Resources>
