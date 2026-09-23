@@ -123,7 +123,8 @@ public sealed partial class MainWindowViewModel
         }
     }
 
-    public string CandidateDisplayCountText => $"{Candidates.Count} / {ReviewTargetCandidates.Count()} グループ";
+    public string CandidateDisplayCountText
+        => $"{CountCandidateGroups(Candidates)} / {CountCandidateGroups(ReviewTargetCandidates)} グループ";
 
     /// <summary>ジャンルFilterだけを解除し、他の表示Filterは維持する。</summary>
     public void ClearGenreFilter()
@@ -343,6 +344,25 @@ public sealed partial class MainWindowViewModel
         }
 
         return result;
+    }
+
+    private static int CountCandidateGroups(IEnumerable<CandidateReviewItemViewModel> candidates)
+    {
+        var adjacency = BuildCandidateAdjacency(candidates);
+        var visited = new HashSet<long>();
+        var count = 0;
+        foreach (var trackId in adjacency.Keys)
+        {
+            if (!visited.Add(trackId))
+            {
+                continue;
+            }
+
+            CollectComponent(trackId, adjacency, visited);
+            count++;
+        }
+
+        return count;
     }
 
     private static IEnumerable<string> NormalizeGenres(IEnumerable<string> genres)
