@@ -98,6 +98,64 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TrackRepository_GetRootScanStateAsync_MaterializesComputedFlagsAsIntegers()
+    {
+        var repository = new SqliteTrackRepository(_database);
+        var withoutFingerprintPath = Path.Combine(_directory, "without.flac");
+        var withFingerprintPath = Path.Combine(_directory, "with.flac");
+        var withoutFingerprintId = await repository.UpsertMetadataAsync(
+            CreateMetadata(withoutFingerprintPath, 100, "Without"),
+            TestContext.Current.CancellationToken);
+        var withFingerprintId = await repository.UpsertMetadataAsync(
+            CreateMetadata(withFingerprintPath, 200, "With"),
+            TestContext.Current.CancellationToken);
+        await repository.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            withoutFingerprintId,
+            "without.flac",
+            TestContext.Current.CancellationToken);
+        await repository.EnsureMembershipAsync(
+            _libraryId,
+            _rootId,
+            withFingerprintId,
+            "with.flac",
+            TestContext.Current.CancellationToken);
+        await repository.SaveFingerprintAsync(
+            withFingerprintId,
+            new AudioFingerprint(withFingerprintPath, TimeSpan.FromMinutes(4), [1u, 2u]),
+            algorithm: 2,
+            TestContext.Current.CancellationToken);
+
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE Tracks
+                SET ContentVerificationStatus = 'VerificationPending'
+                WHERE Id = $trackId;
+                """;
+            command.Parameters.AddWithValue("$trackId", withoutFingerprintId);
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        // 実SQLiteのCASE式をDapperでRootScanTrackRowへMaterializeする経路を通す。
+        // SQLite providerが計算列を想定外のCLR型として返しても、Repository側のSQLで型を固定して回帰を検出する。
+        var states = await repository.GetRootScanStateAsync(
+            _libraryId,
+            _rootId,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, states.Count);
+        var withoutFingerprint = Assert.Single(states, state => state.Track.Id == withoutFingerprintId);
+        Assert.False(withoutFingerprint.HasFingerprint);
+        Assert.True(withoutFingerprint.VerificationPending);
+        var withFingerprint = Assert.Single(states, state => state.Track.Id == withFingerprintId);
+        Assert.True(withFingerprint.HasFingerprint);
+        Assert.False(withFingerprint.VerificationPending);
+    }
+
+    [Fact]
     public async Task TrackRepository_GetsRootMembershipAndMarksGlobalTrackMissing()
     {
         var repository = new SqliteTrackRepository(_database);
