@@ -169,7 +169,8 @@
                                        TargetType="Button">
                                     <Setter Property="Visibility" Value="Visible" />
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding HasGenreFilter}" Value="False">
+                                        <DataTrigger Binding="{Binding HasGenreFilter}"
+                                                     Value="False">
                                             <Setter Property="Visibility" Value="Collapsed" />
                                         </DataTrigger>
                                     </Style.Triggers>
