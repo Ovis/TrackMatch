@@ -34,7 +34,10 @@ jobs:
         run: dotnet format TrackMatch.slnx --no-restore --verify-no-changes
 
       - name: Verify XAML formatting
-        run: dotnet xstyler -c Settings.XamlStyler -r -d ./src --passive
+        run: |
+          dotnet xstyler -c Settings.XamlStyler -r -d ./src
+          git diff -- src/TrackMatch.App/MainWindow.xaml
+          git diff --exit-code
 
       - name: Build
         run: dotnet build TrackMatch.slnx --configuration Release --no-restore
