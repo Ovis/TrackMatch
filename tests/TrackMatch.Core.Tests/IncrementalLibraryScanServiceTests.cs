@@ -426,11 +426,11 @@ public sealed class IncrementalLibraryScanServiceTests
     {
         public bool MetadataWasSkipped { get; private set; }
 
-        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
-            => [LibraryScanResult.Success(metadata)];
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => new(Path.GetFullPath(rootPath), [metadata.Path]);
 
         public IEnumerable<LibraryScanResult> Scan(
-            string rootPath,
+            LibraryScanPlan plan,
             Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
             CancellationToken cancellationToken = default)
         {
