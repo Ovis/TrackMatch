@@ -36,7 +36,7 @@ public sealed class SoundFileLoadFailureTests
     }
 
     [Fact]
-    public void LoadCandidate_WhenSourceFileIsMissing_DoesNotCallPlaybackService()
+    public void LoadCandidate_WhenSourceFileIsMissing_DoesNotTouchSourceUntilPlayback()
     {
         var missingPathA = Path.Combine(Path.GetTempPath(), $"trackmatch-missing-{Guid.NewGuid():N}.flac");
         var pathB = Path.GetTempFileName();
@@ -49,10 +49,10 @@ public sealed class SoundFileLoadFailureTests
             var exception = Record.Exception(() => viewModel.LoadCandidate(candidate));
 
             Assert.Null(exception);
-            Assert.Equal(0, service.LoadCallCount);
-            Assert.False(viewModel.IsLoaded);
-            Assert.False(viewModel.CanControl);
-            Assert.Contains("音源Aのファイルが見つかりません", viewModel.StatusText, StringComparison.Ordinal);
+            Assert.Equal(1, service.LoadCallCount);
+            Assert.True(viewModel.IsLoaded);
+            Assert.True(viewModel.CanControl);
+            Assert.Equal("停止中", viewModel.StatusText);
         }
         finally
         {
