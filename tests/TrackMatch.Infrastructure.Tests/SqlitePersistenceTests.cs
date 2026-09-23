@@ -139,8 +139,8 @@ public sealed class SqlitePersistenceTests : IAsyncLifetime
             await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
 
-        // 実SQLiteのCASE式をDapperでRootScanTrackRowへMaterializeする経路を通す。
-        // SQLite providerが計算列を想定外のCLR型として返しても、Repository側のSQLで型を固定して回帰を検出する。
+        // 実SQLiteの結果をDapperでRootScanTrackRowへMaterializeする経路を通す。
+        // SQLiteの計算列は実環境でCLR型推論がずれた実績があるため、実列だけを受けてC#側で状態判定する構造を回帰テストする。
         var states = await repository.GetRootScanStateAsync(
             _libraryId,
             _rootId,
