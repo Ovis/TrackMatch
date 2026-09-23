@@ -301,6 +301,10 @@ public sealed class LibraryAnalysisWorkflow
                 progress: generationProgress);
             _logger.LogInformation("候補生成完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, generationStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
+            // 前回の処理がComparison保存直後に中断していても、再利用されるComparisonに分類欠落を残さない。
+            // 分類は軽量なので、詳細比較再開前にCurrent Comparison全体を一度補完する。
+            await ClassifyCandidatesAsync(libraryId, cancellationToken);
+
             var analysisStopwatch = Stopwatch.StartNew();
             _logger.LogInformation("詳細比較開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.AnalyzingCandidates, 0, null, null));
@@ -382,7 +386,11 @@ public sealed class LibraryAnalysisWorkflow
     private CandidateAnalysisService CreateCandidateAnalysisService(
         SqliteDatabase database,
         long libraryId)
-        => new(
+    {
+        var classificationService = new CandidateClassificationService(
+            new SqliteCandidateComparisonRepository(database, libraryId),
+            new SqliteCandidateClassificationRepository(database, libraryId));
+        return new CandidateAnalysisService(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteCandidatePairRepository(database, libraryId),
             new SqliteCandidateComparisonRepository(database, libraryId),
@@ -400,7 +408,12 @@ public sealed class LibraryAnalysisWorkflow
                 timing.AverageComparisonElapsed.TotalMilliseconds,
                 timing.MaximumComparisonElapsed.TotalMilliseconds,
                 timing.PersistenceElapsed.TotalMilliseconds,
-                timing.CheckpointElapsed.TotalMilliseconds));
+                timing.CheckpointElapsed.TotalMilliseconds),
+            (comparisons, cancellationToken) => classificationService.ClassifyAsync(
+                AutomaticRelationshipClassificationProfile.Default,
+                comparisons,
+                cancellationToken));
+    }
 
     private static async Task<Library> GetRequiredLibraryAsync(
         SqliteDatabase database,
