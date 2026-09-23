@@ -138,6 +138,39 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetByTrackIdsAsync_ReturnsOnlyCandidatesTouchingAffectedTracks()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "delta-a.flac");
+        var trackB = await AddTrackAsync(tracks, "delta-b.flac");
+        var trackC = await AddTrackAsync(tracks, "delta-c.flac");
+        var trackD = await AddTrackAsync(tracks, "delta-d.flac");
+        // ReplaceAllAsyncは名前どおり既存集合を置換するため、2組を同じ更新単位で保存する。
+        // 個別にAddComparisonAsyncを2回呼ぶと後の1組だけが残り、差分取得自体ではなくfixtureが壊れる。
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [
+                new CandidatePair(Math.Min(trackA, trackB), Math.Max(trackA, trackB), 0),
+                new CandidatePair(Math.Min(trackC, trackD), Math.Max(trackC, trackD), 0),
+            ],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [
+                CreateComparison(trackA, trackB),
+                CreateComparison(trackC, trackD),
+            ],
+            TestContext.Current.CancellationToken);
+
+        var rows = await new SqliteCandidateReviewReportRepository(_database)
+            .GetByTrackIdsAsync(
+                _libraryId,
+                [trackA],
+                TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(CandidatePairKey.Create(trackA, trackB), CandidatePairKey.Create(row.TrackIdA, row.TrackIdB));
+    }
+
+    [Fact]
     public async Task GetAsync_DoesNotExposeOlderComparisonAlgorithmVersion()
     {
         var tracks = new SqliteTrackRepository(_database);
@@ -227,6 +260,19 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         Assert.Equal(0, currentCount);
         Assert.Equal(0, historyCount);
     }
+
+    private static CandidateComparison CreateComparison(long trackA, long trackB)
+        => new(
+            Math.Min(trackA, trackB),
+            Math.Max(trackA, trackB),
+            0.99,
+            0,
+            TimeSpan.Zero,
+            100,
+            TimeSpan.FromMinutes(3),
+            0.99,
+            0.99,
+            1.0);
 
     private async Task AddComparisonAsync(long trackA, long trackB)
     {

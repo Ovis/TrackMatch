@@ -13,9 +13,33 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     /// <summary>
     /// 指定LibraryのMembershipに両Trackが属するCurrent詳細比較結果を取得する。
     /// </summary>
-    public async Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
+    public Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
         CancellationToken cancellationToken = default)
+        => GetCoreAsync(libraryId, affectedTrackIds: null, cancellationToken);
+
+    /// <summary>
+    /// 指定Trackのいずれかを含むCandidateだけを取得する。
+    /// レビュー後の差分更新で全Candidateを再読込しないために使用する。
+    /// </summary>
+    public Task<IReadOnlyList<CandidateReviewReportRow>> GetByTrackIdsAsync(
+        long libraryId,
+        IReadOnlyCollection<long> affectedTrackIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(affectedTrackIds);
+        if (affectedTrackIds.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<CandidateReviewReportRow>>([]);
+        }
+
+        return GetCoreAsync(libraryId, affectedTrackIds, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<CandidateReviewReportRow>> GetCoreAsync(
+        long libraryId,
+        IReadOnlyCollection<long>? affectedTrackIds,
+        CancellationToken cancellationToken)
     {
         if (libraryId <= 0)
         {
@@ -70,6 +94,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
               AND EXISTS (
                     SELECT 1 FROM LibraryTracks lb
                     WHERE lb.LibraryId = @LibraryId AND lb.TrackId = x.TrackIdB)
+              AND (@FilterAffected = 0
+                   OR x.TrackIdA IN @AffectedTrackIds
+                   OR x.TrackIdB IN @AffectedTrackIds)
             ORDER BY CASE c.Kind
                 WHEN 'DuplicateCandidate' THEN 0
                 WHEN 'ShortVersionCandidate' THEN 1
@@ -86,6 +113,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             {
                 LibraryId = libraryId,
                 ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+                FilterAffected = affectedTrackIds is null ? 0 : 1,
+                // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
+                AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
             },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
