@@ -341,6 +341,32 @@ public sealed class SynchronizedPlaybackControlsViewModel : INotifyPropertyChang
     }
 
     /// <summary>
+    /// Aを基準にしたBの相対Offsetを秒Decimalの直接入力から反映する。
+    /// </summary>
+    public bool CommitRelativeOffsetText(string text)
+    {
+        if (!IsLoaded || !TryParseSeconds(text, out var relativeOffset))
+        {
+            SyncFromService();
+            return false;
+        }
+
+        try
+        {
+            var offsets = _service.Offsets;
+            _service.SetOffsets(offsets.A, offsets.A + relativeOffset);
+            SyncFromService();
+            return true;
+        }
+        catch (Exception exception) when (exception is OverflowException or ArgumentOutOfRangeException)
+        {
+            StatusText = "Offsetが表現可能範囲を超えています。";
+            SyncFromService();
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Manual Offsetを破棄し、Candidate解析時のBestOffsetへ戻す。
     /// </summary>
     public void ResetOffsetToAnalysis()

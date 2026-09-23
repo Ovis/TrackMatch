@@ -33,6 +33,7 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         _playbackTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _playbackTimer.Tick += PlaybackTimer_Tick;
+        _viewModel.Playback.PropertyChanged += Playback_PropertyChanged;
         PlaybackSeekSlider.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_PreviewMouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
         Loaded += MainWindow_Loaded;
@@ -45,6 +46,7 @@ public partial class MainWindow : Window
         EnableMoveToPointForSliders(this);
         _playbackTimer.Start();
         await _viewModel.LoadAsync();
+        RefreshRelativeOffsetText();
         if (_viewModel.Libraries.Count == 0)
         {
             var service = new LibraryManagementService(_viewModel.DatabasePath, _viewModel.TrashRoot);
@@ -59,6 +61,7 @@ public partial class MainWindow : Window
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _playbackTimer.Stop();
+        _viewModel.Playback.PropertyChanged -= Playback_PropertyChanged;
         _viewModel.Dispose();
     }
 
@@ -341,6 +344,66 @@ public partial class MainWindow : Window
         => _viewModel.Playback.AdjustOffset(isTrackA: false, OffsetStep);
 
     private void ResetOffset_Click(object sender, RoutedEventArgs e) => _viewModel.Playback.ResetOffsetToAnalysis();
+
+    /// <summary>
+    /// 相対Offsetの直接入力をEnterで確定し、B側OffsetとしてPlayback Engineへ反映する。
+    /// </summary>
+    /// <summary>
+    /// Playback Engine側でOffsetが変化した場合、編集中でない限り表示値を追従させる。
+    /// TextBox.TextへBindingとユーザー入力を同居させると編集後のローカル値が残るため、
+    /// Offset表示だけは明示的に同期する。
+    /// </summary>
+    private void Playback_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(_viewModel.Playback.OffsetASeconds) or nameof(_viewModel.Playback.OffsetBSeconds)))
+        {
+            return;
+        }
+
+        if (!RelativeOffsetTextBox.IsKeyboardFocusWithin)
+        {
+            RefreshRelativeOffsetText();
+        }
+    }
+
+    private void RelativeOffsetTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitRelativeOffsetText();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            RefreshRelativeOffsetText();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Enterで確定しなかった編集内容は破棄し、現在のEngine値へ表示を戻す。
+    /// </summary>
+    private void RelativeOffsetTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        => RefreshRelativeOffsetText();
+
+    /// <summary>
+    /// Aを基準に入力された相対OffsetをPlayback ViewModelへ確定する。
+    /// </summary>
+    private void CommitRelativeOffsetText()
+        => _viewModel.Playback.CommitRelativeOffsetText(RelativeOffsetTextBox.Text);
+
+    /// <summary>
+    /// 編集中の文字列を破棄し、ViewModelが保持する現在の相対Offset表示へ戻す。
+    /// </summary>
+    private void RefreshRelativeOffsetText()
+    {
+        var relativeSeconds = _viewModel.Playback.OffsetBSeconds - _viewModel.Playback.OffsetASeconds;
+        RelativeOffsetTextBox.Text = $"{relativeSeconds:+0.000;-0.000;0.000} s";
+    }
 
     private static void EnableMoveToPointForSliders(DependencyObject root)
     {
