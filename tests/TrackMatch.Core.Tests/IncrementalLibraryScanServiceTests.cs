@@ -51,6 +51,28 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_PrepareScanFailure_RecordsFailedSession()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var sessions = new FakeScanSessionRepository();
+        var service = new IncrementalLibraryScanService(
+            new PrepareThrowingLibraryScanner(),
+            new FakeTrackRepository([]),
+            sessions,
+            new FakeFingerprintExtractor(),
+            2);
+
+        await Assert.ThrowsAsync<IOException>(() => service.ScanAsync(
+            1,
+            1,
+            root,
+            TestContext.Current.CancellationToken));
+
+        Assert.NotNull(sessions.FailedSummary);
+        Assert.Null(sessions.CompletedSummary);
+    }
+
+    [Fact]
     public async Task ScanAsync_ReportsPreparedScanFileCountAsProgressTotal()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -477,6 +499,21 @@ public sealed class IncrementalLibraryScanServiceTests
             yield return first;
             cancellation.Cancel();
         }
+    }
+
+    /// <summary>
+    /// Scan対象の事前列挙中にI/Oエラーが発生する状況を再現する。
+    /// </summary>
+    private sealed class PrepareThrowingLibraryScanner : ILibraryScanner
+    {
+        public LibraryScanPlan PrepareScan(string rootPath, CancellationToken cancellationToken = default)
+            => throw new IOException("prepare failed");
+
+        public IEnumerable<LibraryScanResult> Scan(
+            LibraryScanPlan plan,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("PrepareScan失敗後にScanへ進んではならない。");
     }
 
     private sealed class ThrowingLibraryScanner(LibraryScanResult first) : ILibraryScanner
