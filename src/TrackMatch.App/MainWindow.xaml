@@ -153,8 +153,8 @@
                                    Text="ジャンル" />
                         <ToggleButton x:Name="GenreFilterToggle"
                                       Grid.Column="2"
-                                      Height="32"
                                       Width="130"
+                                      Height="32"
                                       Padding="10,0,34,0"
                                       HorizontalContentAlignment="Left"
                                       Background="White"
