@@ -62,6 +62,7 @@ public sealed class IncrementalLibraryScanServiceTests
             Stored(2, Metadata(secondPath, 100, 10)),
         ]);
         var progressValues = new List<IncrementalScanProgress>();
+        var progress = new SynchronousProgress<IncrementalScanProgress>(progressValues.Add);
         var service = new IncrementalLibraryScanService(
             new FakeLibraryScanner(
             [
@@ -78,7 +79,7 @@ public sealed class IncrementalLibraryScanServiceTests
             1,
             root,
             TestContext.Current.CancellationToken,
-            new Progress<IncrementalScanProgress>(progressValues.Add));
+            progress);
 
         Assert.NotEmpty(progressValues);
         Assert.All(progressValues, value => Assert.Equal(2, value.TotalFiles));
@@ -422,6 +423,14 @@ public sealed class IncrementalLibraryScanServiceTests
     /// <summary>
     /// File属性によるfast path判定を実際のScannerと同じ順序で呼び出すTest Double。
     /// </summary>
+    /// <summary>
+    /// Reportを呼び出し元Threadで即時実行し、非同期dispatchによるTestの競合を避けるProgress実装。
+    /// </summary>
+    private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
     private sealed class FastPathFakeLibraryScanner(AudioTrackMetadata metadata) : ILibraryScanner
     {
         public bool MetadataWasSkipped { get; private set; }
