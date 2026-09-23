@@ -18,9 +18,33 @@ public sealed class CandidateClassificationService(
         ArgumentNullException.ThrowIfNull(profile);
         profile.Validate();
 
+        var comparisons = await comparisonRepository.GetAllAsync(cancellationToken);
+        await ClassifyAsync(profile, comparisons, cancellationToken);
+        return await classificationRepository.GetReportAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 指定した詳細比較結果だけを分類し、既存の他Pairの分類を維持したまま永続化する。
+    /// </summary>
+    /// <param name="profile">分類に使用するしきい値Profile</param>
+    /// <param name="comparisons">分類対象の詳細比較結果</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    public async Task ClassifyAsync(
+        RelationshipThresholdProfile profile,
+        IReadOnlyCollection<CandidateComparison> comparisons,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(comparisons);
+        profile.Validate();
+
+        if (comparisons.Count == 0)
+        {
+            return;
+        }
+
         var classifier = new RelationshipClassifier(profile);
         var profileJson = JsonSerializer.Serialize(profile);
-        var comparisons = await comparisonRepository.GetAllAsync(cancellationToken);
         var classifications = comparisons
             .Select(comparison =>
             {
@@ -39,6 +63,5 @@ public sealed class CandidateClassificationService(
             .ToArray();
 
         await classificationRepository.ReplaceAllAsync(classifications, cancellationToken);
-        return await classificationRepository.GetReportAsync(cancellationToken);
     }
 }
