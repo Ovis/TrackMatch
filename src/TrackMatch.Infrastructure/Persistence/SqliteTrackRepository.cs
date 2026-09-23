@@ -246,9 +246,9 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
                    t.Id, t.Path, t.FileSize, t.LastWriteTimeUtcTicks, t.DurationTicks,
                    t.ArtistsJson, t.Title, t.Album, t.TrackNumber, t.DiscNumber, t.GenresJson, t.Year,
                    t.Format, t.Codec, t.BitrateKbps, t.SampleRateHz, t.BitDepth, t.Channels, t.IsMissing,
-                   CASE WHEN f.TrackId IS NULL THEN 0 ELSE 1 END AS HasFingerprint,
-                   CASE WHEN t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed')
-                        THEN 1 ELSE 0 END AS VerificationPending
+                   CAST(CASE WHEN f.TrackId IS NULL THEN 0 ELSE 1 END AS INTEGER) AS HasFingerprint,
+                   CAST(CASE WHEN t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed')
+                        THEN 1 ELSE 0 END AS INTEGER) AS VerificationPending
             FROM LibraryTracks lt
             INNER JOIN Tracks t ON t.Id = lt.TrackId
             LEFT JOIN Fingerprints f ON f.TrackId = lt.TrackId
