@@ -6,6 +6,7 @@ using TrackMatch.App.Playback;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Classification;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Scanning;
