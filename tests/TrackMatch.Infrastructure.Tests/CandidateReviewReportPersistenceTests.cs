@@ -145,8 +145,20 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         var trackB = await AddTrackAsync(tracks, "delta-b.flac");
         var trackC = await AddTrackAsync(tracks, "delta-c.flac");
         var trackD = await AddTrackAsync(tracks, "delta-d.flac");
-        await AddComparisonAsync(trackA, trackB);
-        await AddComparisonAsync(trackC, trackD);
+        // ReplaceAllAsyncは名前どおり既存集合を置換するため、2組を同じ更新単位で保存する。
+        // 個別にAddComparisonAsyncを2回呼ぶと後の1組だけが残り、差分取得自体ではなくfixtureが壊れる。
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [
+                new CandidatePair(Math.Min(trackA, trackB), Math.Max(trackA, trackB), 0),
+                new CandidatePair(Math.Min(trackC, trackD), Math.Max(trackC, trackD), 0),
+            ],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [
+                CreateComparison(trackA, trackB),
+                CreateComparison(trackC, trackD),
+            ],
+            TestContext.Current.CancellationToken);
 
         var rows = await new SqliteCandidateReviewReportRepository(_database)
             .GetByTrackIdsAsync(
@@ -248,6 +260,19 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
         Assert.Equal(0, currentCount);
         Assert.Equal(0, historyCount);
     }
+
+    private static CandidateComparison CreateComparison(long trackA, long trackB)
+        => new(
+            Math.Min(trackA, trackB),
+            Math.Max(trackA, trackB),
+            0.99,
+            0,
+            TimeSpan.Zero,
+            100,
+            TimeSpan.FromMinutes(3),
+            0.99,
+            0.99,
+            1.0);
 
     private async Task AddComparisonAsync(long trackA, long trackB)
     {
