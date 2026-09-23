@@ -729,18 +729,7 @@
                                      FontWeight="SemiBold"
                                      IsEnabled="{Binding CanControl}"
                                      KeyDown="RelativeOffsetTextBox_KeyDown"
-                                     LostKeyboardFocus="RelativeOffsetTextBox_LostKeyboardFocus">
-                                <TextBox.Text>
-                                    <!-- TextBoxは編集時にTextへローカル値を保持するため、Engine側のOffset変更で
-                                         表示が更新されるようBindingを明示的に優先させる。 -->
-                                    <MultiBinding Converter="{StaticResource RelativeOffsetConverter}"
-                                                  Mode="OneWay"
-                                                  UpdateSourceTrigger="Explicit">
-                                        <Binding Path="OffsetASeconds" />
-                                        <Binding Path="OffsetBSeconds" />
-                                    </MultiBinding>
-                                </TextBox.Text>
-                            </TextBox>
+                                     LostKeyboardFocus="RelativeOffsetTextBox_LostKeyboardFocus" />
                             <Button Grid.Column="6"
                                     Padding="10,5"
                                     Click="RelativeOffsetPlus_Click"
