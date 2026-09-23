@@ -294,6 +294,58 @@ public sealed class IncrementalLibraryScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_UnchangedHealthyTrack_UsesFastPathWithoutRepositoryWrites()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "unchanged.flac");
+        var metadata = Metadata(path, 100, 10);
+        var repository = new FakeTrackRepository([Stored(1, metadata)]);
+        var scanner = new FastPathFakeLibraryScanner(metadata);
+        var extractor = new FakeFingerprintExtractor();
+        var service = new IncrementalLibraryScanService(
+            scanner,
+            repository,
+            new FakeScanSessionRepository(),
+            extractor,
+            2);
+
+        var result = await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.Summary.ProcessedFiles);
+        Assert.True(scanner.MetadataWasSkipped);
+        Assert.Empty(repository.UpsertedPaths);
+        Assert.Empty(repository.Memberships);
+        Assert.Empty(extractor.Paths);
+    }
+
+    [Fact]
+    public async Task ScanAsync_VerificationPendingTrack_DoesNotUseFastPath()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
+        var path = Path.Combine(root, "pending.flac");
+        var metadata = Metadata(path, 100, 10);
+        var fingerprint = new AudioFingerprint(path, TimeSpan.FromMinutes(4), [1u, 2u, 3u]);
+        var repository = new FakeTrackRepository(
+            [Stored(1, metadata)],
+            existingFingerprint: fingerprint,
+            verificationPendingTrackIds: new HashSet<long> { 1 });
+        var scanner = new FastPathFakeLibraryScanner(metadata);
+        var extractor = new FakeFingerprintExtractor();
+        var service = new IncrementalLibraryScanService(
+            scanner,
+            repository,
+            new FakeScanSessionRepository(),
+            extractor,
+            2);
+
+        await service.ScanAsync(1, 1, root, TestContext.Current.CancellationToken);
+
+        Assert.False(scanner.MetadataWasSkipped);
+        Assert.Equal([path], repository.UpsertedPaths);
+        Assert.Equal([path], extractor.Paths);
+    }
+
+    [Fact]
     public async Task ScanAsync_LimitsConcurrentFingerprintExtractions()
     {
         var root = Path.Combine(Path.GetTempPath(), "TrackMatch", "Music");
@@ -332,6 +384,29 @@ public sealed class IncrementalLibraryScanServiceTests
             1,
             1,
             ["J-POPS"]);
+
+    /// <summary>
+    /// File属性によるfast path判定を実際のScannerと同じ順序で呼び出すTest Double。
+    /// </summary>
+    private sealed class FastPathFakeLibraryScanner(AudioTrackMetadata metadata) : ILibraryScanner
+    {
+        public bool MetadataWasSkipped { get; private set; }
+
+        public IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default)
+            => [LibraryScanResult.Success(metadata)];
+
+        public IEnumerable<LibraryScanResult> Scan(
+            string rootPath,
+            Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+            CancellationToken cancellationToken = default)
+        {
+            var snapshot = new LibraryFileSnapshot(metadata.Path, metadata.FileSize, metadata.LastWriteTimeUtc);
+            MetadataWasSkipped = shouldSkipMetadata(snapshot);
+            return MetadataWasSkipped
+                ? [LibraryScanResult.SkippedMetadata(snapshot)]
+                : [LibraryScanResult.Success(metadata)];
+        }
+    }
 
     private sealed class FakeLibraryScanner(IReadOnlyList<LibraryScanResult> results) : ILibraryScanner
     {
@@ -446,6 +521,26 @@ public sealed class IncrementalLibraryScanServiceTests
         public List<long> VerifiedTrackIds { get; } = [];
         public List<long> ContentChangedTrackIds { get; } = [];
 
+        public async Task<PreparedTrackScanState> PrepareTrackForScanAsync(
+            AudioTrackMetadata metadata,
+            long libraryId,
+            long rootId,
+            string relativePath,
+            CancellationToken cancellationToken = default)
+        {
+            var trackId = await UpsertMetadataAsync(metadata, cancellationToken);
+            await EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+
+            // Production実装と同じく、既存Fingerprintの有無とVerification状態をまとめて返す。
+            // Test Doubleでもこの状態を再現しないと、既存Fingerprintがすべて欠落扱いになってしまう。
+            var hasFingerprint = !MissingFingerprintIds.Contains(trackId)
+                && (initialTracks.Any(track => track.Id == trackId) || existingFingerprint is not null);
+            return new PreparedTrackScanState(
+                trackId,
+                hasFingerprint,
+                verificationPendingTrackIds?.Contains(trackId) == true);
+        }
+
         public Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default)
         {
             UpsertedPaths.Add(metadata.Path);
@@ -470,6 +565,12 @@ public sealed class IncrementalLibraryScanServiceTests
             long rootId,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlySet<long>>(MissingFingerprintIds);
+
+        public Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+            long libraryId,
+            long rootId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<long>>(verificationPendingTrackIds?.ToHashSet() ?? []);
 
         public Task EnsureMembershipAsync(
             long libraryId,

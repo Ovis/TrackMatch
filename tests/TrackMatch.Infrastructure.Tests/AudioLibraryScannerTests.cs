@@ -1,4 +1,5 @@
-﻿using TrackMatch.Infrastructure.Audio;
+﻿using TrackMatch.Core.Scanning;
+using TrackMatch.Infrastructure.Audio;
 using TrackMatch.Infrastructure.Scanning;
 using Xunit;
 
@@ -58,4 +59,41 @@ public sealed class AudioLibraryScannerTests
             Directory.Delete(root, recursive: true);
         }
     }
+    [Fact]
+    public void Scan_WhenFastPathMatches_SkipsMetadataReader()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"TrackMatch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "unchanged.flac");
+        File.WriteAllBytes(path, FlacTestFileBuilder.Create(comments: ["TITLE=Unchanged"]));
+
+        try
+        {
+            var reader = new CountingMetadataReader();
+            var scanner = new AudioLibraryScanner(reader);
+            var result = Assert.Single(scanner.Scan(root, _ => true, TestContext.Current.CancellationToken));
+
+            Assert.True(result.MetadataSkipped);
+            Assert.False(result.IsSuccess);
+            Assert.NotNull(result.Snapshot);
+            Assert.Equal(0, reader.ReadCount);
+            Assert.Equal(new FileInfo(path).Length, result.Snapshot.FileSize);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class CountingMetadataReader : IAudioMetadataReader
+    {
+        public int ReadCount { get; private set; }
+
+        public TrackMatch.Core.Models.AudioTrackMetadata Read(string path)
+        {
+            ReadCount++;
+            throw new InvalidOperationException("fast pathではMetadata Readerを呼び出してはならない。");
+        }
+    }
+
 }

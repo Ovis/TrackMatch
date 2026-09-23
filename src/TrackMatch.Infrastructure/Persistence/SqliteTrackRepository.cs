@@ -105,6 +105,121 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
     }
 
     /// <inheritdoc />
+    public async Task<PreparedTrackScanState> PrepareTrackForScanAsync(
+        AudioTrackMetadata metadata,
+        long libraryId,
+        long rootId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        var normalizedPath = LibraryValueNormalizer.NormalizeTrackPath(metadata.Path);
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        var parameters = new
+        {
+            Path = normalizedPath.DisplayPath,
+            PathKey = normalizedPath.Key,
+            metadata.FileSize,
+            LastWriteTimeUtcTicks = metadata.LastWriteTimeUtc.Ticks,
+            DurationTicks = metadata.Duration.Ticks,
+            ArtistsJson = JsonSerializer.Serialize(metadata.Artists),
+            metadata.Title,
+            metadata.Album,
+            TrackNumber = metadata.TrackNumber is null ? (long?)null : metadata.TrackNumber.Value,
+            DiscNumber = metadata.DiscNumber is null ? (long?)null : metadata.DiscNumber.Value,
+            GenresJson = JsonSerializer.Serialize(metadata.Genres),
+            Year = metadata.Year is null ? (long?)null : metadata.Year.Value,
+            metadata.Format,
+            metadata.Codec,
+            metadata.BitrateKbps,
+            metadata.SampleRateHz,
+            metadata.BitDepth,
+            metadata.Channels,
+            UpdatedAtUtcTicks = DateTime.UtcNow.Ticks,
+        };
+
+        // ScanではMetadata更新とMembership確立を必ず連続して行うため、接続とTransactionを共有する。
+        // 個別Repository APIを順番に呼ぶ構成より、数万Fileの初回Scanで接続確立とCommit回数を減らす。
+        const string upsertSql = """
+            INSERT INTO Tracks (
+                Path, PathKey, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+                ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
+                Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels,
+                IsMissing, UpdatedAtUtcTicks)
+            VALUES (
+                @Path, @PathKey, @FileSize, @LastWriteTimeUtcTicks, @DurationTicks,
+                @ArtistsJson, @Title, @Album, @TrackNumber, @DiscNumber, @GenresJson, @Year,
+                @Format, @Codec, @BitrateKbps, @SampleRateHz, @BitDepth, @Channels,
+                0, @UpdatedAtUtcTicks)
+            ON CONFLICT(PathKey) DO UPDATE SET
+                Path = excluded.Path,
+                FileSize = excluded.FileSize,
+                LastWriteTimeUtcTicks = excluded.LastWriteTimeUtcTicks,
+                DurationTicks = excluded.DurationTicks,
+                ArtistsJson = excluded.ArtistsJson,
+                Title = excluded.Title,
+                Album = excluded.Album,
+                TrackNumber = excluded.TrackNumber,
+                DiscNumber = excluded.DiscNumber,
+                GenresJson = excluded.GenresJson,
+                Year = excluded.Year,
+                Format = excluded.Format,
+                Codec = excluded.Codec,
+                BitrateKbps = excluded.BitrateKbps,
+                SampleRateHz = excluded.SampleRateHz,
+                BitDepth = excluded.BitDepth,
+                Channels = excluded.Channels,
+                IsMissing = 0,
+                UpdatedAtUtcTicks = excluded.UpdatedAtUtcTicks;
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(
+            upsertSql,
+            parameters,
+            transaction,
+            cancellationToken: cancellationToken));
+
+        var trackId = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT Id FROM Tracks WHERE PathKey = @PathKey;",
+            new { PathKey = normalizedPath.Key },
+            transaction,
+            cancellationToken: cancellationToken));
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO LibraryTracks (
+                LibraryId, TrackId, RootId, RelativePath,
+                CandidateGenerationPending)
+            VALUES (@LibraryId, @TrackId, @RootId, @RelativePath, 1)
+            ON CONFLICT(LibraryId, TrackId) DO UPDATE SET
+                RootId = excluded.RootId,
+                RelativePath = excluded.RelativePath;
+            """,
+            new { LibraryId = libraryId, TrackId = trackId, RootId = rootId, RelativePath = relativePath },
+            transaction,
+            cancellationToken: cancellationToken));
+
+        var state = await connection.QuerySingleAsync<PreparedTrackScanRow>(new CommandDefinition(
+            """
+            SELECT CASE WHEN f.TrackId IS NULL THEN 0 ELSE 1 END AS HasFingerprint,
+                   CASE WHEN t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed')
+                        THEN 1 ELSE 0 END AS VerificationPending
+            FROM Tracks t
+            LEFT JOIN Fingerprints f ON f.TrackId = t.Id
+            WHERE t.Id = @TrackId;
+            """,
+            new { TrackId = trackId },
+            transaction,
+            cancellationToken: cancellationToken));
+
+        await transaction.CommitAsync(cancellationToken);
+        return new PreparedTrackScanState(trackId, state.HasFingerprint != 0, state.VerificationPending != 0);
+    }
+
+    /// <inheritdoc />
     public async Task<StoredTrack?> GetByPathAsync(
         string path,
         CancellationToken cancellationToken = default)
@@ -116,6 +231,44 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             new { PathKey = normalizedPath.Key },
             cancellationToken: cancellationToken));
         return row is null ? null : ToStoredTrack(row);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RootScanTrackState>> GetRootScanStateAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        const string sql = """
+            SELECT lt.LibraryId, lt.TrackId, lt.RootId, lt.RelativePath,
+                   lt.CandidateGenerationPending,
+                   t.Id, t.Path, t.FileSize, t.LastWriteTimeUtcTicks, t.DurationTicks,
+                   t.ArtistsJson, t.Title, t.Album, t.TrackNumber, t.DiscNumber, t.GenresJson, t.Year,
+                   t.Format, t.Codec, t.BitrateKbps, t.SampleRateHz, t.BitDepth, t.Channels, t.IsMissing,
+                   CASE WHEN f.TrackId IS NULL THEN 0 ELSE 1 END AS HasFingerprint,
+                   CASE WHEN t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed')
+                        THEN 1 ELSE 0 END AS VerificationPending
+            FROM LibraryTracks lt
+            INNER JOIN Tracks t ON t.Id = lt.TrackId
+            LEFT JOIN Fingerprints f ON f.TrackId = lt.TrackId
+            WHERE lt.LibraryId = @LibraryId AND lt.RootId = @RootId
+            ORDER BY lt.RelativePath COLLATE NOCASE;
+            """;
+        var rows = await connection.QueryAsync<RootScanTrackRow>(new CommandDefinition(
+            sql,
+            new { LibraryId = libraryId, RootId = rootId },
+            cancellationToken: cancellationToken));
+        return rows.Select(row => new RootScanTrackState(
+            new StoredLibraryTrack(
+                row.LibraryId,
+                row.TrackId,
+                row.RootId,
+                row.RelativePath,
+                row.CandidateGenerationPending != 0),
+            ToStoredTrack(row),
+            row.HasFingerprint != 0,
+            row.VerificationPending != 0)).ToArray();
     }
 
     /// <inheritdoc />
@@ -164,6 +317,28 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             WHERE lt.LibraryId = @LibraryId
               AND lt.RootId = @RootId
               AND f.TrackId IS NULL;
+            """;
+        var ids = await connection.QueryAsync<long>(new CommandDefinition(
+            sql,
+            new { LibraryId = libraryId, RootId = rootId },
+            cancellationToken: cancellationToken));
+        return ids.ToHashSet();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        const string sql = """
+            SELECT lt.TrackId
+            FROM LibraryTracks lt
+            INNER JOIN Tracks t ON t.Id = lt.TrackId
+            WHERE lt.LibraryId = @LibraryId
+              AND lt.RootId = @RootId
+              AND t.ContentVerificationStatus IN ('VerificationPending', 'VerificationFailed');
             """;
         var ids = await connection.QueryAsync<long>(new CommandDefinition(
             sql,
@@ -782,6 +957,39 @@ public sealed class SqliteTrackRepository(SqliteDatabase database) : ITrackRepos
             Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
             ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
             Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing);
+
+    private sealed record RootScanTrackRow(
+        long LibraryId,
+        long TrackId,
+        long RootId,
+        string RelativePath,
+        long CandidateGenerationPending,
+        long Id,
+        string Path,
+        long FileSize,
+        long LastWriteTimeUtcTicks,
+        long DurationTicks,
+        string ArtistsJson,
+        string? Title,
+        string? Album,
+        long? TrackNumber,
+        long? DiscNumber,
+        string GenresJson,
+        long? Year,
+        string? Format,
+        string? Codec,
+        long? BitrateKbps,
+        long? SampleRateHz,
+        long? BitDepth,
+        long? Channels,
+        long IsMissing,
+        long HasFingerprint,
+        long VerificationPending) : TrackRow(
+            Id, Path, FileSize, LastWriteTimeUtcTicks, DurationTicks,
+            ArtistsJson, Title, Album, TrackNumber, DiscNumber, GenresJson, Year,
+            Format, Codec, BitrateKbps, SampleRateHz, BitDepth, Channels, IsMissing);
+
+    private sealed record PreparedTrackScanRow(long HasFingerprint, long VerificationPending);
 
     private sealed record FingerprintRow(string Path, long DurationTicks, byte[] ValuesBlob);
 }

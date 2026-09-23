@@ -1,4 +1,5 @@
-﻿using TrackMatch.Core.Comparison;
+﻿using System.Diagnostics;
+using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Candidates;
@@ -10,8 +11,13 @@ public sealed class CandidateAnalysisService(
     IFingerprintCatalogRepository fingerprintCatalog,
     ICandidatePairRepository candidatePairRepository,
     ICandidateComparisonRepository comparisonRepository,
-    FingerprintComparer comparer)
+    FingerprintComparer comparer,
+    Action<CandidateAnalysisTiming>? timing = null)
 {
+    // 数万～十数万件の比較を最後までMemoryに保持すると、Cancel時に全計算結果を失う。
+    // SQLiteへのTransaction回数を抑えつつ再開可能性を確保するため、一定件数ごとにCheckpointする。
+    private const int ComparisonCheckpointSize = 500;
+    private readonly Action<CandidateAnalysisTiming>? _timing = timing;
     /// <summary>
     /// 保存済み候補ペアを詳細比較する。
     /// </summary>
@@ -33,6 +39,10 @@ public sealed class CandidateAnalysisService(
         var fingerprintsByTrackId = fingerprints.ToDictionary(item => item.TrackId);
         var comparedAtByPair = await comparisonRepository.GetComparedAtUtcAsync(cancellationToken);
         var changedComparisons = new List<CandidateComparison>();
+        var checkpointStopwatch = Stopwatch.StartNew();
+        var checkpointComparisonElapsed = TimeSpan.Zero;
+        var checkpointCompared = 0;
+        var checkpointMaximumComparisonElapsed = TimeSpan.Zero;
         var reused = 0;
         var skipped = 0;
         var completed = 0;
@@ -63,7 +73,15 @@ public sealed class CandidateAnalysisService(
                 continue;
             }
 
+            var comparisonStopwatch = Stopwatch.StartNew();
             var result = comparer.Compare(a.Fingerprint, b.Fingerprint);
+            comparisonStopwatch.Stop();
+            checkpointComparisonElapsed += comparisonStopwatch.Elapsed;
+            checkpointCompared++;
+            if (comparisonStopwatch.Elapsed > checkpointMaximumComparisonElapsed)
+            {
+                checkpointMaximumComparisonElapsed = comparisonStopwatch.Elapsed;
+            }
             changedComparisons.Add(new CandidateComparison(
                 pair.TrackIdA,
                 pair.TrackIdB,
@@ -77,10 +95,53 @@ public sealed class CandidateAnalysisService(
                 CalculateDurationRatio(a.Fingerprint.Duration, b.Fingerprint.Duration)));
             completed++;
             progress?.Report(new CandidateAnalysisProgress(completed, pairs.Count));
+
+            if (changedComparisons.Count >= ComparisonCheckpointSize)
+            {
+                var persistenceStopwatch = Stopwatch.StartNew();
+                await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+                persistenceStopwatch.Stop();
+                checkpointStopwatch.Stop();
+
+                _timing?.Invoke(new CandidateAnalysisTiming(
+                    completed,
+                    pairs.Count,
+                    checkpointCompared,
+                    checkpointComparisonElapsed,
+                    checkpointCompared == 0 ? TimeSpan.Zero : checkpointComparisonElapsed / checkpointCompared,
+                    checkpointMaximumComparisonElapsed,
+                    persistenceStopwatch.Elapsed,
+                    checkpointStopwatch.Elapsed,
+                    false));
+
+                changedComparisons.Clear();
+                checkpointStopwatch.Restart();
+                checkpointComparisonElapsed = TimeSpan.Zero;
+                checkpointCompared = 0;
+                checkpointMaximumComparisonElapsed = TimeSpan.Zero;
+            }
         }
 
-        await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
-        return new CandidateAnalysisResult(pairs.Count, changedComparisons.Count, reused, skipped);
+        var analyzed = completed - reused - skipped;
+        if (changedComparisons.Count != 0)
+        {
+            var persistenceStopwatch = Stopwatch.StartNew();
+            await comparisonRepository.UpsertAsync(changedComparisons, cancellationToken);
+            persistenceStopwatch.Stop();
+            checkpointStopwatch.Stop();
+            _timing?.Invoke(new CandidateAnalysisTiming(
+                completed,
+                pairs.Count,
+                checkpointCompared,
+                checkpointComparisonElapsed,
+                checkpointCompared == 0 ? TimeSpan.Zero : checkpointComparisonElapsed / checkpointCompared,
+                checkpointMaximumComparisonElapsed,
+                persistenceStopwatch.Elapsed,
+                checkpointStopwatch.Elapsed,
+                true));
+        }
+
+        return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
     }
 
     private static double CalculateDurationRatio(TimeSpan a, TimeSpan b)
@@ -94,3 +155,17 @@ public sealed class CandidateAnalysisService(
 /// 候補ペアの詳細比較進捗を表す。
 /// </summary>
 public sealed record CandidateAnalysisProgress(int CompletedPairs, int TotalPairs);
+
+/// <summary>
+/// 詳細比較Checkpoint単位の処理時間を表す。
+/// </summary>
+public sealed record CandidateAnalysisTiming(
+    int CompletedPairs,
+    int TotalPairs,
+    int ComparedPairs,
+    TimeSpan ComparisonElapsed,
+    TimeSpan AverageComparisonElapsed,
+    TimeSpan MaximumComparisonElapsed,
+    TimeSpan PersistenceElapsed,
+    TimeSpan CheckpointElapsed,
+    bool IsFinalCheckpoint);

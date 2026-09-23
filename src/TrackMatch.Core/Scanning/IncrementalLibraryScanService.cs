@@ -50,7 +50,9 @@ public sealed class IncrementalLibraryScanService(
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
-        var totalFiles = scanner.GetSupportedFileCount(fullRootPath, cancellationToken);
+        // 件数表示のためだけにNAS全体を事前走査すると大規模Libraryでは列挙コストが二重になる。
+        // 進捗総数は未確定(null)として開始し、実処理と同じ1回の列挙だけを行う。
+        int? totalFiles = null;
         progress?.Report(new IncrementalScanProgress(0, totalFiles, null));
 
         var sessionId = await scanSessionRepository.StartAsync(fullRootPath, DateTime.UtcNow, cancellationToken);
@@ -66,20 +68,53 @@ public sealed class IncrementalLibraryScanService(
 
         try
         {
-            var storedEntries = await trackRepository.GetByRootAsync(libraryId, rootId, cancellationToken);
-            var missingFingerprintIds = await trackRepository.GetTrackIdsWithoutFingerprintByRootAsync(libraryId, rootId, cancellationToken);
-            var storedByPath = storedEntries.ToDictionary(
-                entry => Path.GetFullPath(entry.Track.Metadata.Path),
+            // Root内Track・Fingerprint有無・Verification状態を1回のRepository readで取得し、
+            // 大規模LibraryのScan開始時に同じ集合を複数回SQLiteへ問い合わせない。
+            var rootScanStates = await trackRepository.GetRootScanStateAsync(libraryId, rootId, cancellationToken);
+            var storedEntries = rootScanStates
+                .Select(state => (state.Membership, state.Track))
+                .ToArray();
+            var missingFingerprintIds = rootScanStates
+                .Where(state => !state.HasFingerprint)
+                .Select(state => state.Track.Id)
+                .ToHashSet();
+            var verificationPendingTrackIds = rootScanStates
+                .Where(state => state.VerificationPending)
+                .Select(state => state.Track.Id)
+                .ToHashSet();
+            var storedByPath = rootScanStates.ToDictionary(
+                state => Path.GetFullPath(state.Track.Metadata.Path),
+                state => (state.Membership, state.Track),
                 StringComparer.OrdinalIgnoreCase);
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var result in scanner.Scan(fullRootPath, cancellationToken))
+            // 未変更・正常状態の既知FileはMetadata Decodeと毎FileのSQLite更新を省略する。
+            // Missing復帰、Fingerprint欠落、Verification再試行は状態更新が必要なので必ず通常経路へ戻す。
+            bool CanSkipMetadata(LibraryFileSnapshot snapshot)
+            {
+                var path = Path.GetFullPath(snapshot.Path);
+                return storedByPath.TryGetValue(path, out var entry)
+                    && !entry.Track.IsMissing
+                    && !missingFingerprintIds.Contains(entry.Track.Id)
+                    && !verificationPendingTrackIds.Contains(entry.Track.Id)
+                    && entry.Track.Metadata.FileSize == snapshot.FileSize
+                    && entry.Track.Metadata.LastWriteTimeUtc == snapshot.LastWriteTimeUtc;
+            }
+
+            foreach (var result in scanner.Scan(fullRootPath, CanSkipMetadata, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 total++;
 
                 var fullPath = Path.GetFullPath(result.Path);
                 seenPaths.Add(fullPath);
+
+                if (result.MetadataSkipped)
+                {
+                    processed++;
+                    progress?.Report(new IncrementalScanProgress(++completedFiles, totalFiles, fullPath));
+                    continue;
+                }
 
                 if (!result.IsSuccess)
                 {
@@ -94,11 +129,16 @@ public sealed class IncrementalLibraryScanService(
                 var wasMissing = hasMembership && storedEntry.Track.IsMissing;
                 var contentChanged = hasMembership && HasChanged(storedEntry.Track, metadata);
 
-                // MetadataとSQLite更新は従来どおり直列に保ち、支配的なfpcalcだけを並列化する。
-                // Path Identityを共有するため、別Libraryで既知のTrackなら同じTrackIdを再利用する。
-                var trackId = await trackRepository.UpsertMetadataAsync(metadata, cancellationToken);
+                // Metadata更新・Membership確立・Fingerprint/Verification状態取得をRepository側で1操作へ集約する。
+                // SQLite実装では同一接続・Transactionを共有し、初回Scanや変更Fileでの接続/Commit往復を削減する。
                 var relativePath = Path.GetRelativePath(fullRootPath, fullPath);
-                await trackRepository.EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+                var prepared = await trackRepository.PrepareTrackForScanAsync(
+                    metadata,
+                    libraryId,
+                    rootId,
+                    relativePath,
+                    cancellationToken);
+                var trackId = prepared.TrackId;
 
                 if (!hasMembership)
                 {
@@ -109,12 +149,8 @@ public sealed class IncrementalLibraryScanService(
                     updated++;
                 }
 
-                var verificationPending = await trackRepository.IsContentVerificationPendingAsync(trackId, cancellationToken);
-                var needsFingerprint = contentChanged || verificationPending || missingFingerprintIds.Contains(trackId);
-                if (!hasMembership && !needsFingerprint)
-                {
-                    needsFingerprint = await trackRepository.GetFingerprintAsync(trackId, cancellationToken) is null;
-                }
+                var verificationPending = prepared.VerificationPending;
+                var needsFingerprint = contentChanged || verificationPending || !prepared.HasFingerprint;
 
                 if (!needsFingerprint)
                 {

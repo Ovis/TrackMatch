@@ -18,4 +18,16 @@ public interface ILibraryScanner
     /// 対象フォルダ以下の音声ファイルを走査する。
     /// </summary>
     IEnumerable<LibraryScanResult> Scan(string rootPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// File属性だけでMetadata解析を省略できる場合に、その判定を利用して走査する。
+    /// </summary>
+    /// <remarks>
+    /// 高速化に対応しないScanner実装は通常のScanへフォールバックしてよい。
+    /// </remarks>
+    IEnumerable<LibraryScanResult> Scan(
+        string rootPath,
+        Func<LibraryFileSnapshot, bool> shouldSkipMetadata,
+        CancellationToken cancellationToken = default)
+        => Scan(rootPath, cancellationToken);
 }

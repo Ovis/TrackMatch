@@ -14,9 +14,48 @@ public interface ITrackRepository
     Task<long> UpsertMetadataAsync(AudioTrackMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Metadata更新とLibrary Membership確立を1つのScan操作として実行し、後続判定に必要な状態を返す。
+    /// </summary>
+    async Task<PreparedTrackScanState> PrepareTrackForScanAsync(
+        AudioTrackMetadata metadata,
+        long libraryId,
+        long rootId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var trackId = await UpsertMetadataAsync(metadata, cancellationToken);
+        await EnsureMembershipAsync(libraryId, rootId, trackId, relativePath, cancellationToken);
+        return new PreparedTrackScanState(
+            trackId,
+            await GetFingerprintAsync(trackId, cancellationToken) is not null,
+            await IsContentVerificationPendingAsync(trackId, cancellationToken));
+    }
+
+    /// <summary>
     /// 指定PathのGlobal Trackを取得する。
     /// </summary>
     Task<StoredTrack?> GetByPathAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 増分Scan開始時に必要なRoot内Track状態を一括取得する。
+    /// </summary>
+    /// <remarks>
+    /// 大規模Libraryで同じRootをFingerprint有無・Verification状態ごとに再照会しないためのScan専用read model。
+    /// </remarks>
+    async Task<IReadOnlyList<RootScanTrackState>> GetRootScanStateAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+    {
+        var entries = await GetByRootAsync(libraryId, rootId, cancellationToken);
+        var missingFingerprintIds = await GetTrackIdsWithoutFingerprintByRootAsync(libraryId, rootId, cancellationToken);
+        var verificationPendingIds = await GetContentVerificationPendingTrackIdsByRootAsync(libraryId, rootId, cancellationToken);
+        return entries.Select(entry => new RootScanTrackState(
+            entry.Membership,
+            entry.Track,
+            !missingFingerprintIds.Contains(entry.Track.Id),
+            verificationPendingIds.Contains(entry.Track.Id))).ToArray();
+    }
 
     /// <summary>
     /// 指定Library Root由来のMembershipとGlobal Trackを取得する。
@@ -33,6 +72,15 @@ public interface ITrackRepository
         long libraryId,
         long rootId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 指定RootでContent Verificationの再試行が必要なTrack IDを一括取得する。
+    /// </summary>
+    Task<IReadOnlySet<long>> GetContentVerificationPendingTrackIdsByRootAsync(
+        long libraryId,
+        long rootId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlySet<long>>(new HashSet<long>());
 
     /// <summary>
     /// 正常なRoot Scanで確認したTrackのMembershipを作成または更新する。
@@ -102,3 +150,17 @@ public interface ITrackRepository
     Task MarkContentVerifiedAsync(long trackId, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }
+
+/// <summary>
+/// Root Scan開始時に一括取得するTrack状態を表す。
+/// </summary>
+public sealed record RootScanTrackState(
+    StoredLibraryTrack Membership,
+    StoredTrack Track,
+    bool HasFingerprint,
+    bool VerificationPending);
+
+/// <summary>
+/// Scan用のMetadata/Membership更新後に必要なTrack状態を表す。
+/// </summary>
+public sealed record PreparedTrackScanState(long TrackId, bool HasFingerprint, bool VerificationPending);

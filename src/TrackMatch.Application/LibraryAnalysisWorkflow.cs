@@ -379,14 +379,28 @@ public sealed class LibraryAnalysisWorkflow
             candidatePairRepository);
     }
 
-    private static CandidateAnalysisService CreateCandidateAnalysisService(
+    private CandidateAnalysisService CreateCandidateAnalysisService(
         SqliteDatabase database,
         long libraryId)
         => new(
             new SqliteFingerprintCatalogRepository(database, libraryId),
             new SqliteCandidatePairRepository(database, libraryId),
             new SqliteCandidateComparisonRepository(database, libraryId),
-            new FingerprintComparer());
+            new FingerprintComparer(),
+            timing => _logger.LogInformation(
+                "Candidate detail comparison {CheckpointKind}. Completed={Completed}/{Total}, Compared={Compared}, " +
+                "ComparisonElapsedMs={ComparisonElapsedMs:F1}, AverageComparisonMs={AverageComparisonMs:F2}, " +
+                "MaximumComparisonMs={MaximumComparisonMs:F1}, PersistenceElapsedMs={PersistenceElapsedMs:F1}, " +
+                "CheckpointElapsedMs={CheckpointElapsedMs:F1}",
+                timing.IsFinalCheckpoint ? "final checkpoint" : "checkpoint",
+                timing.CompletedPairs,
+                timing.TotalPairs,
+                timing.ComparedPairs,
+                timing.ComparisonElapsed.TotalMilliseconds,
+                timing.AverageComparisonElapsed.TotalMilliseconds,
+                timing.MaximumComparisonElapsed.TotalMilliseconds,
+                timing.PersistenceElapsed.TotalMilliseconds,
+                timing.CheckpointElapsed.TotalMilliseconds));
 
     private static async Task<Library> GetRequiredLibraryAsync(
         SqliteDatabase database,
