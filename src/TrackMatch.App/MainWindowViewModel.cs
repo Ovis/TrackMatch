@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using TrackMatch.App.Playback;
@@ -59,6 +60,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public ObservableCollection<CandidateReviewItemViewModel> Candidates { get; } = [];
     public SynchronizedPlaybackControlsViewModel Playback { get; }
     public string DatabasePath => _databasePath;
+    internal ILoggerFactory LoggerFactory => _loggerFactory;
 
     public Library? SelectedLibrary
     {
@@ -89,14 +91,23 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 return;
             }
 
+            var stopwatch = Stopwatch.StartNew();
+            var previous = _selectedCandidate;
             _selectedCandidate = value;
+            var playbackStarted = stopwatch.Elapsed;
             Playback.LoadCandidate(value);
+            var playbackCompleted = stopwatch.Elapsed;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(CanReview));
             OnPropertyChanged(nameof(CanClearReview));
             RememberCurrentCandidate();
             _ = LoadDuplicateGroupsForSelectionAsync(value);
+            _logger.LogDebug(
+                "Candidate選択を反映した PreviousPair={PreviousA}/{PreviousB} Pair={TrackA}/{TrackB} PlaybackMs={PlaybackMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                previous?.TrackIdA, previous?.TrackIdB, value?.TrackIdA, value?.TrackIdB,
+                (playbackCompleted - playbackStarted).TotalMilliseconds, stopwatch.Elapsed.TotalMilliseconds,
+                Environment.CurrentManagedThreadId);
         }
     }
 
@@ -436,6 +447,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void ApplyCandidateFilter()
     {
+        var stopwatch = Stopwatch.StartNew();
         var library = SelectedLibrary; var previous = SelectedCandidate;
         var reviewStateFiltered = ReviewTargetCandidates.Where(item => CandidateListMode switch
         {
@@ -446,15 +458,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         });
         // 異なるFilter軸はANDで結合する。ジャンル内のOR/ANDはApplyGenreFilter側だけで解釈する。
         var visible = ApplyGenreFilter(reviewStateFiltered).ToArray();
+        var projectionCompleted = stopwatch.Elapsed;
         if (previous is not null && !visible.Any(item => SameCandidate(item, previous)))
         {
             StopPlayback();
         }
 
-        Candidates.Clear(); foreach (var item in visible)
+        Candidates.Clear();
+        var clearCompleted = stopwatch.Elapsed;
+        foreach (var item in visible)
         {
             Candidates.Add(item);
         }
+        var addCompleted = stopwatch.Elapsed;
 
         CandidateReviewItemViewModel? selection = null;
         if (library is not null && _sessionSelections.TryGetValue(library.Id, out var remembered))
@@ -473,6 +489,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             StatusText = $"{library.Name} — 表示 {Candidates.Count} / 未レビュー {UnreviewedCount}件";
             OnPropertyChanged(nameof(CandidateDisplayCountText));
         }
+
+        _logger.LogDebug(
+            "Candidate Projectionを再構築した Mode={Mode} AllCount={AllCount} VisibleCount={VisibleCount} ProjectionMs={ProjectionMs:F1} ClearMs={ClearMs:F1} AddMs={AddMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+            CandidateListMode, _allCandidates.Count, visible.Length,
+            projectionCompleted.TotalMilliseconds,
+            (clearCompleted - projectionCompleted).TotalMilliseconds,
+            (addCompleted - clearCompleted).TotalMilliseconds,
+            stopwatch.Elapsed.TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
     }
 
     private async Task SaveReviewAsync(CandidateReviewDecision decision, long? preferredTrackId)
@@ -487,6 +512,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
+        var operationId = Guid.NewGuid().ToString("N");
+        var totalStopwatch = Stopwatch.StartNew();
+        _logger.LogDebug(
+            "Review保存を開始する OperationId={OperationId} LibraryId={LibraryId} Pair={TrackA}/{TrackB} Decision={Decision} CandidateCount={CandidateCount} ThreadId={ThreadId}",
+            operationId, library.Id, selected.TrackIdA, selected.TrackIdB, decision, _allCandidates.Count, Environment.CurrentManagedThreadId);
         var selectedIndex = Candidates.IndexOf(selected);
         StopPlayback();
 
@@ -511,8 +541,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 decision == CandidateReviewDecision.ConfirmedDuplicate ? preferredTrackId : null,
                 null);
             // Review保存はGlobal Group再同期と補完Candidate生成を伴うため、UI Threadから分離する。
-            var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review));
+            var backgroundStarted = totalStopwatch.Elapsed;
+            var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review, operationId));
+            var backgroundCompleted = totalStopwatch.Elapsed;
             ApplyCandidateRefresh(refresh);
+            _logger.LogDebug(
+                "Review保存を完了した OperationId={OperationId} BackgroundMs={BackgroundMs:F1} UiApplyMs={UiApplyMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                operationId,
+                (backgroundCompleted - backgroundStarted).TotalMilliseconds,
+                (totalStopwatch.Elapsed - backgroundCompleted).TotalMilliseconds,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                Environment.CurrentManagedThreadId);
         }
         catch
         {
@@ -529,27 +568,48 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private async Task<CandidateRefreshResult> SaveReviewAndRefreshDerivedStateAsync(
         string databasePath,
         long libraryId,
-        CandidateReview review)
+        CandidateReview review,
+        string operationId)
     {
+        var stopwatch = Stopwatch.StartNew();
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
+        var initializeCompleted = stopwatch.Elapsed;
         var groups = new SqliteDuplicateGroupRepository(database);
 
         // NotDuplicateでGroupが分割される場合、保存後のGroupだけでは元GroupのTrackを特定できない。
         // 保存前後の双方を集め、レビューによってPresentation Stateが変わり得る範囲を欠落させない。
         var affectedTrackIds = GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair);
+        var beforeGroupsCompleted = stopwatch.Elapsed;
         var service = new DuplicateGroupService(
             new SqliteCandidateReviewRepository(database),
             new SqliteTrackLookupRepository(database),
-            groups);
+            groups,
+            (phase, elapsed, count) => _logger.LogDebug(
+                "DuplicateGroupService計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} Count={Count} ThreadId={ThreadId}",
+                operationId, phase, elapsed.TotalMilliseconds, count, Environment.CurrentManagedThreadId));
         await service.SaveReviewAsync(libraryId, review);
+        var reviewSaved = stopwatch.Elapsed;
         foreach (var trackId in GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair))
         {
             affectedTrackIds.Add(trackId);
         }
 
-        await EnsureSupplementalCandidatesAsync(database, libraryId);
+        var afterGroupsCompleted = stopwatch.Elapsed;
+        await EnsureSupplementalCandidatesAsync(database, libraryId, operationId);
+        var supplementalCompleted = stopwatch.Elapsed;
         var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, affectedTrackIds);
+        _logger.LogDebug(
+            "Review派生状態更新を完了した OperationId={OperationId} InitializeMs={InitializeMs:F1} BeforeGroupsMs={BeforeGroupsMs:F1} SaveReviewMs={SaveReviewMs:F1} AfterGroupsMs={AfterGroupsMs:F1} SupplementalMs={SupplementalMs:F1} CandidateLoadMs={CandidateLoadMs:F1} TotalMs={TotalMs:F1} AffectedTrackCount={AffectedTrackCount} ItemCount={ItemCount} ThreadId={ThreadId}",
+            operationId,
+            initializeCompleted.TotalMilliseconds,
+            (beforeGroupsCompleted - initializeCompleted).TotalMilliseconds,
+            (reviewSaved - beforeGroupsCompleted).TotalMilliseconds,
+            (afterGroupsCompleted - reviewSaved).TotalMilliseconds,
+            (supplementalCompleted - afterGroupsCompleted).TotalMilliseconds,
+            (stopwatch.Elapsed - supplementalCompleted).TotalMilliseconds,
+            stopwatch.Elapsed.TotalMilliseconds,
+            affectedTrackIds.Count, items.Count, Environment.CurrentManagedThreadId);
         return new CandidateRefreshResult(affectedTrackIds, items);
     }
 
@@ -576,16 +636,31 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// </summary>
     private void ApplyCandidateRefresh(CandidateRefreshResult refresh)
     {
+        var stopwatch = Stopwatch.StartNew();
         _allCandidates.RemoveAll(item =>
             refresh.AffectedTrackIds.Contains(item.TrackIdA)
             || refresh.AffectedTrackIds.Contains(item.TrackIdB));
         _allCandidates.AddRange(refresh.Items);
+        var replaceCompleted = stopwatch.Elapsed;
 
         // DBの全Candidateは再読込しない。表示順とタブProjectionだけを現在のメモリ状態から再計算する。
         _allCandidates.Sort(CompareCandidates);
+        var sortCompleted = stopwatch.Elapsed;
         NotifyCandidateCountsChanged();
+        var countsCompleted = stopwatch.Elapsed;
         RefreshGenreOptions();
+        var genresCompleted = stopwatch.Elapsed;
         ApplyCandidateFilter();
+        _logger.LogDebug(
+            "Candidate差分をUIへ反映した AffectedTrackCount={AffectedTrackCount} ItemCount={ItemCount} AllCount={AllCount} ReplaceMs={ReplaceMs:F1} SortMs={SortMs:F1} CountsMs={CountsMs:F1} GenresMs={GenresMs:F1} ProjectionMs={ProjectionMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+            refresh.AffectedTrackIds.Count, refresh.Items.Count, _allCandidates.Count,
+            replaceCompleted.TotalMilliseconds,
+            (sortCompleted - replaceCompleted).TotalMilliseconds,
+            (countsCompleted - sortCompleted).TotalMilliseconds,
+            (genresCompleted - countsCompleted).TotalMilliseconds,
+            (stopwatch.Elapsed - genresCompleted).TotalMilliseconds,
+            stopwatch.Elapsed.TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
     }
 
     private static int CompareCandidates(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
@@ -666,12 +741,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// 現在の優劣関係だけではKeepを一意化できないGroupへ、必要最小限の補完Candidateを生成する。
     /// </summary>
-    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId)
+    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId, string? operationId = null)
     {
+        var stopwatch = Stopwatch.StartNew();
         var reviews = await GetUsableReviewsAsync(database);
+        var reviewsCompleted = stopwatch.Elapsed;
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var groupsCompleted = stopwatch.Elapsed;
         var pairs = new SqliteCandidatePairRepository(database, libraryId);
         var existingPairs = await pairs.GetAllAsync();
+        var pairsCompleted = stopwatch.Elapsed;
         var required = new List<CandidatePairKey>();
 
         foreach (var group in groups.Where(group => group.KeepStatus == DuplicateGroupKeepStatus.Unselected))
@@ -688,6 +767,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
         }
 
+        var requiredCompleted = stopwatch.Elapsed;
         var existingKeys = existingPairs
             .Select(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB))
             .ToHashSet();
@@ -698,14 +778,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             created = true;
         }
 
+        var ensureCompleted = stopwatch.Elapsed;
         await pairs.DeleteObsoleteSupplementalAsync(required);
+        var deleteCompleted = stopwatch.Elapsed;
 
-        // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。
+        // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。 
         // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
         // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
         var comparedKeys = (await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync())
             .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
             .ToHashSet();
+        var comparisonsCompleted = stopwatch.Elapsed;
         var needsAnalysis = created || required.Any(pair => !comparedKeys.Contains(pair));
 
         // 比較保存後から分類保存前の間に終了したケースも自己修復する。
@@ -713,9 +796,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
         var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId)
             .GetClassifiedPairKeysAsync();
+        var classificationCheckCompleted = stopwatch.Elapsed;
         var needsClassification = required.Any(pair => comparedKeys.Contains(pair) && !classifiedKeys.Contains(pair));
         if (!needsAnalysis && !needsClassification)
         {
+            LogSupplementalPerformance();
             return;
         }
 
@@ -729,10 +814,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // 補完Candidateも通常Candidateと同じMachine Resultを持たせる。
         // 分類だけ欠けた中断状態では不要なFingerprint比較を繰り返さず、分類処理だけを再実行する。
         await workflow.ClassifyCandidatesAsync(libraryId);
+        LogSupplementalPerformance();
+
+        void LogSupplementalPerformance()
+        {
+            _logger.LogDebug(
+                "Supplemental Candidate整合を確認した OperationId={OperationId} LibraryId={LibraryId} Reviews={ReviewCount} Groups={GroupCount} ExistingPairs={ExistingPairCount} Required={RequiredCount} ReviewsMs={ReviewsMs:F1} GroupsMs={GroupsMs:F1} PairsMs={PairsMs:F1} RequiredMs={RequiredMs:F1} EnsureMs={EnsureMs:F1} DeleteMs={DeleteMs:F1} ComparisonsMs={ComparisonsMs:F1} ClassificationCheckMs={ClassificationCheckMs:F1} TotalMs={TotalMs:F1} NeedsAnalysis={NeedsAnalysis} NeedsClassification={NeedsClassification} ThreadId={ThreadId}",
+                operationId, libraryId, reviews.Count, groups.Count, existingPairs.Count, required.Count,
+                reviewsCompleted.TotalMilliseconds,
+                (groupsCompleted - reviewsCompleted).TotalMilliseconds,
+                (pairsCompleted - groupsCompleted).TotalMilliseconds,
+                (requiredCompleted - pairsCompleted).TotalMilliseconds,
+                (ensureCompleted - requiredCompleted).TotalMilliseconds,
+                (deleteCompleted - ensureCompleted).TotalMilliseconds,
+                (comparisonsCompleted - deleteCompleted).TotalMilliseconds,
+                (classificationCheckCompleted - comparisonsCompleted).TotalMilliseconds,
+                stopwatch.Elapsed.TotalMilliseconds,
+                needsAnalysis, needsClassification, Environment.CurrentManagedThreadId);
+        }
     }
 
     /// <summary>
-    /// Content Verification中のTrackに関係するVerdictを除き、現在の派生計算へ利用可能なHuman Verdictだけを取得する。
+    /// Content Verification中のTrackに関係するVerdictを除き、現在の派生計算へ利用可能なHuman Verdictだけを取得する.
     /// </summary>
     private static async Task<IReadOnlyList<CandidateReview>> GetUsableReviewsAsync(SqliteDatabase database)
     {
