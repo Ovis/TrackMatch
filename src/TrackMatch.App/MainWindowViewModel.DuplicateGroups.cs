@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
