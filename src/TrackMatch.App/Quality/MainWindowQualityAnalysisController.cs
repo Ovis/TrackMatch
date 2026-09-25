@@ -1,4 +1,6 @@
 ﻿using System.ComponentModel;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Quality;
@@ -14,6 +16,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly Action<string> _setStatusText;
+    private readonly ILogger<MainWindowQualityAnalysisController> _logger;
     private CancellationTokenSource? _cancellation;
     private Task? _sessionTask;
     private TrackQualityAnalysisCoordinator? _trackCoordinator;
@@ -25,6 +28,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _setStatusText = setStatusText ?? throw new ArgumentNullException(nameof(setStatusText));
+        _logger = _viewModel.LoggerFactory.CreateLogger<MainWindowQualityAnalysisController>();
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
     }
 
@@ -152,6 +156,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     private async Task RunSessionAsync(long libraryId, int generation, CancellationToken cancellationToken)
     {
+        var sessionStopwatch = Stopwatch.StartNew();
+        _logger.LogDebug(
+            "Quality解析Sessionを開始する LibraryId={LibraryId} Generation={Generation} VisibleCandidateCount={CandidateCount} ThreadId={ThreadId}",
+            libraryId, generation, _viewModel.Candidates.Count, Environment.CurrentManagedThreadId);
         var database = new SqliteDatabase(_viewModel.DatabasePath);
         await database.InitializeAsync(cancellationToken);
         var minimumSimilarity = _viewModel.SimilarityDisplayLowerBoundPercent / 100d;
@@ -219,8 +227,15 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             }
         }
 
+        var finalRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         SetStatusIfCurrent(generation, $"音質解析完了 {requests.Count}曲 / 比較 {orderedRows.Count}件");
+        _logger.LogDebug(
+            "Quality解析Sessionを完了した LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} CandidateCount={CandidateCount} FinalRefreshMs={FinalRefreshMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+            libraryId, generation, requests.Count, orderedRows.Count,
+            (sessionStopwatch.Elapsed - finalRefreshStarted).TotalMilliseconds,
+            sessionStopwatch.Elapsed.TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
     }
 
     private async Task TryAnalyzeAndRefreshAsync(
@@ -239,11 +254,17 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         SqliteCandidateQualityComparisonRepository candidateRepository,
         CancellationToken cancellationToken)
     {
-        foreach (var item in _viewModel.Candidates.ToArray())
+        var stopwatch = Stopwatch.StartNew();
+        var items = _viewModel.Candidates.ToArray();
+        foreach (var item in items)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await RefreshPresentationAsync(item, trackRepository, candidateRepository, cancellationToken);
         }
+
+        _logger.LogDebug(
+            "Quality表示状態を全件更新した CandidateCount={CandidateCount} ExpectedTrackQualityQueries={TrackQualityQueries} ExpectedComparisonQueries={ComparisonQueries} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+            items.Length, items.Length * 2, items.Length, stopwatch.Elapsed.TotalMilliseconds, Environment.CurrentManagedThreadId);
     }
 
     private static async Task RefreshPresentationAsync(
