@@ -162,10 +162,21 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             libraryId, generation, _viewModel.Candidates.Count, Environment.CurrentManagedThreadId);
         var database = new SqliteDatabase(_viewModel.DatabasePath);
         await database.InitializeAsync(cancellationToken);
+        var initializeCompleted = sessionStopwatch.Elapsed;
         var minimumSimilarity = _viewModel.SimilarityDisplayLowerBoundPercent / 100d;
-        var rows = (await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken))
+        var reportRows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken);
+        var reportLoaded = sessionStopwatch.Elapsed;
+        var rows = reportRows
             .Where(row => row.Similarity >= minimumSimilarity)
             .ToArray();
+        var filtered = sessionStopwatch.Elapsed;
+        _logger.LogDebug(
+            "Quality解析Session準備 LibraryId={LibraryId} Generation={Generation} ReportCount={ReportCount} FilteredCount={FilteredCount} InitializeMs={InitializeMs:F1} ReportLoadMs={ReportLoadMs:F1} FilterMs={FilterMs:F1} ThreadId={ThreadId}",
+            libraryId, generation, reportRows.Count, rows.Length,
+            initializeCompleted.TotalMilliseconds,
+            (reportLoaded - initializeCompleted).TotalMilliseconds,
+            (filtered - reportLoaded).TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
         if (rows.Length == 0)
         {
             SetStatusIfCurrent(generation, "音質解析: 対象候補なし");
@@ -175,7 +186,12 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var trackRepository = new SqliteTrackQualityAnalysisRepository(database);
         var candidateRepository = new SqliteCandidateQualityComparisonRepository(database);
         var candidateService = CreateCandidateService(trackRepository, candidateRepository);
+        var initialRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
+        var initialRefreshCompleted = sessionStopwatch.Elapsed;
+        _logger.LogDebug(
+            "Quality解析Session初期表示更新 LibraryId={LibraryId} Generation={Generation} ElapsedMs={ElapsedMs:F1} ThreadId={ThreadId}",
+            libraryId, generation, (initialRefreshCompleted - initialRefreshStarted).TotalMilliseconds, Environment.CurrentManagedThreadId);
         var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
         if (IsCurrent(generation))
         {
@@ -208,12 +224,21 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         }
 
         await trackTask;
+        var trackAnalysisCompleted = sessionStopwatch.Elapsed;
+        _logger.LogDebug(
+            "Quality Track解析を完了した LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} ElapsedMs={ElapsedMs:F1} ThreadId={ThreadId}",
+            libraryId, generation, requests.Count,
+            (trackAnalysisCompleted - initialRefreshCompleted).TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
         if (IsCurrent(generation))
         {
             _trackCoordinator = null;
         }
 
+        var orderStarted = sessionStopwatch.Elapsed;
         var orderedRows = OrderSelectedFirst(rows);
+        var orderCompleted = sessionStopwatch.Elapsed;
+        var candidateAnalysisStarted = orderCompleted;
         var completed = 0;
         foreach (var row in orderedRows)
         {
@@ -226,6 +251,14 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
                 await RefreshPresentationAsync(item, trackRepository, candidateRepository, cancellationToken, result);
             }
         }
+
+        var candidateAnalysisCompleted = sessionStopwatch.Elapsed;
+        _logger.LogDebug(
+            "Quality Candidate比較を完了した LibraryId={LibraryId} Generation={Generation} CandidateCount={CandidateCount} OrderMs={OrderMs:F1} CompareAndRefreshMs={CompareAndRefreshMs:F1} ThreadId={ThreadId}",
+            libraryId, generation, orderedRows.Count,
+            (orderCompleted - orderStarted).TotalMilliseconds,
+            (candidateAnalysisCompleted - candidateAnalysisStarted).TotalMilliseconds,
+            Environment.CurrentManagedThreadId);
 
         var finalRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
