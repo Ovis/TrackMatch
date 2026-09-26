@@ -164,7 +164,14 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         await database.InitializeAsync(cancellationToken);
         var initializeCompleted = sessionStopwatch.Elapsed;
         var minimumSimilarity = _viewModel.SimilarityDisplayLowerBoundPercent / 100d;
-        var reportRows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken);
+        var repositoryDiagnostic = _logger.IsEnabled(LogLevel.Debug)
+            ? (Action<string, TimeSpan, int, string?>)((phase, elapsed, count, queryPlan) =>
+                _logger.LogDebug(
+                    "Quality SQLite読込計測 LibraryId={LibraryId} Generation={Generation} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
+                    libraryId, generation, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId))
+            : null;
+        var reportRows = await new SqliteCandidateReviewReportRepository(database, repositoryDiagnostic)
+            .GetAsync(libraryId, cancellationToken);
         var reportLoaded = sessionStopwatch.Elapsed;
         var rows = reportRows
             .Where(row => row.Similarity >= minimumSimilarity)
