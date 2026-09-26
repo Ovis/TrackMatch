@@ -786,7 +786,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
         // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
         var comparisonLoadStarted = stopwatch.Elapsed;
-        var comparisons = await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync();
+        var repositoryDiagnostic = _logger.IsEnabled(LogLevel.Debug)
+            ? (Action<string, TimeSpan, int, string?>)((phase, elapsed, count, queryPlan) =>
+                _logger.LogDebug(
+                    "SQLite読込計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
+                    operationId, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId))
+            : null;
+        var comparisons = await new SqliteCandidateComparisonRepository(database, libraryId, repositoryDiagnostic).GetAllAsync();
         var comparisonLoadCompleted = stopwatch.Elapsed;
         var comparedKeys = comparisons
             .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
@@ -798,7 +804,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // Review ReportはClassificationをLEFT JOINするため表示自体は可能だが、分類なしのまま恒久化すると
         // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
         var classificationLoadStarted = stopwatch.Elapsed;
-        var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId)
+        var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId, repositoryDiagnostic)
             .GetClassifiedPairKeysAsync();
         var classificationCheckCompleted = stopwatch.Elapsed;
         var needsClassification = required.Any(pair => comparedKeys.Contains(pair) && !classifiedKeys.Contains(pair));
