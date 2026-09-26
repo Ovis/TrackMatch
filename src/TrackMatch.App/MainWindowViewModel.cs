@@ -785,7 +785,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。 
         // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
         // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
-        var comparedKeys = (await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync())
+        var comparisonLoadStarted = stopwatch.Elapsed;
+        var comparisons = await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync();
+        var comparisonLoadCompleted = stopwatch.Elapsed;
+        var comparedKeys = comparisons
             .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
             .ToHashSet();
         var comparisonsCompleted = stopwatch.Elapsed;
@@ -794,6 +797,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         // 比較保存後から分類保存前の間に終了したケースも自己修復する。
         // Review ReportはClassificationをLEFT JOINするため表示自体は可能だが、分類なしのまま恒久化すると
         // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
+        var classificationLoadStarted = stopwatch.Elapsed;
         var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId)
             .GetClassifiedPairKeysAsync();
         var classificationCheckCompleted = stopwatch.Elapsed;
@@ -819,16 +823,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         void LogSupplementalPerformance()
         {
             _logger.LogDebug(
-                "Supplemental Candidate整合を確認した OperationId={OperationId} LibraryId={LibraryId} Reviews={ReviewCount} Groups={GroupCount} ExistingPairs={ExistingPairCount} Required={RequiredCount} ReviewsMs={ReviewsMs:F1} GroupsMs={GroupsMs:F1} PairsMs={PairsMs:F1} RequiredMs={RequiredMs:F1} EnsureMs={EnsureMs:F1} DeleteMs={DeleteMs:F1} ComparisonsMs={ComparisonsMs:F1} ClassificationCheckMs={ClassificationCheckMs:F1} TotalMs={TotalMs:F1} NeedsAnalysis={NeedsAnalysis} NeedsClassification={NeedsClassification} ThreadId={ThreadId}",
-                operationId, libraryId, reviews.Count, groups.Count, existingPairs.Count, required.Count,
+                "Supplemental Candidate整合を確認した OperationId={OperationId} LibraryId={LibraryId} Reviews={ReviewCount} Groups={GroupCount} ExistingPairs={ExistingPairCount} Required={RequiredCount} Comparisons={ComparisonCount} ClassifiedKeys={ClassifiedKeyCount} ReviewsMs={ReviewsMs:F1} GroupsMs={GroupsMs:F1} PairsMs={PairsMs:F1} RequiredMs={RequiredMs:F1} EnsureMs={EnsureMs:F1} DeleteMs={DeleteMs:F1} ComparisonLoadMs={ComparisonLoadMs:F1} ComparisonHashSetMs={ComparisonHashSetMs:F1} ClassificationLoadAndHashSetMs={ClassificationLoadAndHashSetMs:F1} TotalMs={TotalMs:F1} NeedsAnalysis={NeedsAnalysis} NeedsClassification={NeedsClassification} ThreadId={ThreadId}",
+                operationId, libraryId, reviews.Count, groups.Count, existingPairs.Count, required.Count, comparisons.Count, classifiedKeys.Count,
                 reviewsCompleted.TotalMilliseconds,
                 (groupsCompleted - reviewsCompleted).TotalMilliseconds,
                 (pairsCompleted - groupsCompleted).TotalMilliseconds,
                 (requiredCompleted - pairsCompleted).TotalMilliseconds,
                 (ensureCompleted - requiredCompleted).TotalMilliseconds,
                 (deleteCompleted - ensureCompleted).TotalMilliseconds,
-                (comparisonsCompleted - deleteCompleted).TotalMilliseconds,
-                (classificationCheckCompleted - comparisonsCompleted).TotalMilliseconds,
+                (comparisonLoadCompleted - comparisonLoadStarted).TotalMilliseconds,
+                (comparisonsCompleted - comparisonLoadCompleted).TotalMilliseconds,
+                (classificationCheckCompleted - classificationLoadStarted).TotalMilliseconds,
                 stopwatch.Elapsed.TotalMilliseconds,
                 needsAnalysis, needsClassification, Environment.CurrentManagedThreadId);
         }
