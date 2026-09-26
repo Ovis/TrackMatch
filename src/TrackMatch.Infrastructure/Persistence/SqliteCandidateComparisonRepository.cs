@@ -1,4 +1,5 @@
-﻿using Dapper;
+﻿using System.Diagnostics;
+using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 
@@ -9,7 +10,8 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCandidateComparisonRepository(
     SqliteDatabase database,
-    long? libraryId = null) : ICandidateComparisonRepository
+    long? libraryId = null,
+    Action<string, TimeSpan, int, string?>? readDiagnostic = null) : ICandidateComparisonRepository
 {
     public Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateComparison> comparisons,
@@ -70,15 +72,31 @@ public sealed class SqliteCandidateComparisonRepository(
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
+        var parameters = new
+        {
+            LibraryId = libraryId,
+            ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+        };
+        string? queryPlan = null;
+        if (readDiagnostic is not null)
+        {
+            var planRows = await connection.QueryAsync<QueryPlanRow>(new CommandDefinition(
+                "EXPLAIN QUERY PLAN " + sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var rows = (await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
             sql,
-            new
-            {
-                LibraryId = libraryId,
-                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
-            },
-            cancellationToken: cancellationToken));
-        return rows.Select(ToDomain).ToArray();
+            parameters,
+            cancellationToken: cancellationToken))).ToArray();
+        var queryCompleted = stopwatch.Elapsed;
+        var result = rows.Select(ToDomain).ToArray();
+        readDiagnostic?.Invoke("CandidateComparisons.GetAll", queryCompleted, rows.Length, queryPlan);
+        readDiagnostic?.Invoke("CandidateComparisons.ToDomain", stopwatch.Elapsed - queryCompleted, result.Length, null);
+        return result;
     }
 
     /// <inheritdoc />
@@ -242,4 +260,6 @@ public sealed class SqliteCandidateComparisonRepository(
         double DurationRatio);
 
     private sealed record ComparedAtRow(long TrackIdA, long TrackIdB, long ComparedAtUtcTicks);
+
+    private sealed record QueryPlanRow(long Id, long Parent, long NotUsed, string Detail);
 }

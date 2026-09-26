@@ -1,4 +1,5 @@
-﻿using TrackMatch.Core.Candidates;
+﻿using System.Diagnostics;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Core.Duplicates;
@@ -9,28 +10,57 @@ namespace TrackMatch.Core.Duplicates;
 public sealed class DuplicateGroupService(
     ICandidateReviewMutationRepository reviewRepository,
     ITrackLookupRepository trackLookupRepository,
-    IDuplicateGroupRepository groupRepository)
+    IDuplicateGroupRepository groupRepository,
+    Action<string, TimeSpan, int?>? performanceDiagnostic = null)
 {
     /// <summary>Human Verdictを保存し、ConfirmedDuplicate Graphから派生Groupを再構成する。</summary>
     public async Task SaveReviewAsync(long libraryId, CandidateReview review, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(review);
         review.Validate();
+        var stopwatch = Stopwatch.StartNew();
         await EnsurePairBelongsToLibraryAsync(libraryId, review.Pair, true, cancellationToken);
+        ReportPerformance("EnsurePairBelongsToLibrary", stopwatch.Elapsed, null);
+        var phaseStarted = stopwatch.Elapsed;
         var allReviews = await reviewRepository.GetAllAsync(cancellationToken);
+        ReportPerformance("GetAllReviews", stopwatch.Elapsed - phaseStarted, allReviews.Count);
         if (allReviews.SingleOrDefault(item => item.Pair == review.Pair) == review) return;
         var proposed = allReviews.Where(item => item.Pair != review.Pair).Append(review).ToArray();
         // 一時利用停止中のVerdictも将来復帰するCurrent Human Verdictであるため、循環不変条件だけは全Current集合で検証する。
+        phaseStarted = stopwatch.Elapsed;
         PreferenceGraphEvaluator.EnsureAcyclic(proposed);
+        ReportPerformance("EnsureAcyclic", stopwatch.Elapsed - phaseStarted, proposed.Length);
+        phaseStarted = stopwatch.Elapsed;
         var active = await GetActiveGlobalReviewsAsync(proposed, cancellationToken);
+        ReportPerformance("GetActiveGlobalReviews", stopwatch.Elapsed - phaseStarted, active.Count);
+        phaseStarted = stopwatch.Elapsed;
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
+        ReportPerformance("GetAllGlobalGroups", stopwatch.Elapsed - phaseStarted, existingGroups.Count);
+        phaseStarted = stopwatch.Elapsed;
         var rebuild = DuplicateGroupPlanner.Build(active, existingGroups);
+        ReportPerformance("BuildTopology", stopwatch.Elapsed - phaseStarted, rebuild.Count);
+        phaseStarted = stopwatch.Elapsed;
         await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
+        ReportPerformance("SaveReview", stopwatch.Elapsed - phaseStarted, null);
         try
         {
-            if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+            phaseStarted = stopwatch.Elapsed;
+            var topologyChanged = HasTopologyChanged(rebuild, existingGroups);
+            ReportPerformance("HasTopologyChanged", stopwatch.Elapsed - phaseStarted, existingGroups.Count);
+            if (topologyChanged)
+            {
+                phaseStarted = stopwatch.Elapsed;
+                await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+                ReportPerformance("ReplaceGlobal", stopwatch.Elapsed - phaseStarted, rebuild.Count);
+            }
+
+            phaseStarted = stopwatch.Elapsed;
             await ApplyDerivedKeepForLibraryAsync(libraryId, active, CancellationToken.None);
+            ReportPerformance("ApplyDerivedKeepCurrentLibrary", stopwatch.Elapsed - phaseStarted, null);
+            phaseStarted = stopwatch.Elapsed;
             await ApplyDerivedKeepForAllLibrariesAsync(active, libraryId, CancellationToken.None);
+            ReportPerformance("ApplyDerivedKeepOtherLibraries", stopwatch.Elapsed - phaseStarted, null);
+            ReportPerformance("Total", stopwatch.Elapsed, active.Count);
         }
         catch
         {
@@ -207,6 +237,9 @@ public sealed class DuplicateGroupService(
         cache[trackId] = track;
         return track;
     }
+
+    private void ReportPerformance(string phase, TimeSpan elapsed, int? count)
+        => performanceDiagnostic?.Invoke(phase, elapsed, count);
 
     private static bool HasTopologyChanged(IReadOnlyCollection<DuplicateGroupRebuildItem> rebuild, IReadOnlyCollection<GlobalDuplicateGroup> existingGroups)
     {

@@ -1,4 +1,6 @@
 ﻿using System.Collections.ObjectModel;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Infrastructure.Persistence;
@@ -106,6 +108,7 @@ public sealed partial class MainWindowViewModel
 
     private async Task LoadDuplicateGroupsForSelectionAsync(CandidateReviewItemViewModel? selected)
     {
+        var stopwatch = Stopwatch.StartNew();
         var version = ++_duplicateGroupLoadVersion;
         var library = SelectedLibrary;
         if (selected is null || library is null || !File.Exists(DatabasePath))
@@ -118,8 +121,10 @@ public sealed partial class MainWindowViewModel
         {
             var database = new SqliteDatabase(DatabasePath);
             await database.InitializeAsync();
+            var initializeCompleted = stopwatch.Elapsed;
             var groupRepository = new SqliteDuplicateGroupRepository(database);
             var groups = await GetGroupsForCandidateAsync(groupRepository, selected, library.Id);
+            var groupsCompleted = stopwatch.Elapsed;
             var tracks = new SqliteTrackLookupRepository(database);
             var summaries = new List<DuplicateGroupSummaryViewModel>(groups.Count);
 
@@ -144,10 +149,22 @@ public sealed partial class MainWindowViewModel
             // Candidateを高速に切り替えた場合、遅れて完了した旧Queryで表示を巻き戻さない。
             if (version != _duplicateGroupLoadVersion || !ReferenceEquals(selected, SelectedCandidate))
             {
+                _logger.LogDebug(
+                    "Duplicate Group詳細の旧結果を破棄した Pair={TrackA}/{TrackB} Version={Version} CurrentVersion={CurrentVersion} GroupCount={GroupCount} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                    selected.TrackIdA, selected.TrackIdB, version, _duplicateGroupLoadVersion, summaries.Count,
+                    stopwatch.Elapsed.TotalMilliseconds, Environment.CurrentManagedThreadId);
                 return;
             }
 
             ReplaceDuplicateGroups(summaries);
+            _logger.LogDebug(
+                "Duplicate Group詳細を読み込んだ Pair={TrackA}/{TrackB} Version={Version} GroupCount={GroupCount} InitializeMs={InitializeMs:F1} GroupQueryMs={GroupQueryMs:F1} TrackLookupAndApplyMs={TrackLookupAndApplyMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                selected.TrackIdA, selected.TrackIdB, version, summaries.Count,
+                initializeCompleted.TotalMilliseconds,
+                (groupsCompleted - initializeCompleted).TotalMilliseconds,
+                (stopwatch.Elapsed - groupsCompleted).TotalMilliseconds,
+                stopwatch.Elapsed.TotalMilliseconds,
+                Environment.CurrentManagedThreadId);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {

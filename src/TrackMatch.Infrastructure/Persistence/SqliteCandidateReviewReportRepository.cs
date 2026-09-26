@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
@@ -8,7 +9,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// Global Comparisonを、人手レビュー状態とLibrary Projectionを含めてGUI用に読み出す。
 /// </summary>
-public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase database)
+public sealed class SqliteCandidateReviewReportRepository(
+    SqliteDatabase database,
+    Action<string, TimeSpan, int, string?>? readDiagnostic = null)
 {
     /// <summary>
     /// 指定LibraryのMembershipに両Trackが属するCurrent詳細比較結果を取得する。
@@ -107,18 +110,35 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
+        var parameters = new
+        {
+            LibraryId = libraryId,
+            ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            FilterAffected = affectedTrackIds is null ? 0 : 1,
+            // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
+            AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
+        };
+        string? queryPlan = null;
+        if (readDiagnostic is not null)
+        {
+            var planRows = await connection.QueryAsync<QueryPlanRow>(new CommandDefinition(
+                "EXPLAIN QUERY PLAN " + sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var rows = (await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
-            new
-            {
-                LibraryId = libraryId,
-                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
-                FilterAffected = affectedTrackIds is null ? 0 : 1,
-                // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
-                AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
-            },
-            cancellationToken: cancellationToken));
-        return rows.Select(ToReport).ToArray();
+            parameters,
+            cancellationToken: cancellationToken))).ToArray();
+        var queryCompleted = stopwatch.Elapsed;
+        var result = rows.Select(ToReport).ToArray();
+        var scope = affectedTrackIds is null ? "All" : "AffectedTracks";
+        readDiagnostic?.Invoke($"CandidateReviewReport.Get.{scope}", queryCompleted, rows.Length, queryPlan);
+        readDiagnostic?.Invoke($"CandidateReviewReport.ToDomain.{scope}", stopwatch.Elapsed - queryCompleted, result.Length, null);
+        return result;
     }
 
     private static CandidateReviewReportRow ToReport(ReportRow row)
@@ -216,6 +236,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     private static IReadOnlyList<string> Deserialize(string json)
         => JsonSerializer.Deserialize<string[]>(json)
             ?? throw new InvalidDataException("TrackメタデータJSONを復元できませんでした。");
+
+    private sealed record QueryPlanRow(long Id, long Parent, long NotUsed, string Detail);
 
     private sealed record ReportRow(
         long TrackIdA, long TrackIdB, long MinimumSegmentHashDistance, string? Kind, string? Reason,

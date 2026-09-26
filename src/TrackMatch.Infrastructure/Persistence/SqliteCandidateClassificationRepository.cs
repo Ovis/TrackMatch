@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
@@ -11,7 +12,8 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCandidateClassificationRepository(
     SqliteDatabase database,
-    long? libraryId = null) : ICandidateClassificationRepository
+    long? libraryId = null,
+    Action<string, TimeSpan, int, string?>? readDiagnostic = null) : ICandidateClassificationRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidateClassification> classifications,
@@ -111,17 +113,33 @@ public sealed class SqliteCandidateClassificationRepository(
             """;
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var rows = await connection.QueryAsync<PairRow>(new CommandDefinition(
+        var parameters = new
+        {
+            LibraryId = libraryId,
+            ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+        };
+        string? queryPlan = null;
+        if (readDiagnostic is not null)
+        {
+            var planRows = await connection.QueryAsync<QueryPlanRow>(new CommandDefinition(
+                "EXPLAIN QUERY PLAN " + sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var rows = (await connection.QueryAsync<PairRow>(new CommandDefinition(
             sql,
-            new
-            {
-                LibraryId = libraryId,
-                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
-            },
-            cancellationToken: cancellationToken));
-        return rows
+            parameters,
+            cancellationToken: cancellationToken))).ToArray();
+        var queryCompleted = stopwatch.Elapsed;
+        var result = rows
             .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
             .ToHashSet();
+        readDiagnostic?.Invoke("CandidateClassifications.GetKeys", queryCompleted, rows.Length, queryPlan);
+        readDiagnostic?.Invoke("CandidateClassifications.ToHashSet", stopwatch.Elapsed - queryCompleted, result.Count, null);
+        return result;
     }
 
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> GetReportAsync(
@@ -256,6 +274,8 @@ public sealed class SqliteCandidateClassificationRepository(
         string ThresholdProfileJson);
 
     private sealed record PairRow(long TrackIdA, long TrackIdB);
+
+    private sealed record QueryPlanRow(long Id, long Parent, long NotUsed, string Detail);
 
     private sealed record ReportRow(
         long TrackIdA,
