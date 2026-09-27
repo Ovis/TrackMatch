@@ -281,7 +281,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             "Quality解析Sessionを完了した OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} CandidateCount={CandidateCount} FinalRefreshMs={FinalRefreshMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
             operationId, libraryId, generation, requests.Count, orderedRows.Count,
             (followUpCompleted - finalRefreshStarted).TotalMilliseconds,
-            completed.TotalMilliseconds,
+            followUpCompleted.TotalMilliseconds,
             Environment.CurrentManagedThreadId);
         _logger.LogDebug(
             "Review Causal Follow-up Summary OperationId={OperationId} Kind=Quality LibraryId={LibraryId} Generation={Generation} ReportCount={ReportCount} VisibleCandidateCount={VisibleCandidateCount} TrackCount={TrackCount} CandidateCount={CandidateCount} InitializeMs={InitializeMs:F1} ReportLoadMs={ReportLoadMs:F1} FilterMs={FilterMs:F1} InitialVisibleRefreshMs={InitialVisibleRefreshMs:F1} TrackAnalysisMs={TrackAnalysisMs:F1} CandidateAnalysisMs={CandidateAnalysisMs:F1} FinalVisibleRefreshMs={FinalVisibleRefreshMs:F1} TotalMs={TotalMs:F1}",
