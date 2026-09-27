@@ -1024,11 +1024,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             await diagnostic.CaptureDatasetSnapshotAsync(database, library.Id);
             await diagnostic.DisposeAsync();
         }
-        catch
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
         {
             // Snapshot失敗は診断情報の欠落に留め、通常のCandidate操作を失敗させない。
+            // 再選択時に再試行できるよう取得済み扱いも解除する。
             _reviewDiagnosticSnapshotLibraries.Remove(library.Id);
-            throw;
+            _logger.LogDebug(
+                exception,
+                "Review Dataset Snapshotの取得に失敗した LibraryId={LibraryId}",
+                library.Id);
         }
     }
 
