@@ -18,7 +18,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     private const double DispatcherDelayThresholdMilliseconds = 250;
     private readonly string _operationId;
     private readonly ILogger _logger;
-    private readonly Stopwatch _operationStopwatch = Stopwatch.StartNew();
+    private readonly System.Diagnostics.Stopwatch _operationStopwatch = System.Diagnostics.System.Diagnostics.Stopwatch.StartNew();
     private readonly ConcurrentDictionary<string, DiagnosticAggregate> _aggregates = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _probeCancellation = new();
     private Task? _probeTask;
@@ -43,7 +43,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     /// </remarks>
     internal async Task CaptureDatasetSnapshotAsync(SqliteDatabase database, long libraryId)
     {
-        var stopwatch = Stopwatch.StartNew();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync();
 
         var libraries = await ExecuteCountAsync(connection, "SELECT COUNT(*) FROM Libraries;");
@@ -164,11 +164,11 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(DispatcherProbeIntervalMilliseconds));
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            var queuedAt = Stopwatch.GetTimestamp();
+            var queuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             await dispatcher.InvokeAsync(
                 () =>
                 {
-                    var delay = Stopwatch.GetElapsedTime(queuedAt);
+                    var delay = System.Diagnostics.Stopwatch.GetElapsedTime(queuedAt);
                     UpdateMaximumDispatcherDelay(delay);
                     if (delay.TotalMilliseconds >= DispatcherDelayThresholdMilliseconds)
                     {
