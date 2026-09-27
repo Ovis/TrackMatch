@@ -536,6 +536,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             await diagnostic.CaptureDatasetSnapshotAsync(snapshotDatabase, library.Id);
         }
 
+        diagnostic?.StartReviewTiming();
         var totalStopwatch = Stopwatch.StartNew();
         diagnostic?.StartDispatcherProbe();
         _activeReviewDiagnostic = diagnostic;
@@ -586,10 +587,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
         finally
         {
+            // E2Eは次のReview操作が可能になるBusy解除までを含める。
+            // PropertyChanged起点のQuality処理はOperation IDだけを開始時に引き継ぎ、Review本体とは別集計にする。
             IsLoading = false;
+            var reviewElapsed = totalStopwatch.Elapsed;
             if (diagnostic is not null)
             {
-                await diagnostic.CompleteAsync(totalStopwatch.Elapsed);
+                await diagnostic.CompleteAsync(reviewElapsed);
                 await diagnostic.DisposeAsync();
             }
 
