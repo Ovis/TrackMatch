@@ -27,6 +27,9 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     private long _maximumDispatcherDelayTicks;
     private int _dispatcherDelayThresholdExceededCount;
 
+    /// <summary>関連する非同期処理を同じReviewへ結び付けるOperation ID。</summary>
+    internal string OperationId => _operationId;
+
     /// <summary>Review診断Sessionを開始する。</summary>
     internal ReviewPerformanceDiagnosticSession(string operationId, ILogger logger)
     {
