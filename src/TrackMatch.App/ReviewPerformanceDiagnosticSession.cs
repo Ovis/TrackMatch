@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Extensions.Logging;
 using TrackMatch.Infrastructure.Persistence;
