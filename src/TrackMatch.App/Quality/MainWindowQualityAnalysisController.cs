@@ -157,8 +157,9 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     private async Task RunSessionAsync(long libraryId, int generation, CancellationToken cancellationToken)
     {
         // IsLoading解除から起動したSessionはReviewと因果関係があるため、開始時点のOperationを保持する。
-        var reviewDiagnostic = _viewModel.ActiveReviewDiagnostic;
-        var operationId = reviewDiagnostic?.OperationId;
+        // Review本体の集約はBusy解除時点で閉じるため、QualityはOperation IDだけを引き継ぎ、
+        // Review集約へ後追いで書き込まず独立したCausal Follow-upとして計測する。
+        var operationId = _viewModel.ActiveReviewDiagnostic?.OperationId;
         var sessionStopwatch = Stopwatch.StartNew();
         _logger.LogDebug(
             "Quality解析Sessionを開始する OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} VisibleCandidateCount={CandidateCount} ThreadId={ThreadId}",
@@ -170,7 +171,6 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var repositoryDiagnostic = _logger.IsEnabled(LogLevel.Debug)
             ? (Action<string, TimeSpan, int, string?>)((phase, elapsed, count, queryPlan) =>
             {
-                reviewDiagnostic?.Record($"Selection.Quality.{phase}", elapsed, count);
                 _logger.LogDebug(
                     "Quality SQLite読込計測 OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
                     operationId, libraryId, generation, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId);
@@ -179,7 +179,6 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var reportRows = await new SqliteCandidateReviewReportRepository(database, repositoryDiagnostic)
             .GetAsync(libraryId, cancellationToken);
         var reportLoaded = sessionStopwatch.Elapsed;
-        reviewDiagnostic?.Record("Selection.Quality.ReportLoad", reportLoaded - initializeCompleted, reportRows.Count);
         var rows = reportRows
             .Where(row => row.Similarity >= minimumSimilarity)
             .ToArray();
@@ -203,7 +202,6 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var initialRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         var initialRefreshCompleted = sessionStopwatch.Elapsed;
-        reviewDiagnostic?.Record("Selection.Quality.InitialVisibleRefresh", initialRefreshCompleted - initialRefreshStarted, _viewModel.Candidates.Count);
         _logger.LogDebug(
             "Quality解析Session初期表示更新 LibraryId={LibraryId} Generation={Generation} ElapsedMs={ElapsedMs:F1} ThreadId={ThreadId}",
             libraryId, generation, (initialRefreshCompleted - initialRefreshStarted).TotalMilliseconds, Environment.CurrentManagedThreadId);
@@ -278,12 +276,24 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var finalRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         SetStatusIfCurrent(generation, $"音質解析完了 {requests.Count}曲 / 比較 {orderedRows.Count}件");
+        var completed = sessionStopwatch.Elapsed;
         _logger.LogDebug(
-            "Quality解析Sessionを完了した LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} CandidateCount={CandidateCount} FinalRefreshMs={FinalRefreshMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
-            libraryId, generation, requests.Count, orderedRows.Count,
-            (sessionStopwatch.Elapsed - finalRefreshStarted).TotalMilliseconds,
-            sessionStopwatch.Elapsed.TotalMilliseconds,
+            "Quality解析Sessionを完了した OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} CandidateCount={CandidateCount} FinalRefreshMs={FinalRefreshMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+            operationId, libraryId, generation, requests.Count, orderedRows.Count,
+            (completed - finalRefreshStarted).TotalMilliseconds,
+            completed.TotalMilliseconds,
             Environment.CurrentManagedThreadId);
+        _logger.LogDebug(
+            "Review Causal Follow-up Summary OperationId={OperationId} Kind=Quality LibraryId={LibraryId} Generation={Generation} ReportCount={ReportCount} VisibleCandidateCount={VisibleCandidateCount} TrackCount={TrackCount} CandidateCount={CandidateCount} InitializeMs={InitializeMs:F1} ReportLoadMs={ReportLoadMs:F1} FilterMs={FilterMs:F1} InitialVisibleRefreshMs={InitialVisibleRefreshMs:F1} TrackAnalysisMs={TrackAnalysisMs:F1} CandidateAnalysisMs={CandidateAnalysisMs:F1} FinalVisibleRefreshMs={FinalVisibleRefreshMs:F1} TotalMs={TotalMs:F1}",
+            operationId, libraryId, generation, reportRows.Count, _viewModel.Candidates.Count, requests.Count, orderedRows.Count,
+            initializeCompleted.TotalMilliseconds,
+            (reportLoaded - initializeCompleted).TotalMilliseconds,
+            (filtered - reportLoaded).TotalMilliseconds,
+            (initialRefreshCompleted - initialRefreshStarted).TotalMilliseconds,
+            (trackAnalysisCompleted - initialRefreshCompleted).TotalMilliseconds,
+            (candidateAnalysisCompleted - candidateAnalysisStarted).TotalMilliseconds,
+            (completed - finalRefreshStarted).TotalMilliseconds,
+            completed.TotalMilliseconds);
     }
 
     private async Task TryAnalyzeAndRefreshAsync(
