@@ -62,6 +62,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public SynchronizedPlaybackControlsViewModel Playback { get; }
     public string DatabasePath => _databasePath;
     internal ILoggerFactory LoggerFactory => _loggerFactory;
+    internal ReviewPerformanceDiagnosticSession? ActiveReviewDiagnostic => _activeReviewDiagnostic;
 
     public Library? SelectedLibrary
     {
