@@ -804,7 +804,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var reviewsCompleted = stopwatch.Elapsed;
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var groupsCompleted = stopwatch.Elapsed;
-        var pairs = new SqliteCandidatePairRepository(database, libraryId);
+        var pairs = new SqliteCandidatePairRepository(
+            database,
+            libraryId,
+            diagnostic is null
+                ? null
+                : (phase, elapsed, count) => diagnostic.Record(phase, elapsed, count));
         var existingPairs = await pairs.GetAllAsync();
         var pairsCompleted = stopwatch.Elapsed;
         var required = new List<CandidatePairKey>();
