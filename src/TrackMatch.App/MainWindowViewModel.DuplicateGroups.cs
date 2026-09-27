@@ -152,18 +152,16 @@ public sealed partial class MainWindowViewModel
             // Candidateを高速に切り替えた場合、遅れて完了した旧Queryで表示を巻き戻さない。
             if (version != _duplicateGroupLoadVersion || !ReferenceEquals(selected, SelectedCandidate))
             {
-                reviewDiagnostic?.Record("Selection.Groups.Discarded", stopwatch.Elapsed, summaries.Count);
                 _logger.LogDebug(
-                    "Duplicate Group詳細の旧結果を破棄した OperationId={OperationId} Pair={TrackA}/{TrackB} Version={Version} CurrentVersion={CurrentVersion} GroupCount={GroupCount} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                    "Review Causal Follow-up Summary OperationId={OperationId} Kind=Groups Result=Discarded Pair={TrackA}/{TrackB} Version={Version} CurrentVersion={CurrentVersion} GroupCount={GroupCount} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
                     operationId, selected.TrackIdA, selected.TrackIdB, version, _duplicateGroupLoadVersion, summaries.Count,
                     stopwatch.Elapsed.TotalMilliseconds, Environment.CurrentManagedThreadId);
                 return;
             }
 
             ReplaceDuplicateGroups(summaries);
-            reviewDiagnostic?.Record("Selection.Groups", stopwatch.Elapsed, summaries.Count);
             _logger.LogDebug(
-                "Duplicate Group詳細を読み込んだ OperationId={OperationId} Pair={TrackA}/{TrackB} Version={Version} GroupCount={GroupCount} InitializeMs={InitializeMs:F1} GroupQueryMs={GroupQueryMs:F1} TrackLookupAndApplyMs={TrackLookupAndApplyMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
+                "Review Causal Follow-up Summary OperationId={OperationId} Kind=Groups Result=Applied Pair={TrackA}/{TrackB} Version={Version} GroupCount={GroupCount} InitializeMs={InitializeMs:F1} GroupQueryMs={GroupQueryMs:F1} TrackLookupAndApplyMs={TrackLookupAndApplyMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
                 operationId, selected.TrackIdA, selected.TrackIdB, version, summaries.Count,
                 initializeCompleted.TotalMilliseconds,
                 (groupsCompleted - initializeCompleted).TotalMilliseconds,
