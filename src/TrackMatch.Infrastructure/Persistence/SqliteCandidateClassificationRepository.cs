@@ -128,17 +128,28 @@ public sealed class SqliteCandidateClassificationRepository(
             queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
         }
 
+        if (readDiagnostic is null)
+        {
+            var rows = await connection.QueryAsync<PairRow>(new CommandDefinition(
+                sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            return rows
+                .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
+                .ToHashSet();
+        }
+
         var stopwatch = Stopwatch.StartNew();
-        var rows = (await connection.QueryAsync<PairRow>(new CommandDefinition(
+        var measuredRows = (await connection.QueryAsync<PairRow>(new CommandDefinition(
             sql,
             parameters,
             cancellationToken: cancellationToken))).ToArray();
         var queryCompleted = stopwatch.Elapsed;
-        var result = rows
+        var result = measuredRows
             .Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB))
             .ToHashSet();
-        readDiagnostic?.Invoke("CandidateClassifications.GetKeys", queryCompleted, rows.Length, queryPlan);
-        readDiagnostic?.Invoke("CandidateClassifications.ToHashSet", stopwatch.Elapsed - queryCompleted, result.Count, null);
+        readDiagnostic("CandidateClassifications.GetKeys", queryCompleted, measuredRows.Length, queryPlan);
+        readDiagnostic("CandidateClassifications.ToHashSet", stopwatch.Elapsed - queryCompleted, result.Count, null);
         return result;
     }
 
