@@ -128,16 +128,25 @@ public sealed class SqliteCandidateReviewReportRepository(
             queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
         }
 
+        if (readDiagnostic is null)
+        {
+            var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
+                sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            return rows.Select(ToReport).ToArray();
+        }
+
         var stopwatch = Stopwatch.StartNew();
-        var rows = (await connection.QueryAsync<ReportRow>(new CommandDefinition(
+        var measuredRows = (await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
             parameters,
             cancellationToken: cancellationToken))).ToArray();
         var queryCompleted = stopwatch.Elapsed;
-        var result = rows.Select(ToReport).ToArray();
+        var result = measuredRows.Select(ToReport).ToArray();
         var scope = affectedTrackIds is null ? "All" : "AffectedTracks";
-        readDiagnostic?.Invoke($"CandidateReviewReport.Get.{scope}", queryCompleted, rows.Length, queryPlan);
-        readDiagnostic?.Invoke($"CandidateReviewReport.ToDomain.{scope}", stopwatch.Elapsed - queryCompleted, result.Length, null);
+        readDiagnostic($"CandidateReviewReport.Get.{scope}", queryCompleted, measuredRows.Length, queryPlan);
+        readDiagnostic($"CandidateReviewReport.ToDomain.{scope}", stopwatch.Elapsed - queryCompleted, result.Length, null);
         return result;
     }
 
