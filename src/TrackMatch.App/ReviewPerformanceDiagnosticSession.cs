@@ -95,6 +95,14 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
         aggregate.Add(elapsed, 1, trackId);
     }
 
+    /// <summary>
+    /// Dataset Snapshot完了後をReview本体の計測基準時刻として設定する。
+    /// </summary>
+    internal void StartReviewTiming()
+    {
+        _operationStopwatch.Restart();
+    }
+
     /// <summary>UI Dispatcherの応答遅延計測を開始する。</summary>
     internal void StartDispatcherProbe()
     {
