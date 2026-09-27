@@ -45,6 +45,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private bool _isAnalyzing;
     private bool _isCancellingAnalysis;
     private bool _disposed;
+    private ReviewPerformanceDiagnosticSession? _activeReviewDiagnostic;
 
     /// <summary>候補レビュー画面のViewModelを生成する。</summary>
     /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
@@ -103,6 +104,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             OnPropertyChanged(nameof(CanClearReview));
             RememberCurrentCandidate();
             _ = LoadDuplicateGroupsForSelectionAsync(value);
+            _activeReviewDiagnostic?.Record("UI.Selection.Playback", playbackCompleted - playbackStarted, value is null ? 0 : 1);
+            _activeReviewDiagnostic?.Record("UI.Selection.Total", stopwatch.Elapsed, value is null ? 0 : 1);
             _logger.LogDebug(
                 "Candidate選択を反映した PreviousPair={PreviousA}/{PreviousB} Pair={TrackA}/{TrackB} PlaybackMs={PlaybackMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
                 previous?.TrackIdA, previous?.TrackIdB, value?.TrackIdA, value?.TrackIdB,
@@ -449,7 +452,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .ToArray();
     }
 
-    private void ApplyCandidateFilter()
+    private void ApplyCandidateFilter(ReviewPerformanceDiagnosticSession? diagnostic = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var library = SelectedLibrary; var previous = SelectedCandidate;
@@ -475,6 +478,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             Candidates.Add(item);
         }
         var addCompleted = stopwatch.Elapsed;
+        diagnostic?.Record("UI.Filter.Projection", projectionCompleted, visible.Length);
+        diagnostic?.Record("UI.Filter.CollectionClear", clearCompleted - projectionCompleted, 0);
+        diagnostic?.Record("UI.Filter.CollectionAdd", addCompleted - clearCompleted, visible.Length);
 
         CandidateReviewItemViewModel? selection = null;
         if (library is not null && _sessionSelections.TryGetValue(library.Id, out var remembered))
@@ -494,6 +500,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             OnPropertyChanged(nameof(CandidateDisplayCountText));
         }
 
+        diagnostic?.Record("UI.Filter.SelectionAndStatus", stopwatch.Elapsed - addCompleted, Candidates.Count);
+        diagnostic?.Record("UI.Filter.Total", stopwatch.Elapsed, visible.Length);
         _logger.LogDebug(
             "Candidate Projectionを再構築した Mode={Mode} AllCount={AllCount} VisibleCount={VisibleCount} ProjectionMs={ProjectionMs:F1} ClearMs={ClearMs:F1} AddMs={AddMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
             CandidateListMode, _allCandidates.Count, visible.Length,
@@ -529,6 +537,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
         var totalStopwatch = Stopwatch.StartNew();
         diagnostic?.StartDispatcherProbe();
+        _activeReviewDiagnostic = diagnostic;
         _logger.LogDebug(
             "Review保存を開始する OperationId={OperationId} LibraryId={LibraryId} Pair={TrackA}/{TrackB} Decision={Decision} CandidateCount={CandidateCount} VisibleCandidateCount={VisibleCandidateCount} ThreadId={ThreadId}",
             operationId, library.Id, selected.TrackIdA, selected.TrackIdB, decision, _allCandidates.Count, Candidates.Count, Environment.CurrentManagedThreadId);
@@ -559,7 +568,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             var backgroundStarted = totalStopwatch.Elapsed;
             var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review, operationId, diagnostic));
             var backgroundCompleted = totalStopwatch.Elapsed;
-            ApplyCandidateRefresh(refresh);
+            ApplyCandidateRefresh(refresh, diagnostic);
             _logger.LogDebug(
                 "Review保存を完了した OperationId={OperationId} BackgroundMs={BackgroundMs:F1} UiApplyMs={UiApplyMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
                 operationId,
@@ -582,6 +591,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 await diagnostic.CompleteAsync(totalStopwatch.Elapsed);
                 await diagnostic.DisposeAsync();
             }
+
+            _activeReviewDiagnostic = null;
         }
     }
 
@@ -666,7 +677,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// 差分取得したCandidateをメモリ上の一覧へ反映する。
     /// </summary>
-    private void ApplyCandidateRefresh(CandidateRefreshResult refresh)
+    private void ApplyCandidateRefresh(
+        CandidateRefreshResult refresh,
+        ReviewPerformanceDiagnosticSession? diagnostic = null)
     {
         var stopwatch = Stopwatch.StartNew();
         _allCandidates.RemoveAll(item =>
@@ -682,7 +695,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var countsCompleted = stopwatch.Elapsed;
         RefreshGenreOptions();
         var genresCompleted = stopwatch.Elapsed;
-        ApplyCandidateFilter();
+        ApplyCandidateFilter(diagnostic);
+        diagnostic?.Record("UI.CandidateRefresh.Replace", replaceCompleted, refresh.Items.Count);
+        diagnostic?.Record("UI.CandidateRefresh.Sort", sortCompleted - replaceCompleted, _allCandidates.Count);
+        diagnostic?.Record("UI.CandidateRefresh.Counts", countsCompleted - sortCompleted, _allCandidates.Count);
+        diagnostic?.Record("UI.CandidateRefresh.Genres", genresCompleted - countsCompleted, _allCandidates.Count);
+        diagnostic?.Record("UI.CandidateRefresh.FilterAndCollection", stopwatch.Elapsed - genresCompleted, Candidates.Count);
+        diagnostic?.Record("UI.CandidateRefresh.Total", stopwatch.Elapsed, _allCandidates.Count);
         _logger.LogDebug(
             "Candidate差分をUIへ反映した AffectedTrackCount={AffectedTrackCount} ItemCount={ItemCount} AllCount={AllCount} ReplaceMs={ReplaceMs:F1} SortMs={SortMs:F1} CountsMs={CountsMs:F1} GenresMs={GenresMs:F1} ProjectionMs={ProjectionMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
             refresh.AffectedTrackIds.Count, refresh.Items.Count, _allCandidates.Count,
