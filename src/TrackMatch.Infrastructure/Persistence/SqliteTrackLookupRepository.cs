@@ -1,4 +1,5 @@
-﻿using Dapper;
+﻿using System.Diagnostics;
+using Dapper;
 using TrackMatch.Core.Persistence;
 
 namespace TrackMatch.Infrastructure.Persistence;
@@ -6,7 +7,9 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// <summary>
 /// Global TrackとLibrary MembershipをSQLiteから参照する。
 /// </summary>
-public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrackLookupRepository
+public sealed class SqliteTrackLookupRepository(
+    SqliteDatabase database,
+    Action<string, long, TimeSpan>? performanceDiagnostic = null) : ITrackLookupRepository
 {
     /// <inheritdoc />
     public async Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
@@ -16,6 +19,7 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
             throw new ArgumentOutOfRangeException(nameof(trackId));
         }
 
+        var stopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var path = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
             "SELECT Path FROM Tracks WHERE Id = @TrackId;",
@@ -23,10 +27,13 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
             cancellationToken: cancellationToken));
         if (path is null)
         {
+            performanceDiagnostic?.Invoke("TrackLookup.GetById", trackId, stopwatch.Elapsed);
             return null;
         }
 
-        return await new SqliteTrackRepository(database).GetByPathAsync(path, cancellationToken);
+        var result = await new SqliteTrackRepository(database).GetByPathAsync(path, cancellationToken);
+        performanceDiagnostic?.Invoke("TrackLookup.GetById", trackId, stopwatch.Elapsed);
+        return result;
     }
 
     /// <inheritdoc />
@@ -37,11 +44,13 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
             throw new ArgumentOutOfRangeException(nameof(trackId));
         }
 
+        var stopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var status = await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
             "SELECT ContentVerificationStatus FROM Tracks WHERE Id = @TrackId AND IsMissing = 0;",
             new { TrackId = trackId },
             cancellationToken: cancellationToken));
+        performanceDiagnostic?.Invoke("TrackLookup.IsHumanVerdictUsable", trackId, stopwatch.Elapsed);
         return string.Equals(status, "Verified", StringComparison.Ordinal);
     }
 
@@ -77,11 +86,13 @@ public sealed class SqliteTrackLookupRepository(SqliteDatabase database) : ITrac
             throw new ArgumentOutOfRangeException(nameof(libraryId));
         }
 
+        var stopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             "SELECT COUNT(*) FROM LibraryTracks WHERE LibraryId = @LibraryId AND TrackId = @TrackId;",
             new { LibraryId = libraryId, TrackId = trackId },
             cancellationToken: cancellationToken));
+        performanceDiagnostic?.Invoke("TrackLookup.IsInLibrary", trackId, stopwatch.Elapsed);
         return count != 0;
     }
 
