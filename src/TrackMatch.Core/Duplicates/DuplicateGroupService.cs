@@ -122,7 +122,7 @@ public sealed class DuplicateGroupService(
             }
         }
 
-        ReportPerformance("DerivedKeep.ProcessedLibraries", phaseStarted.Elapsed, libraryIds.Count(id => id != excludedLibraryId));
+        ReportPerformance("DerivedKeep.ProcessedLibraries.Inclusive", phaseStarted.Elapsed, libraryIds.Count(id => id != excludedLibraryId));
     }
 
     private async Task ApplyDerivedKeepForLibraryAsync(
@@ -138,7 +138,7 @@ public sealed class DuplicateGroupService(
             await ApplyDerivedKeepAsync(libraryId, group.Id, reviews, cancellationToken);
         }
 
-        ReportPerformance("DerivedKeep.ProcessedGroups", phaseStarted.Elapsed, groups.Count);
+        ReportPerformance("DerivedKeep.ProcessedGroups.Inclusive", phaseStarted.Elapsed, groups.Count);
     }
 
     private async Task ApplyDerivedKeepAsync(long libraryId, long groupId, IReadOnlyCollection<CandidateReview> reviews, CancellationToken cancellationToken)
