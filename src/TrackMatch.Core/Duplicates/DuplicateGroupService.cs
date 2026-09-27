@@ -111,13 +111,18 @@ public sealed class DuplicateGroupService(
         long? excludedLibraryId,
         CancellationToken cancellationToken)
     {
-        foreach (var libraryId in await groupRepository.GetLibraryIdsAsync(cancellationToken))
+        var phaseStarted = Stopwatch.StartNew();
+        var libraryIds = await groupRepository.GetLibraryIdsAsync(cancellationToken);
+        ReportPerformance("DerivedKeep.GetLibraryIds", phaseStarted.Elapsed, libraryIds.Count);
+        foreach (var libraryId in libraryIds)
         {
             if (libraryId != excludedLibraryId)
             {
                 await ApplyDerivedKeepForLibraryAsync(libraryId, reviews, cancellationToken);
             }
         }
+
+        ReportPerformance("DerivedKeep.ProcessedLibraries", phaseStarted.Elapsed, libraryIds.Count(id => id != excludedLibraryId));
     }
 
     private async Task ApplyDerivedKeepForLibraryAsync(
@@ -125,16 +130,22 @@ public sealed class DuplicateGroupService(
         IReadOnlyCollection<CandidateReview> reviews,
         CancellationToken cancellationToken)
     {
+        var phaseStarted = Stopwatch.StartNew();
         var groups = await groupRepository.GetByLibraryIdAsync(libraryId, cancellationToken);
+        ReportPerformance("DerivedKeep.GetGroupsByLibrary", phaseStarted.Elapsed, groups.Count);
         foreach (var group in groups)
         {
             await ApplyDerivedKeepAsync(libraryId, group.Id, reviews, cancellationToken);
         }
+
+        ReportPerformance("DerivedKeep.ProcessedGroups", phaseStarted.Elapsed, groups.Count);
     }
 
     private async Task ApplyDerivedKeepAsync(long libraryId, long groupId, IReadOnlyCollection<CandidateReview> reviews, CancellationToken cancellationToken)
     {
+        var phaseStarted = Stopwatch.StartNew();
         var group = await groupRepository.GetByIdAsync(groupId, libraryId, cancellationToken);
+        ReportPerformance("DerivedKeep.GetGroupById", phaseStarted.Elapsed, group is null ? 0 : 1);
         if (group is null) return;
 
         // KeepはLibrary固有なので、現在LibraryのMembershipに存在するTrackだけを候補にする。
@@ -142,7 +153,9 @@ public sealed class DuplicateGroupService(
         var activeTrackIds = new List<long>(group.TrackIds.Count);
         foreach (var groupTrackId in group.TrackIds)
         {
+            phaseStarted.Restart();
             var track = await trackLookupRepository.GetByIdAsync(groupTrackId, cancellationToken);
+            ReportPerformance("DerivedKeep.TrackLookup", phaseStarted.Elapsed, 1);
             if (track is not null && !track.IsMissing)
             {
                 activeTrackIds.Add(groupTrackId);
@@ -158,6 +171,7 @@ public sealed class DuplicateGroupService(
         if (hasConflict)
         {
             // NotDuplicateとの矛盾はHuman Verdictを破棄せず正常なConflict状態として投影し、Trashを安全側で停止する。
+            phaseStarted.Restart();
             await groupRepository.SetDerivedKeepStateAsync(
                 libraryId,
                 group.Id,
@@ -165,10 +179,12 @@ public sealed class DuplicateGroupService(
                 DuplicateGroupKeepStatus.Conflict,
                 "HumanVerdict",
                 cancellationToken);
+            ReportPerformance("DerivedKeep.SetState", phaseStarted.Elapsed, 1);
             return;
         }
 
         var candidates = PreferenceGraphEvaluator.GetKeepCandidates(groupReviews, activeTrackIds);
+        phaseStarted.Restart();
         await groupRepository.SetDerivedKeepStateAsync(
             libraryId,
             group.Id,
@@ -176,6 +192,7 @@ public sealed class DuplicateGroupService(
             candidates.Count == 1 ? DuplicateGroupKeepStatus.Selected : DuplicateGroupKeepStatus.Unselected,
             "HumanVerdict",
             cancellationToken);
+        ReportPerformance("DerivedKeep.SetState", phaseStarted.Elapsed, 1);
     }
 
     private async Task TryRepairGlobalTopologyAsync()
