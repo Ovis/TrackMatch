@@ -1,4 +1,5 @@
 ﻿using System.Data.Common;
+using System.Diagnostics;
 using Dapper;
 using Microsoft.Data.Sqlite;
 using TrackMatch.Core.Candidates;
@@ -11,7 +12,8 @@ namespace TrackMatch.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCandidatePairRepository(
     SqliteDatabase database,
-    long? libraryId = null) : ICandidatePairRepository, ICandidateGenerationCommitRepository
+    long? libraryId = null,
+    Action<string, TimeSpan, int>? performanceDiagnostic = null) : ICandidatePairRepository, ICandidateGenerationCommitRepository
 {
     public async Task ReplaceAllAsync(
         IReadOnlyCollection<CandidatePair> pairs,
@@ -415,17 +417,22 @@ public sealed class SqliteCandidatePairRepository(
             ORDER BY p.TrackIdA, p.TrackIdB;
             """;
 
+        var stopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
+        var rows = (await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             sql,
             new { LibraryId = libraryId },
-            cancellationToken: cancellationToken));
-        return rows
+            cancellationToken: cancellationToken))).ToArray();
+        var queryCompleted = stopwatch.Elapsed;
+        var result = rows
             .Select(row => new CandidatePair(
                 row.TrackIdA,
                 row.TrackIdB,
                 checked((int)row.MinimumSegmentHashDistance)))
             .ToArray();
+        performanceDiagnostic?.Invoke("CandidatePairs.GetAll.Query", queryCompleted, rows.Length);
+        performanceDiagnostic?.Invoke("CandidatePairs.GetAll.Materialize", stopwatch.Elapsed - queryCompleted, result.Length);
+        return result;
     }
 
     private async Task EnsurePairsInScopeAsync(
