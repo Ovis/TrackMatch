@@ -431,9 +431,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsByTrackIdsAsync(
         SqliteDatabase database,
         long libraryId,
-        IReadOnlyCollection<long> affectedTrackIds)
+        IReadOnlyCollection<long> affectedTrackIds,
+        ReviewPerformanceDiagnosticSession? diagnostic = null)
     {
-        var rows = await new SqliteCandidateReviewReportRepository(database)
+        Action<string, TimeSpan, int, string?>? repositoryDiagnostic = diagnostic is null
+            ? null
+            : (phase, elapsed, count, _) => diagnostic.Record(phase, elapsed, count);
+        var rows = await new SqliteCandidateReviewReportRepository(database, repositoryDiagnostic)
             .GetByTrackIdsAsync(libraryId, affectedTrackIds);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var reviews = await GetUsableReviewsAsync(database);
@@ -513,10 +517,21 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         var operationId = Guid.NewGuid().ToString("N");
+        ReviewPerformanceDiagnosticSession? diagnostic = null;
+        if (_settings.DetailedLogging)
+        {
+            diagnostic = new ReviewPerformanceDiagnosticSession(operationId, _logger);
+            // Dataset規模をReview本体のE2Eへ混ぜないため、Stopwatch開始前に診断用Snapshotを取得する。
+            var snapshotDatabase = new SqliteDatabase(DatabasePath);
+            await snapshotDatabase.InitializeAsync();
+            await diagnostic.CaptureDatasetSnapshotAsync(snapshotDatabase, library.Id);
+        }
+
         var totalStopwatch = Stopwatch.StartNew();
+        diagnostic?.StartDispatcherProbe();
         _logger.LogDebug(
-            "Review保存を開始する OperationId={OperationId} LibraryId={LibraryId} Pair={TrackA}/{TrackB} Decision={Decision} CandidateCount={CandidateCount} ThreadId={ThreadId}",
-            operationId, library.Id, selected.TrackIdA, selected.TrackIdB, decision, _allCandidates.Count, Environment.CurrentManagedThreadId);
+            "Review保存を開始する OperationId={OperationId} LibraryId={LibraryId} Pair={TrackA}/{TrackB} Decision={Decision} CandidateCount={CandidateCount} VisibleCandidateCount={VisibleCandidateCount} ThreadId={ThreadId}",
+            operationId, library.Id, selected.TrackIdA, selected.TrackIdB, decision, _allCandidates.Count, Candidates.Count, Environment.CurrentManagedThreadId);
         var selectedIndex = Candidates.IndexOf(selected);
         StopPlayback();
 
@@ -542,7 +557,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 null);
             // Review保存はGlobal Group再同期と補完Candidate生成を伴うため、UI Threadから分離する。
             var backgroundStarted = totalStopwatch.Elapsed;
-            var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review, operationId));
+            var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review, operationId, diagnostic));
             var backgroundCompleted = totalStopwatch.Elapsed;
             ApplyCandidateRefresh(refresh);
             _logger.LogDebug(
@@ -559,7 +574,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
             throw;
         }
-        finally { IsLoading = false; }
+        finally
+        {
+            IsLoading = false;
+            if (diagnostic is not null)
+            {
+                await diagnostic.CompleteAsync(totalStopwatch.Elapsed);
+                await diagnostic.DisposeAsync();
+            }
+        }
     }
 
     /// <summary>
@@ -569,7 +592,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         string databasePath,
         long libraryId,
         CandidateReview review,
-        string operationId)
+        string operationId,
+        ReviewPerformanceDiagnosticSession? diagnostic)
     {
         var stopwatch = Stopwatch.StartNew();
         var database = new SqliteDatabase(databasePath);
@@ -583,11 +607,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var beforeGroupsCompleted = stopwatch.Elapsed;
         var service = new DuplicateGroupService(
             new SqliteCandidateReviewRepository(database),
-            new SqliteTrackLookupRepository(database),
+            new SqliteTrackLookupRepository(
+                database,
+                diagnostic is null
+                    ? null
+                    : (phase, trackId, elapsed) => diagnostic.RecordTrackLookup(phase, trackId, elapsed)),
             groups,
-            (phase, elapsed, count) => _logger.LogDebug(
-                "DuplicateGroupService計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} Count={Count} ThreadId={ThreadId}",
-                operationId, phase, elapsed.TotalMilliseconds, count, Environment.CurrentManagedThreadId));
+            (phase, elapsed, count) =>
+            {
+                diagnostic?.Record($"DuplicateGroup.{phase}", elapsed, count);
+                _logger.LogDebug(
+                    "DuplicateGroupService計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} Count={Count} ThreadId={ThreadId}",
+                    operationId, phase, elapsed.TotalMilliseconds, count, Environment.CurrentManagedThreadId);
+            });
         await service.SaveReviewAsync(libraryId, review);
         var reviewSaved = stopwatch.Elapsed;
         foreach (var trackId in GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair))
@@ -596,9 +628,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         var afterGroupsCompleted = stopwatch.Elapsed;
-        await EnsureSupplementalCandidatesAsync(database, libraryId, operationId);
+        await EnsureSupplementalCandidatesAsync(database, libraryId, operationId, diagnostic);
         var supplementalCompleted = stopwatch.Elapsed;
-        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, affectedTrackIds);
+        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, affectedTrackIds, diagnostic);
         _logger.LogDebug(
             "Review派生状態更新を完了した OperationId={OperationId} InitializeMs={InitializeMs:F1} BeforeGroupsMs={BeforeGroupsMs:F1} SaveReviewMs={SaveReviewMs:F1} AfterGroupsMs={AfterGroupsMs:F1} SupplementalMs={SupplementalMs:F1} CandidateLoadMs={CandidateLoadMs:F1} TotalMs={TotalMs:F1} AffectedTrackCount={AffectedTrackCount} ItemCount={ItemCount} ThreadId={ThreadId}",
             operationId,
@@ -741,7 +773,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// 現在の優劣関係だけではKeepを一意化できないGroupへ、必要最小限の補完Candidateを生成する。
     /// </summary>
-    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId, string? operationId = null)
+    private async Task EnsureSupplementalCandidatesAsync(
+        SqliteDatabase database,
+        long libraryId,
+        string? operationId = null,
+        ReviewPerformanceDiagnosticSession? diagnostic = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var reviews = await GetUsableReviewsAsync(database);
@@ -788,9 +824,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var comparisonLoadStarted = stopwatch.Elapsed;
         var repositoryDiagnostic = _logger.IsEnabled(LogLevel.Debug)
             ? (Action<string, TimeSpan, int, string?>)((phase, elapsed, count, queryPlan) =>
+            {
+                diagnostic?.Record(phase, elapsed, count);
                 _logger.LogDebug(
                     "SQLite読込計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
-                    operationId, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId))
+                    operationId, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId);
+            })
             : null;
         var comparisons = await new SqliteCandidateComparisonRepository(database, libraryId, repositoryDiagnostic).GetAllAsync();
         var comparisonLoadCompleted = stopwatch.Elapsed;
