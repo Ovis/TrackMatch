@@ -156,23 +156,30 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     private async Task RunSessionAsync(long libraryId, int generation, CancellationToken cancellationToken)
     {
+        // IsLoading解除から起動したSessionはReviewと因果関係があるため、開始時点のOperationを保持する。
+        var reviewDiagnostic = _viewModel.ActiveReviewDiagnostic;
+        var operationId = reviewDiagnostic?.OperationId;
         var sessionStopwatch = Stopwatch.StartNew();
         _logger.LogDebug(
-            "Quality解析Sessionを開始する LibraryId={LibraryId} Generation={Generation} VisibleCandidateCount={CandidateCount} ThreadId={ThreadId}",
-            libraryId, generation, _viewModel.Candidates.Count, Environment.CurrentManagedThreadId);
+            "Quality解析Sessionを開始する OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} VisibleCandidateCount={CandidateCount} ThreadId={ThreadId}",
+            operationId, libraryId, generation, _viewModel.Candidates.Count, Environment.CurrentManagedThreadId);
         var database = new SqliteDatabase(_viewModel.DatabasePath);
         await database.InitializeAsync(cancellationToken);
         var initializeCompleted = sessionStopwatch.Elapsed;
         var minimumSimilarity = _viewModel.SimilarityDisplayLowerBoundPercent / 100d;
         var repositoryDiagnostic = _logger.IsEnabled(LogLevel.Debug)
             ? (Action<string, TimeSpan, int, string?>)((phase, elapsed, count, queryPlan) =>
+            {
+                reviewDiagnostic?.Record($"Selection.Quality.{phase}", elapsed, count);
                 _logger.LogDebug(
-                    "Quality SQLite読込計測 LibraryId={LibraryId} Generation={Generation} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
-                    libraryId, generation, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId))
+                    "Quality SQLite読込計測 OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} Phase={Phase} ElapsedMs={ElapsedMs:F1} RowCount={RowCount} QueryPlan={QueryPlan} ThreadId={ThreadId}",
+                    operationId, libraryId, generation, phase, elapsed.TotalMilliseconds, count, queryPlan, Environment.CurrentManagedThreadId);
+            })
             : null;
         var reportRows = await new SqliteCandidateReviewReportRepository(database, repositoryDiagnostic)
             .GetAsync(libraryId, cancellationToken);
         var reportLoaded = sessionStopwatch.Elapsed;
+        reviewDiagnostic?.Record("Selection.Quality.ReportLoad", reportLoaded - initializeCompleted, reportRows.Count);
         var rows = reportRows
             .Where(row => row.Similarity >= minimumSimilarity)
             .ToArray();
@@ -196,6 +203,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var initialRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         var initialRefreshCompleted = sessionStopwatch.Elapsed;
+        reviewDiagnostic?.Record("Selection.Quality.InitialVisibleRefresh", initialRefreshCompleted - initialRefreshStarted, _viewModel.Candidates.Count);
         _logger.LogDebug(
             "Quality解析Session初期表示更新 LibraryId={LibraryId} Generation={Generation} ElapsedMs={ElapsedMs:F1} ThreadId={ThreadId}",
             libraryId, generation, (initialRefreshCompleted - initialRefreshStarted).TotalMilliseconds, Environment.CurrentManagedThreadId);
