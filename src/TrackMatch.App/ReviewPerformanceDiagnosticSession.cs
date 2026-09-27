@@ -18,7 +18,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     private const double DispatcherDelayThresholdMilliseconds = 250;
     private readonly string _operationId;
     private readonly ILogger _logger;
-    private readonly System.Diagnostics.Stopwatch _operationStopwatch = System.Diagnostics.System.Diagnostics.Stopwatch.StartNew();
+    private readonly global::System.Diagnostics.Stopwatch _operationStopwatch = global::global::System.Diagnostics.Stopwatch.StartNew();
     private readonly ConcurrentDictionary<string, DiagnosticAggregate> _aggregates = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _probeCancellation = new();
     private Task? _probeTask;
@@ -43,7 +43,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     /// </remarks>
     internal async Task CaptureDatasetSnapshotAsync(SqliteDatabase database, long libraryId)
     {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var stopwatch = global::System.Diagnostics.Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync();
 
         var libraries = await ExecuteCountAsync(connection, "SELECT COUNT(*) FROM Libraries;");
@@ -98,7 +98,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     /// <summary>UI Dispatcherの応答遅延計測を開始する。</summary>
     internal void StartDispatcherProbe()
     {
-        var dispatcher = Application.Current?.Dispatcher;
+        var dispatcher = global::System.Windows.Application.Current?.Dispatcher;
         if (dispatcher is null || _probeTask is not null)
         {
             return;
@@ -164,11 +164,11 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(DispatcherProbeIntervalMilliseconds));
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            var queuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            var queuedAt = global::System.Diagnostics.Stopwatch.GetTimestamp();
             await dispatcher.InvokeAsync(
                 () =>
                 {
-                    var delay = System.Diagnostics.Stopwatch.GetElapsedTime(queuedAt);
+                    var delay = global::System.Diagnostics.Stopwatch.GetElapsedTime(queuedAt);
                     UpdateMaximumDispatcherDelay(delay);
                     if (delay.TotalMilliseconds >= DispatcherDelayThresholdMilliseconds)
                     {
