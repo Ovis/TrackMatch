@@ -46,6 +46,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private bool _isCancellingAnalysis;
     private bool _disposed;
     private ReviewPerformanceDiagnosticSession? _activeReviewDiagnostic;
+    private readonly HashSet<long> _reviewDiagnosticSnapshotLibraries = [];
 
     /// <summary>候補レビュー画面のViewModelを生成する。</summary>
     /// <param name="playbackService">Candidate A/Bを同期再生するService</param>
@@ -202,7 +203,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
             var selectedId = preferredLibraryId ?? SelectedLibrary?.Id ?? _settings.LastSelectedLibraryId;
             SelectedLibrary = libraries.FirstOrDefault(item => item.Id == selectedId) ?? libraries.FirstOrDefault();
-            await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync();
+            await LoadCandidatesCoreAsync();
+            await CaptureReviewDiagnosticSnapshotOnceAsync(SelectedLibrary);
+            await SaveSettingsSafeAsync();
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
@@ -219,7 +222,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         SelectedLibrary = library; IsLoading = true;
-        try { await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync(); }
+        try
+        {
+            await LoadCandidatesCoreAsync();
+            await CaptureReviewDiagnosticSnapshotOnceAsync(SelectedLibrary);
+            await SaveSettingsSafeAsync();
+        }
         finally { IsLoading = false; }
     }
 
@@ -530,10 +538,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         if (_settings.DetailedLogging)
         {
             diagnostic = new ReviewPerformanceDiagnosticSession(operationId, _logger);
-            // Dataset規模をReview本体のE2Eへ混ぜないため、Stopwatch開始前に診断用Snapshotを取得する。
-            var snapshotDatabase = new SqliteDatabase(DatabasePath);
-            await snapshotDatabase.InitializeAsync();
-            await diagnostic.CaptureDatasetSnapshotAsync(snapshotDatabase, library.Id);
         }
 
         diagnostic?.StartReviewTiming();
@@ -996,6 +1000,36 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         OnPropertyChanged(nameof(ReviewedTabHeader));
         OnPropertyChanged(nameof(ReReviewRecommendedCount));
         OnPropertyChanged(nameof(TotalCandidateCount));
+    }
+
+    /// <summary>
+    /// Detailed Logging有効時に、選択LibraryのDataset規模を診断期間中一度だけ記録する。
+    /// </summary>
+    /// <remarks>
+    /// Review直前にCOUNTを実行するとSQLite/OS cacheを温めて測定値を歪めるため、
+    /// Candidate一覧の初期読み込みが完了した時点で取得し、Review操作の経路から切り離す。
+    /// </remarks>
+    private async Task CaptureReviewDiagnosticSnapshotOnceAsync(Library? library)
+    {
+        if (!_settings.DetailedLogging || library is null || !_reviewDiagnosticSnapshotLibraries.Add(library.Id))
+        {
+            return;
+        }
+
+        try
+        {
+            var database = new SqliteDatabase(DatabasePath);
+            await database.InitializeAsync();
+            var diagnostic = new ReviewPerformanceDiagnosticSession($"dataset-{library.Id}", _logger);
+            await diagnostic.CaptureDatasetSnapshotAsync(database, library.Id);
+            await diagnostic.DisposeAsync();
+        }
+        catch
+        {
+            // Snapshot失敗は診断情報の欠落に留め、通常のCandidate操作を失敗させない。
+            _reviewDiagnosticSnapshotLibraries.Remove(library.Id);
+            throw;
+        }
     }
 
     private async Task SaveSettingsSafeAsync()
