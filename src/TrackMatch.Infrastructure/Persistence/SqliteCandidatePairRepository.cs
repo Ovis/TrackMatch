@@ -417,21 +417,35 @@ public sealed class SqliteCandidatePairRepository(
             ORDER BY p.TrackIdA, p.TrackIdB;
             """;
 
-        var stopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
-        var rows = (await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
+        if (performanceDiagnostic is null)
+        {
+            var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
+                sql,
+                new { LibraryId = libraryId },
+                cancellationToken: cancellationToken));
+            return rows
+                .Select(row => new CandidatePair(
+                    row.TrackIdA,
+                    row.TrackIdB,
+                    checked((int)row.MinimumSegmentHashDistance)))
+                .ToArray();
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var measuredRows = (await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             sql,
             new { LibraryId = libraryId },
             cancellationToken: cancellationToken))).ToArray();
         var queryCompleted = stopwatch.Elapsed;
-        var result = rows
+        var result = measuredRows
             .Select(row => new CandidatePair(
                 row.TrackIdA,
                 row.TrackIdB,
                 checked((int)row.MinimumSegmentHashDistance)))
             .ToArray();
-        performanceDiagnostic?.Invoke("CandidatePairs.GetAll.Query", queryCompleted, rows.Length);
-        performanceDiagnostic?.Invoke("CandidatePairs.GetAll.Materialize", stopwatch.Elapsed - queryCompleted, result.Length);
+        performanceDiagnostic("CandidatePairs.GetAll.Query", queryCompleted, measuredRows.Length);
+        performanceDiagnostic("CandidatePairs.GetAll.Materialize", stopwatch.Elapsed - queryCompleted, result.Length);
         return result;
     }
 
