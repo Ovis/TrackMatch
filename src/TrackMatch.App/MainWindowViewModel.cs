@@ -444,7 +444,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var rows = await new SqliteCandidateReviewReportRepository(database, repositoryDiagnostic)
             .GetByTrackIdsAsync(libraryId, affectedTrackIds);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
-        var reviews = await GetUsableReviewsAsync(database);
+        var reviews = await GetUsableReviewsAsync(database, diagnostic, "CandidateLoad.GetUsableReviews");
         var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
         return rows
             .Select(row => new CandidateReviewItemViewModel(
@@ -800,7 +800,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         ReviewPerformanceDiagnosticSession? diagnostic = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        var reviews = await GetUsableReviewsAsync(database);
+        var reviews = await GetUsableReviewsAsync(database, diagnostic, "Supplemental.GetUsableReviews");
         var reviewsCompleted = stopwatch.Elapsed;
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var groupsCompleted = stopwatch.Elapsed;
@@ -912,12 +912,23 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// Content Verification中のTrackに関係するVerdictを除き、現在の派生計算へ利用可能なHuman Verdictだけを取得する.
     /// </summary>
-    private static async Task<IReadOnlyList<CandidateReview>> GetUsableReviewsAsync(SqliteDatabase database)
+    private static async Task<IReadOnlyList<CandidateReview>> GetUsableReviewsAsync(
+        SqliteDatabase database,
+        ReviewPerformanceDiagnosticSession? diagnostic = null,
+        string phasePrefix = "GetUsableReviews")
     {
+        var stopwatch = Stopwatch.StartNew();
         var reviews = await new SqliteCandidateReviewRepository(database).GetAllAsync();
-        var tracks = new SqliteTrackLookupRepository(database);
+        diagnostic?.Record($"{phasePrefix}.GetAllReviews", stopwatch.Elapsed, reviews.Count);
+
+        var tracks = new SqliteTrackLookupRepository(
+            database,
+            diagnostic is null
+                ? null
+                : (phase, trackId, elapsed) => diagnostic.RecordTrackLookup($"{phasePrefix}.{phase}", trackId, elapsed));
         var result = new List<CandidateReview>(reviews.Count);
         var usableByTrackId = new Dictionary<long, bool>();
+        var lookupStarted = stopwatch.Elapsed;
 
         foreach (var review in reviews)
         {
@@ -939,6 +950,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
         }
 
+        diagnostic?.Record($"{phasePrefix}.TrackUsabilityTotal", stopwatch.Elapsed - lookupStarted, usableByTrackId.Count);
+        diagnostic?.Record($"{phasePrefix}.Total", stopwatch.Elapsed, result.Count);
         return result;
     }
 
