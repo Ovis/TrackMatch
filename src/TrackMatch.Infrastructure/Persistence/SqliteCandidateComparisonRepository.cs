@@ -87,15 +87,24 @@ public sealed class SqliteCandidateComparisonRepository(
             queryPlan = string.Join(" | ", planRows.Select(row => $"{row.Id}:{row.Parent}:{row.Detail}"));
         }
 
+        if (readDiagnostic is null)
+        {
+            var rows = await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
+                sql,
+                parameters,
+                cancellationToken: cancellationToken));
+            return rows.Select(ToDomain).ToArray();
+        }
+
         var stopwatch = Stopwatch.StartNew();
-        var rows = (await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
+        var measuredRows = (await connection.QueryAsync<ComparisonRow>(new CommandDefinition(
             sql,
             parameters,
             cancellationToken: cancellationToken))).ToArray();
         var queryCompleted = stopwatch.Elapsed;
-        var result = rows.Select(ToDomain).ToArray();
-        readDiagnostic?.Invoke("CandidateComparisons.GetAll", queryCompleted, rows.Length, queryPlan);
-        readDiagnostic?.Invoke("CandidateComparisons.ToDomain", stopwatch.Elapsed - queryCompleted, result.Length, null);
+        var result = measuredRows.Select(ToDomain).ToArray();
+        readDiagnostic("CandidateComparisons.GetAll", queryCompleted, measuredRows.Length, queryPlan);
+        readDiagnostic("CandidateComparisons.ToDomain", stopwatch.Elapsed - queryCompleted, result.Length, null);
         return result;
     }
 
