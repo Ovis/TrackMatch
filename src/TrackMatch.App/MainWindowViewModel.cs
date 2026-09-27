@@ -633,13 +633,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                     ? null
                     : (phase, trackId, elapsed) => diagnostic.RecordTrackLookup(phase, trackId, elapsed)),
             groups,
-            (phase, elapsed, count) =>
-            {
-                diagnostic?.Record($"DuplicateGroup.{phase}", elapsed, count);
-                _logger.LogDebug(
-                    "DuplicateGroupService計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} Count={Count} ThreadId={ThreadId}",
-                    operationId, phase, elapsed.TotalMilliseconds, count, Environment.CurrentManagedThreadId);
-            });
+            diagnostic is null
+                ? null
+                : (phase, elapsed, count) =>
+                {
+                    diagnostic.Record($"DuplicateGroup.{phase}", elapsed, count);
+                    _logger.LogDebug(
+                        "DuplicateGroupService計測 OperationId={OperationId} Phase={Phase} ElapsedMs={ElapsedMs:F1} Count={Count} ThreadId={ThreadId}",
+                        operationId, phase, elapsed.TotalMilliseconds, count, Environment.CurrentManagedThreadId);
+                });
         await service.SaveReviewAsync(libraryId, review);
         var reviewSaved = stopwatch.Elapsed;
         foreach (var trackId in GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair))
