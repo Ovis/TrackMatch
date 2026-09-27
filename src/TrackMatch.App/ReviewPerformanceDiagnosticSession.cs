@@ -18,7 +18,7 @@ internal sealed class ReviewPerformanceDiagnosticSession : IAsyncDisposable
     private const double DispatcherDelayThresholdMilliseconds = 250;
     private readonly string _operationId;
     private readonly ILogger _logger;
-    private readonly global::System.Diagnostics.Stopwatch _operationStopwatch = global::global::System.Diagnostics.Stopwatch.StartNew();
+    private readonly global::System.Diagnostics.Stopwatch _operationStopwatch = global::System.Diagnostics.Stopwatch.StartNew();
     private readonly ConcurrentDictionary<string, DiagnosticAggregate> _aggregates = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _probeCancellation = new();
     private Task? _probeTask;
