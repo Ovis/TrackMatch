@@ -276,11 +276,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var finalRefreshStarted = sessionStopwatch.Elapsed;
         await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
         SetStatusIfCurrent(generation, $"音質解析完了 {requests.Count}曲 / 比較 {orderedRows.Count}件");
-        var completed = sessionStopwatch.Elapsed;
+        var followUpCompleted = sessionStopwatch.Elapsed;
         _logger.LogDebug(
             "Quality解析Sessionを完了した OperationId={OperationId} LibraryId={LibraryId} Generation={Generation} TrackCount={TrackCount} CandidateCount={CandidateCount} FinalRefreshMs={FinalRefreshMs:F1} TotalMs={TotalMs:F1} ThreadId={ThreadId}",
             operationId, libraryId, generation, requests.Count, orderedRows.Count,
-            (completed - finalRefreshStarted).TotalMilliseconds,
+            (followUpCompleted - finalRefreshStarted).TotalMilliseconds,
             completed.TotalMilliseconds,
             Environment.CurrentManagedThreadId);
         _logger.LogDebug(
@@ -292,8 +292,8 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             (initialRefreshCompleted - initialRefreshStarted).TotalMilliseconds,
             (trackAnalysisCompleted - initialRefreshCompleted).TotalMilliseconds,
             (candidateAnalysisCompleted - candidateAnalysisStarted).TotalMilliseconds,
-            (completed - finalRefreshStarted).TotalMilliseconds,
-            completed.TotalMilliseconds);
+            (followUpCompleted - finalRefreshStarted).TotalMilliseconds,
+            followUpCompleted.TotalMilliseconds);
     }
 
     private async Task TryAnalyzeAndRefreshAsync(
