@@ -90,6 +90,47 @@ public sealed class CandidateAnalysisServiceTests
         Assert.Single(comparisonRepository.Comparisons);
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_ForPairLoadsAndPersistsOnlyRequestedPair()
+    {
+        var extractedAt = new DateTime(2026, 9, 11, 0, 0, 0, DateTimeKind.Utc);
+        var pair = CandidatePairKey.Create(1, 2);
+        var fingerprintCatalog = new FakeFingerprintCatalogRepository(
+        [
+            Stored(1, [1u, 2u, 3u, 4u], extractedAt),
+            Stored(2, [1u, 2u, 3u, 4u], extractedAt),
+            Stored(3, [4u, 3u, 2u, 1u], extractedAt),
+        ]);
+        var comparisonRepository = new FakeComparisonRepository();
+        var service = new CandidateAnalysisService(
+            fingerprintCatalog,
+            new FakeCandidatePairRepository([]),
+            comparisonRepository,
+            new FingerprintComparer());
+
+        var comparison = await service.AnalyzeAsync(pair, 2, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L, 2L], fingerprintCatalog.RequestedTrackIds);
+        Assert.Equal(pair, CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB));
+        Assert.Same(comparison, Assert.Single(comparisonRepository.Comparisons));
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ForPairRejectsMissingCurrentFingerprint()
+    {
+        var extractedAt = new DateTime(2026, 9, 11, 0, 0, 0, DateTimeKind.Utc);
+        var service = new CandidateAnalysisService(
+            new FakeFingerprintCatalogRepository([Stored(1, [1u, 2u], extractedAt)]),
+            new FakeCandidatePairRepository([]),
+            new FakeComparisonRepository(),
+            new FingerprintComparer());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AnalyzeAsync(
+            CandidatePairKey.Create(1, 2),
+            2,
+            TestContext.Current.CancellationToken));
+    }
+
 
     [Fact]
     public async Task AnalyzeAsync_CheckpointsCompletedComparisonsBeforeLaterCancellation()
@@ -130,8 +171,21 @@ public sealed class CandidateAnalysisServiceTests
     private sealed class FakeFingerprintCatalogRepository(IReadOnlyList<StoredFingerprint> items)
         : IFingerprintCatalogRepository
     {
+        public IReadOnlyList<long> RequestedTrackIds { get; private set; } = [];
+
         public Task<IReadOnlyList<StoredFingerprint>> GetActiveAsync(int algorithm, CancellationToken cancellationToken = default)
             => Task.FromResult(items);
+
+        public Task<IReadOnlyList<StoredFingerprint>> GetActiveByTrackIdsAsync(
+            int algorithm,
+            IReadOnlyCollection<long> trackIds,
+            CancellationToken cancellationToken = default)
+        {
+            RequestedTrackIds = trackIds.OrderBy(trackId => trackId).ToArray();
+            var targets = trackIds.ToHashSet();
+            return Task.FromResult<IReadOnlyList<StoredFingerprint>>(
+                items.Where(item => targets.Contains(item.TrackId)).ToArray());
+        }
     }
 
     private sealed class FakeCandidatePairRepository(IReadOnlyList<CandidatePair> pairs) : ICandidatePairRepository
@@ -141,6 +195,24 @@ public sealed class CandidateAnalysisServiceTests
 
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(pairs);
+
+        public Task<IReadOnlyList<CandidatePair>> GetWithinTracksAsync(
+            IReadOnlyCollection<long> trackIds,
+            CancellationToken cancellationToken = default)
+        {
+            var targets = trackIds.ToHashSet();
+            return Task.FromResult<IReadOnlyList<CandidatePair>>(
+                pairs.Where(pair => targets.Contains(pair.TrackIdA) && targets.Contains(pair.TrackIdB)).ToArray());
+        }
+
+        public Task EnsureSupplementalAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteObsoleteSupplementalWithinTracksAsync(
+            IReadOnlyCollection<long> cleanupTrackIds,
+            IReadOnlyCollection<CandidatePairKey> requiredPairs,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
 
@@ -177,6 +249,9 @@ public sealed class CandidateAnalysisServiceTests
         public Task<IReadOnlyList<CandidateComparison>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CandidateComparison>>(Comparisons);
 
+        public Task<CandidateComparison?> GetAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.FromResult(Comparisons.SingleOrDefault(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair));
+
         public Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyDictionary<CandidatePairKey, DateTime>>(
@@ -205,6 +280,9 @@ public sealed class CandidateAnalysisServiceTests
 
         public Task<IReadOnlyList<CandidateComparison>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Comparisons);
+
+        public Task<CandidateComparison?> GetAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.FromResult(Comparisons.SingleOrDefault(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair));
 
         public Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(_comparedAt);

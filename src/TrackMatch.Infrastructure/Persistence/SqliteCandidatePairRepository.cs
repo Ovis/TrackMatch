@@ -309,7 +309,99 @@ public sealed class SqliteCandidatePairRepository(
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await EnsurePairsInScopeAsync(connection, transaction, [candidate], cancellationToken);
-        await UpsertAsync(connection, transaction, [candidate], cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO CandidatePairs (
+                TrackIdA, TrackIdB, MinimumSegmentHashDistance, GeneratedAtUtcTicks)
+            VALUES (
+                @TrackIdA, @TrackIdB, @MinimumSegmentHashDistance, @GeneratedAtUtcTicks)
+            ON CONFLICT (TrackIdA, TrackIdB) DO NOTHING;
+            """,
+            new
+            {
+                candidate.TrackIdA,
+                candidate.TrackIdB,
+                candidate.MinimumSegmentHashDistance,
+                GeneratedAtUtcTicks = DateTime.UtcNow.Ticks,
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteObsoleteSupplementalWithinTracksAsync(
+        IReadOnlyCollection<long> cleanupTrackIds,
+        IReadOnlyCollection<CandidatePairKey> requiredPairs,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(cleanupTrackIds);
+        ArgumentNullException.ThrowIfNull(requiredPairs);
+        var cleanupIds = cleanupTrackIds.Distinct().ToArray();
+        if (cleanupIds.Length == 0)
+        {
+            return;
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            CREATE TEMP TABLE IF NOT EXISTS SupplementalCleanupTracks (TrackId INTEGER PRIMARY KEY);
+            DELETE FROM SupplementalCleanupTracks;
+            CREATE TEMP TABLE IF NOT EXISTS RequiredSupplementalPairs (
+                TrackIdA INTEGER NOT NULL,
+                TrackIdB INTEGER NOT NULL,
+                PRIMARY KEY (TrackIdA, TrackIdB));
+            DELETE FROM RequiredSupplementalPairs;
+            """,
+            transaction: transaction,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO SupplementalCleanupTracks (TrackId) VALUES (@TrackId);",
+            cleanupIds.Select(trackId => new { TrackId = trackId }),
+            transaction,
+            cancellationToken: cancellationToken));
+        if (requiredPairs.Count != 0)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "INSERT OR IGNORE INTO RequiredSupplementalPairs (TrackIdA, TrackIdB) VALUES (@TrackIdA, @TrackIdB);",
+                requiredPairs.Select(pair => new { pair.TrackIdA, pair.TrackIdB }),
+                transaction,
+                cancellationToken: cancellationToken));
+        }
+
+        // PairはGlobalなので、現在Library以外にも両TrackのMembershipがある場合は保守的に残す。
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE FROM CandidatePairs
+            WHERE MinimumSegmentHashDistance < 0
+              AND EXISTS (SELECT 1 FROM SupplementalCleanupTracks a WHERE a.TrackId = CandidatePairs.TrackIdA)
+              AND EXISTS (SELECT 1 FROM SupplementalCleanupTracks b WHERE b.TrackId = CandidatePairs.TrackIdB)
+              AND NOT EXISTS (
+                    SELECT 1 FROM CandidateReviews r
+                    WHERE r.TrackIdA = CandidatePairs.TrackIdA AND r.TrackIdB = CandidatePairs.TrackIdB)
+              AND NOT EXISTS (
+                    SELECT 1 FROM RequiredSupplementalPairs required
+                    WHERE required.TrackIdA = CandidatePairs.TrackIdA
+                      AND required.TrackIdB = CandidatePairs.TrackIdB)
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks currentA WHERE currentA.LibraryId = @LibraryId AND currentA.TrackId = CandidatePairs.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks currentB WHERE currentB.LibraryId = @LibraryId AND currentB.TrackId = CandidatePairs.TrackIdB)))
+              AND (
+                    @LibraryId IS NULL
+                 OR NOT EXISTS (
+                        SELECT 1
+                        FROM Libraries other
+                        WHERE other.Id <> @LibraryId
+                          AND EXISTS (SELECT 1 FROM LibraryTracks otherA WHERE otherA.LibraryId = other.Id AND otherA.TrackId = CandidatePairs.TrackIdA)
+                          AND EXISTS (SELECT 1 FROM LibraryTracks otherB WHERE otherB.LibraryId = other.Id AND otherB.TrackId = CandidatePairs.TrackIdB)));
+            """,
+            new { LibraryId = libraryId },
+            transaction,
+            cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -418,6 +510,53 @@ public sealed class SqliteCandidatePairRepository(
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
             sql,
+            new { LibraryId = libraryId },
+            cancellationToken: cancellationToken));
+        return rows
+            .Select(row => new CandidatePair(
+                row.TrackIdA,
+                row.TrackIdB,
+                checked((int)row.MinimumSegmentHashDistance)))
+            .ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CandidatePair>> GetWithinTracksAsync(
+        IReadOnlyCollection<long> trackIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trackIds);
+        var targets = trackIds.Distinct().ToArray();
+        if (targets.Length == 0)
+        {
+            return [];
+        }
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            CREATE TEMP TABLE IF NOT EXISTS CandidateTrackScope (TrackId INTEGER PRIMARY KEY);
+            DELETE FROM CandidateTrackScope;
+            """,
+            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO CandidateTrackScope (TrackId) VALUES (@TrackId);",
+            targets.Select(trackId => new { TrackId = trackId }),
+            cancellationToken: cancellationToken));
+
+        var rows = await connection.QueryAsync<CandidatePairRow>(new CommandDefinition(
+            """
+            SELECT p.TrackIdA, p.TrackIdB, p.MinimumSegmentHashDistance
+            FROM CandidatePairs p
+            WHERE EXISTS (SELECT 1 FROM CandidateTrackScope a WHERE a.TrackId = p.TrackIdA)
+              AND EXISTS (SELECT 1 FROM CandidateTrackScope b WHERE b.TrackId = p.TrackIdB)
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks la WHERE la.LibraryId = @LibraryId AND la.TrackId = p.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks lb WHERE lb.LibraryId = @LibraryId AND lb.TrackId = p.TrackIdB)))
+            ORDER BY p.TrackIdA, p.TrackIdB;
+            """,
             new { LibraryId = libraryId },
             cancellationToken: cancellationToken));
         return rows

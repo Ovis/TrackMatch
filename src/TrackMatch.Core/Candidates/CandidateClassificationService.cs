@@ -64,4 +64,36 @@ public sealed class CandidateClassificationService(
 
         await classificationRepository.ReplaceAllAsync(classifications, cancellationToken);
     }
+
+    /// <summary>
+    /// 指定した詳細比較結果だけを分類し、結果を永続化する。
+    /// </summary>
+    /// <param name="profile">分類に使用するしきい値Profile</param>
+    /// <param name="comparison">分類対象の詳細比較結果</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    /// <returns>永続化した分類結果</returns>
+    public async Task<CandidateClassification> ClassifyAsync(
+        RelationshipThresholdProfile profile,
+        CandidateComparison comparison,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(comparison);
+        profile.Validate();
+
+        var classifier = new RelationshipClassifier(profile);
+        var result = classifier.Classify(
+            comparison.Similarity,
+            comparison.CoverageA,
+            comparison.CoverageB,
+            comparison.DurationRatio);
+        var classification = new CandidateClassification(
+            comparison.TrackIdA,
+            comparison.TrackIdB,
+            result.Kind,
+            result.Reason,
+            JsonSerializer.Serialize(profile));
+        await classificationRepository.ReplaceAllAsync([classification], cancellationToken);
+        return classification;
+    }
 }

@@ -26,6 +26,13 @@ public interface ICandidateComparisonRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 指定Pairの現在有効な詳細比較結果を取得する。
+    /// </summary>
+    Task<CandidateComparison?> GetAsync(
+        CandidatePairKey pair,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 保存済み比較結果の比較日時をペアごとに取得する。
     /// </summary>
     Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(

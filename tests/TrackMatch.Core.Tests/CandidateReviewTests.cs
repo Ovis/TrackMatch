@@ -101,6 +101,13 @@ public sealed class CandidateReviewTests
         public IReadOnlyList<CandidatePair> Pairs { get; private set; } = [];
         public Task ReplaceAllAsync(IReadOnlyCollection<CandidatePair> newPairs, CancellationToken cancellationToken = default) { Pairs = newPairs.ToArray(); return Task.CompletedTask; }
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult(Pairs);
+        public Task<IReadOnlyList<CandidatePair>> GetWithinTracksAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+        {
+            var targets = trackIds.ToHashSet();
+            return Task.FromResult<IReadOnlyList<CandidatePair>>(Pairs.Where(pair => targets.Contains(pair.TrackIdA) && targets.Contains(pair.TrackIdB)).ToArray());
+        }
+        public Task EnsureSupplementalAsync(CandidatePairKey pair, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DeleteObsoleteSupplementalWithinTracksAsync(IReadOnlyCollection<long> cleanupTrackIds, IReadOnlyCollection<CandidatePairKey> requiredPairs, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeCandidateReviewRepository(IReadOnlySet<CandidatePairKey> excluded) : ICandidateReviewRepository
