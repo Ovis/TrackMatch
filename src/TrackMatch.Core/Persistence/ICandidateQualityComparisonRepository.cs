@@ -1,4 +1,5 @@
-﻿using TrackMatch.Core.Quality;
+﻿using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Quality;
 
 namespace TrackMatch.Core.Persistence;
 
@@ -13,6 +14,13 @@ public interface ICandidateQualityComparisonRepository
     Task<CandidateQualityComparison?> GetAsync(
         long trackIdA,
         long trackIdB,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 指定Pair集合の既存比較結果を一括取得する。未保存Pairは結果に含めない。
+    /// </summary>
+    Task<IReadOnlyDictionary<CandidatePairKey, CandidateQualityComparison>> GetByPairsAsync(
+        IReadOnlyCollection<CandidatePairKey> pairKeys,
         CancellationToken cancellationToken = default);
 
     /// <summary>

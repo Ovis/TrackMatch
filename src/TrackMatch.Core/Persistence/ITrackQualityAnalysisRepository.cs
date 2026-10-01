@@ -13,6 +13,13 @@ public interface ITrackQualityAnalysisRepository
     Task<TrackQualityAnalysis?> GetAsync(long trackId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 指定Track集合の既存解析結果を一括取得する。未保存Trackは結果に含めない。
+    /// </summary>
+    Task<IReadOnlyDictionary<long, TrackQualityAnalysis>> GetByTrackIdsAsync(
+        IReadOnlyCollection<long> trackIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Track単体の解析状態または解析結果を保存する。
     /// </summary>
     Task UpsertAsync(TrackQualityAnalysis analysis, CancellationToken cancellationToken = default);

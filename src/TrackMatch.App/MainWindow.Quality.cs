@@ -362,10 +362,9 @@ public partial class MainWindow
             return;
         }
 
-        if (e.PropertyName == nameof(MainWindowViewModel.IsAnalyzing) && _viewModel.IsAnalyzing) { _qualityController.Stop(); return; }
-        if (e.PropertyName == nameof(MainWindowViewModel.IsLoading) && !_viewModel.IsLoading && !_viewModel.IsAnalyzing)
+        if (e.PropertyName == nameof(MainWindowViewModel.IsAnalyzing) && _viewModel.IsAnalyzing)
         {
-            _qualityController.Restart();
+            _qualityController.Stop();
         }
     }
 

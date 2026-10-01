@@ -229,6 +229,12 @@ public sealed class TrackQualityAnalysisCoordinatorTests
             return Task.FromResult(value);
         }
 
+        public Task<IReadOnlyDictionary<long, TrackQualityAnalysis>> GetByTrackIdsAsync(
+            IReadOnlyCollection<long> trackIds,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<long, TrackQualityAnalysis>>(
+                Values.Where(pair => trackIds.Contains(pair.Key)).ToDictionary());
+
         public Task UpsertAsync(TrackQualityAnalysis analysis, CancellationToken cancellationToken = default)
         {
             Values[analysis.TrackId] = analysis;

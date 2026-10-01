@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using TrackMatch.App.Playback;
+using TrackMatch.App.Quality;
 using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
@@ -166,6 +167,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public IReadOnlyList<ContentChangeNotice> ContentChanges => _contentChanges;
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    /// <summary>Review開始時に既存Quality SessionへCancel要求するための内部通知。</summary>
+    internal event EventHandler? ReviewStarting;
+
+    /// <summary>Review差分反映後に不足Qualityだけを局所解析するための内部通知。</summary>
+    internal event EventHandler<ReviewCandidatesUpdatedEventArgs>? ReviewCandidatesUpdated;
+
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
     public async Task LoadAsync(long? preferredLibraryId = null)
     {
@@ -299,6 +306,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
         var reviewStopwatch = Stopwatch.StartNew();
         var selectedIndex = Candidates.IndexOf(selected);
+        ReviewStarting?.Invoke(this, EventArgs.Empty);
         StopPlayback(); IsLoading = true;
         try
         {
@@ -453,7 +461,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// 指定Pairと完全一致するCandidateだけを読み込み、レビュー後の差分更新用ViewModelを構築する。
     /// </summary>
-    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsByPairKeysAsync(
+    private static async Task<CandidateItemLoadResult> LoadCandidateItemsByPairKeysAsync(
         SqliteDatabase database,
         long libraryId,
         IReadOnlyCollection<CandidatePairKey> affectedPairKeys)
@@ -463,11 +471,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var reviews = await GetUsableReviewsAsync(database);
         var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
-        return rows
+        var items = rows
             .Select(row => new CandidateReviewItemViewModel(
                 row,
                 states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
             .ToArray();
+        var missingQualityItems = await CandidateQualityHydrator.HydrateAsync(
+            items,
+            new SqliteTrackQualityAnalysisRepository(database),
+            new SqliteCandidateQualityComparisonRepository(database));
+        return new CandidateItemLoadResult(items, missingQualityItems);
     }
 
     private void ApplyCandidateFilter()
@@ -524,6 +537,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         var selectedIndex = Candidates.IndexOf(selected);
+        ReviewStarting?.Invoke(this, EventArgs.Empty);
         StopPlayback();
 
         // DB更新にはGroup再構築などが含まれるが、判定済みの行をその完了まで画面へ残す必要はない。
@@ -586,10 +600,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var mutation = await CreateReviewMutationService(database, libraryId)
             .SaveAsync(libraryId, review);
         var reloadStopwatch = Stopwatch.StartNew();
-        var items = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
+        var loaded = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
         reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, items.Count, reloadStopwatch.Elapsed);
-        return new CandidateRefreshResult(mutation.AffectedPairKeys, items);
+        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, loaded.Items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(
+            mutation.AffectedPairKeys,
+            loaded.Items,
+            loaded.MissingQualityItems);
     }
 
     /// <summary>
@@ -624,6 +641,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         RefreshGenreOptions();
         ApplyCandidateFilter();
         RestoreSelection(previousSelection, previousDisplayIndex);
+        ReviewCandidatesUpdated?.Invoke(
+            this,
+            new ReviewCandidatesUpdatedEventArgs(refresh.MissingQualityItems));
         mergeStopwatch.Stop();
         _logger.LogInformation(
             "Review Candidate merge/filter完了 LibraryId={LibraryId} AffectedPairs={AffectedPairCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
@@ -642,6 +662,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private static CandidatePairKey GetPair(CandidateReviewItemViewModel item)
         => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB);
+
+    /// <summary>局所Quality解析対象が現在のCandidate Projectionと同じInstanceか確認する。</summary>
+    internal bool IsCurrentCandidate(CandidateReviewItemViewModel item)
+        => _candidatesByPair.TryGetValue(GetPair(item), out var current)
+            && ReferenceEquals(current, item)
+            && Candidates.Contains(item);
 
     private static int CompareCandidates(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
     {
@@ -684,10 +710,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var mutation = await CreateReviewMutationService(database, libraryId)
             .DeleteAsync(libraryId, pair);
         var reloadStopwatch = Stopwatch.StartNew();
-        var items = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
+        var loaded = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
         reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, items.Count, reloadStopwatch.Elapsed);
-        return new CandidateRefreshResult(mutation.AffectedPairKeys, items);
+        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, loaded.Items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(
+            mutation.AffectedPairKeys,
+            loaded.Items,
+            loaded.MissingQualityItems);
     }
 
     private void LogCandidateReloadTiming(
@@ -967,7 +996,20 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 /// </summary>
 internal sealed record CandidateRefreshResult(
     IReadOnlySet<CandidatePairKey> AffectedPairKeys,
-    IReadOnlyList<CandidateReviewItemViewModel> Items);
+    IReadOnlyList<CandidateReviewItemViewModel> Items,
+    IReadOnlyList<CandidateReviewItemViewModel> MissingQualityItems);
+
+/// <summary>Pair-local Quality解析が必要な差分Candidateを通知する。</summary>
+internal sealed class ReviewCandidatesUpdatedEventArgs(
+    IReadOnlyList<CandidateReviewItemViewModel> missingQualityItems) : EventArgs
+{
+    public IReadOnlyList<CandidateReviewItemViewModel> MissingQualityItems { get; } = missingQualityItems;
+}
+
+/// <summary>Pair-local Candidate読み込みとQuality Hydrationの結果。</summary>
+internal sealed record CandidateItemLoadResult(
+    IReadOnlyList<CandidateReviewItemViewModel> Items,
+    IReadOnlyList<CandidateReviewItemViewModel> MissingQualityItems);
 
 /// <summary>候補一覧で表示するレビュー状態を表す。</summary>
 public enum CandidateReviewListMode

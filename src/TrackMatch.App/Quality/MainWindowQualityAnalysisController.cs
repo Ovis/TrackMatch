@@ -15,9 +15,12 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
     private readonly MainWindowViewModel _viewModel;
     private readonly Action<string> _setStatusText;
     private CancellationTokenSource? _cancellation;
+    private CancellationTokenSource? _localCancellation;
     private Task? _sessionTask;
+    private Task? _localTask;
     private TrackQualityAnalysisCoordinator? _trackCoordinator;
     private int _sessionGeneration;
+    private int _localGeneration;
     private bool _disposed;
 
     /// <summary>UI状態と品質解析基盤を接続するControllerを生成する。</summary>
@@ -26,6 +29,8 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _setStatusText = setStatusText ?? throw new ArgumentNullException(nameof(setStatusText));
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+        _viewModel.ReviewStarting += ViewModel_ReviewStarting;
+        _viewModel.ReviewCandidatesUpdated += ViewModel_ReviewCandidatesUpdated;
     }
 
     /// <summary>現在選択中Libraryのレビュー対象Candidateについて、既存処理を中断してバックグラウンド解析を開始する。</summary>
@@ -98,7 +103,12 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
                 cancellation.Token);
             var candidateService = CreateCandidateService(trackRepository, candidateRepository);
             await candidateService.AnalyzeAsync(CreateRequest(selected.Row), force: true, cancellation.Token);
-            await RefreshPresentationAsync(selected, trackRepository, candidateRepository, cancellation.Token);
+            await RefreshPresentationAsync(
+                selected,
+                trackRepository,
+                candidateRepository,
+                cancellation.Token,
+                shouldApply: () => IsCurrent(generation) && _viewModel.IsCurrentCandidate(selected));
             SetStatusIfCurrent(generation, "音質解析: 選択中の候補を再解析しました");
         }
         catch (OperationCanceledException)
@@ -120,11 +130,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             cancellation.Dispose();
         }
 
-        // 別のRestart/Stopでこの手動解析が旧世代になった場合、その新しい状態を上書きして再起動しない。
-        if (!_disposed && IsCurrent(generation))
-        {
-            Restart();
-        }
+        // 選択Candidateの局所解析完了をLibrary-wide Full Sessionの暗黙Triggerにしない。
     }
 
     /// <summary>実行中の品質解析へキャンセルを要求する。アプリ終了時は完了待ちを行わない。</summary>
@@ -134,6 +140,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         _sessionGeneration++;
         _cancellation?.Cancel();
         _trackCoordinator = null;
+        CancelLocal();
     }
 
     public void Dispose()
@@ -145,8 +152,11 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
         _disposed = true;
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        _viewModel.ReviewStarting -= ViewModel_ReviewStarting;
+        _viewModel.ReviewCandidatesUpdated -= ViewModel_ReviewCandidatesUpdated;
         Stop();
         _cancellation = null;
+        _localCancellation = null;
         _trackCoordinator = null;
     }
 
@@ -167,7 +177,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var trackRepository = new SqliteTrackQualityAnalysisRepository(database);
         var candidateRepository = new SqliteCandidateQualityComparisonRepository(database);
         var candidateService = CreateCandidateService(trackRepository, candidateRepository);
-        await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
+        await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, generation, cancellationToken);
         var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
         if (IsCurrent(generation))
         {
@@ -192,6 +202,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
                     candidateService,
                     trackRepository,
                     candidateRepository,
+                    generation,
                     cancellationToken);
             }
 
@@ -215,12 +226,132 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             var result = await candidateService.AnalyzeAsync(CreateRequest(row), cancellationToken: cancellationToken);
             if (FindVisibleCandidate(row.TrackIdA, row.TrackIdB) is { } item)
             {
-                await RefreshPresentationAsync(item, trackRepository, candidateRepository, cancellationToken, result);
+                await RefreshPresentationAsync(
+                    item,
+                    trackRepository,
+                    candidateRepository,
+                    cancellationToken,
+                    result,
+                    () => IsCurrent(generation) && _viewModel.IsCurrentCandidate(item));
             }
         }
 
-        await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, cancellationToken);
+        await RefreshVisiblePresentationsAsync(trackRepository, candidateRepository, generation, cancellationToken);
         SetStatusIfCurrent(generation, $"音質解析完了 {requests.Count}曲 / 比較 {orderedRows.Count}件");
+    }
+
+    private void ViewModel_ReviewStarting(object? sender, EventArgs e)
+    {
+        // ReviewはQuality終了を待たず、世代を進めて旧SessionのUI反映だけを無効化する。
+        Stop();
+    }
+
+    private void ViewModel_ReviewCandidatesUpdated(object? sender, ReviewCandidatesUpdatedEventArgs e)
+    {
+        if (e.MissingQualityItems.Count == 0)
+        {
+            return;
+        }
+
+        StartLocalAnalysis(e.MissingQualityItems);
+    }
+
+    private void StartLocalAnalysis(IReadOnlyList<CandidateReviewItemViewModel> items)
+    {
+        CancelLocal();
+        var generation = ++_localGeneration;
+        var cancellation = new CancellationTokenSource();
+        _localCancellation = cancellation;
+        _localTask = RunLocalAnalysisAsync(items, generation, cancellation.Token);
+        _ = ObserveLocalAnalysisAsync(_localTask, cancellation, generation);
+    }
+
+    private async Task RunLocalAnalysisAsync(
+        IReadOnlyList<CandidateReviewItemViewModel> items,
+        int generation,
+        CancellationToken cancellationToken)
+    {
+        var currentItems = items.Where(_viewModel.IsCurrentCandidate).ToArray();
+        if (currentItems.Length == 0)
+        {
+            return;
+        }
+
+        SetLocalStatusIfCurrent(generation, $"音質局所解析中 0 / {currentItems.Length}");
+        var database = new SqliteDatabase(_viewModel.DatabasePath);
+        await database.InitializeAsync(cancellationToken);
+        var trackRepository = new SqliteTrackQualityAnalysisRepository(database);
+        var candidateRepository = new SqliteCandidateQualityComparisonRepository(database);
+        var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
+        await coordinator.RunAsync(
+            TrackQualityAnalysisRequestFactory.FromCandidates(currentItems.Select(item => item.Row).ToArray()),
+            cancellationToken: cancellationToken);
+
+        var candidateService = CreateCandidateService(trackRepository, candidateRepository);
+        var completed = 0;
+        foreach (var item in currentItems)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_viewModel.IsCurrentCandidate(item))
+            {
+                continue;
+            }
+
+            await candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken);
+            completed++;
+            SetLocalStatusIfCurrent(generation, $"音質局所解析中 {completed} / {currentItems.Length}");
+        }
+
+        var stillCurrent = currentItems.Where(_viewModel.IsCurrentCandidate).ToArray();
+        await CandidateQualityHydrator.HydrateAsync(
+            stillCurrent,
+            trackRepository,
+            candidateRepository,
+            cancellationToken,
+            _viewModel.IsCurrentCandidate);
+        SetLocalStatusIfCurrent(generation, $"音質局所解析完了 {stillCurrent.Length}件");
+    }
+
+    private async Task ObserveLocalAnalysisAsync(
+        Task task,
+        CancellationTokenSource cancellation,
+        int generation)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SetLocalStatusIfCurrent(generation, $"音質局所解析失敗: {ex.Message}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_localCancellation, cancellation))
+            {
+                _localCancellation = null;
+                _localTask = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelLocal()
+    {
+        _localGeneration++;
+        _localCancellation?.Cancel();
+    }
+
+    private void SetLocalStatusIfCurrent(int generation, string status)
+    {
+        if (!_disposed && generation == _localGeneration)
+        {
+            _setStatusText(status);
+        }
     }
 
     private async Task TryAnalyzeAndRefreshAsync(
@@ -228,21 +359,34 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         CandidateQualityAnalysisService candidateService,
         SqliteTrackQualityAnalysisRepository trackRepository,
         SqliteCandidateQualityComparisonRepository candidateRepository,
+        int generation,
         CancellationToken cancellationToken)
     {
         var result = await candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken);
-        await RefreshPresentationAsync(item, trackRepository, candidateRepository, cancellationToken, result);
+        await RefreshPresentationAsync(
+            item,
+            trackRepository,
+            candidateRepository,
+            cancellationToken,
+            result,
+            () => IsCurrent(generation) && _viewModel.IsCurrentCandidate(item));
     }
 
     private async Task RefreshVisiblePresentationsAsync(
         SqliteTrackQualityAnalysisRepository trackRepository,
         SqliteCandidateQualityComparisonRepository candidateRepository,
+        int generation,
         CancellationToken cancellationToken)
     {
         foreach (var item in _viewModel.Candidates.ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await RefreshPresentationAsync(item, trackRepository, candidateRepository, cancellationToken);
+            await RefreshPresentationAsync(
+                item,
+                trackRepository,
+                candidateRepository,
+                cancellationToken,
+                shouldApply: () => IsCurrent(generation) && _viewModel.IsCurrentCandidate(item));
         }
     }
 
@@ -251,11 +395,18 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         SqliteTrackQualityAnalysisRepository trackRepository,
         SqliteCandidateQualityComparisonRepository candidateRepository,
         CancellationToken cancellationToken,
-        CandidateQualityComparison? knownComparison = null)
+        CandidateQualityComparison? knownComparison = null,
+        Func<bool>? shouldApply = null)
     {
         var analysisA = await trackRepository.GetAsync(item.TrackIdA, cancellationToken);
         var analysisB = await trackRepository.GetAsync(item.TrackIdB, cancellationToken);
         var comparison = knownComparison ?? await candidateRepository.GetAsync(item.TrackIdA, item.TrackIdB, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (shouldApply is not null && !shouldApply())
+        {
+            return;
+        }
+
         item.ApplyQualityAnalysis(analysisA, analysisB, comparison);
     }
 
