@@ -466,6 +466,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         long libraryId,
         IReadOnlyCollection<CandidatePairKey> affectedPairKeys)
     {
+        var candidateReloadStopwatch = Stopwatch.StartNew();
         var rows = await new SqliteCandidateReviewReportRepository(database)
             .GetByPairKeysAsync(libraryId, affectedPairKeys);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
@@ -476,11 +477,18 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 row,
                 states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
             .ToArray();
+        candidateReloadStopwatch.Stop();
+        var qualityHydrationStopwatch = Stopwatch.StartNew();
         var missingQualityItems = await CandidateQualityHydrator.HydrateAsync(
             items,
             new SqliteTrackQualityAnalysisRepository(database),
             new SqliteCandidateQualityComparisonRepository(database));
-        return new CandidateItemLoadResult(items, missingQualityItems);
+        qualityHydrationStopwatch.Stop();
+        return new CandidateItemLoadResult(
+            items,
+            missingQualityItems,
+            candidateReloadStopwatch.Elapsed,
+            qualityHydrationStopwatch.Elapsed);
     }
 
     private void ApplyCandidateFilter()
@@ -599,10 +607,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         await database.InitializeAsync();
         var mutation = await CreateReviewMutationService(database, libraryId)
             .SaveAsync(libraryId, review);
-        var reloadStopwatch = Stopwatch.StartNew();
         var loaded = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
-        reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, loaded.Items.Count, reloadStopwatch.Elapsed);
+        LogCandidateReloadTiming(
+            libraryId,
+            mutation.AffectedPairKeys.Count,
+            loaded.Items.Count,
+            loaded.CandidateReloadElapsed);
+        LogQualityHydrationTiming(libraryId, loaded);
         return new CandidateRefreshResult(
             mutation.AffectedPairKeys,
             loaded.Items,
@@ -709,10 +720,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         await database.InitializeAsync();
         var mutation = await CreateReviewMutationService(database, libraryId)
             .DeleteAsync(libraryId, pair);
-        var reloadStopwatch = Stopwatch.StartNew();
         var loaded = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
-        reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, loaded.Items.Count, reloadStopwatch.Elapsed);
+        LogCandidateReloadTiming(
+            libraryId,
+            mutation.AffectedPairKeys.Count,
+            loaded.Items.Count,
+            loaded.CandidateReloadElapsed);
+        LogQualityHydrationTiming(libraryId, loaded);
         return new CandidateRefreshResult(
             mutation.AffectedPairKeys,
             loaded.Items,
@@ -730,6 +744,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             affectedPairCount,
             itemCount,
             elapsed.TotalMilliseconds);
+
+    private void LogQualityHydrationTiming(long libraryId, CandidateItemLoadResult loaded)
+        => _logger.LogInformation(
+            "Review Quality hydration完了 LibraryId={LibraryId} Items={ItemCount} MissingItems={MissingItemCount} ElapsedMs={ElapsedMs:F1}",
+            libraryId,
+            loaded.Items.Count,
+            loaded.MissingQualityItems.Count,
+            loaded.QualityHydrationElapsed.TotalMilliseconds);
 
     /// <summary>
     /// Trashの判定、実ファイル移動、移動後のGlobal Group再同期をUI Thread外で完結させる。
@@ -1009,7 +1031,9 @@ internal sealed class ReviewCandidatesUpdatedEventArgs(
 /// <summary>Pair-local Candidate読み込みとQuality Hydrationの結果。</summary>
 internal sealed record CandidateItemLoadResult(
     IReadOnlyList<CandidateReviewItemViewModel> Items,
-    IReadOnlyList<CandidateReviewItemViewModel> MissingQualityItems);
+    IReadOnlyList<CandidateReviewItemViewModel> MissingQualityItems,
+    TimeSpan CandidateReloadElapsed,
+    TimeSpan QualityHydrationElapsed);
 
 /// <summary>候補一覧で表示するレビュー状態を表す。</summary>
 public enum CandidateReviewListMode
