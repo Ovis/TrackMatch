@@ -465,8 +465,7 @@ public partial class MainWindow : Window
     }
 
     private async void NotDuplicate_Click(object sender, RoutedEventArgs e)
-        => await _viewModel.ExecuteReviewWithUndoAsync(
-            () => ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync));
+        => await ExecuteReviewActionAsync(CandidateReviewDecision.NotDuplicate, _viewModel.MarkNotDuplicateAsync);
 
     private async void KeepA_Click(object sender, RoutedEventArgs e)
     {
@@ -476,8 +475,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _viewModel.ExecuteReviewWithUndoAsync(
-            () => ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync));
+        await ConfirmDuplicateWithImpactAsync(selected.TrackIdA, _viewModel.ConfirmDuplicateKeepAAsync);
     }
 
     private async void KeepB_Click(object sender, RoutedEventArgs e)
@@ -488,8 +486,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _viewModel.ExecuteReviewWithUndoAsync(
-            () => ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync));
+        await ConfirmDuplicateWithImpactAsync(selected.TrackIdB, _viewModel.ConfirmDuplicateKeepBAsync);
     }
 
     private async Task ConfirmDuplicateWithImpactAsync(long preferredTrackId, Func<Task> action)
