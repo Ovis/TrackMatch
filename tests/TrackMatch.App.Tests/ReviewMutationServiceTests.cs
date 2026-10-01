@@ -84,6 +84,49 @@ public sealed class ReviewMutationServiceTests
     }
 
     [Fact]
+    public async Task SupplementalReconciliation_Split前ClosureのNormalPairもPresentation再評価範囲へ含める()
+    {
+        var inAfterGroup = CandidatePairKey.Create(1, 2);
+        var onlyInBeforeClosure = CandidatePairKey.Create(1, 3);
+        var reviews = new RecordingReviewRepository(new CandidateReview(
+            inAfterGroup,
+            CandidateReviewDecision.ConfirmedDuplicate,
+            1,
+            null));
+        var pairs = new FakeCandidatePairRepository(
+        [
+            new CandidatePair(inAfterGroup.TrackIdA, inAfterGroup.TrackIdB, 0),
+            new CandidatePair(onlyInBeforeClosure.TrackIdA, onlyInBeforeClosure.TrackIdB, 0),
+        ]);
+        var comparisons = new FakeComparisonRepository();
+        var classifications = new FakeClassificationRepository();
+        var service = new SupplementalCandidateReconciliationService(
+            reviews,
+            new FakeTrackLookupRepository(),
+            pairs,
+            CreateReviewReadyService(
+                pairs,
+                new FakeFingerprintRepository([]),
+                comparisons,
+                classifications));
+        var afterGroup = new DuplicateGroup(
+            1,
+            10,
+            1,
+            DuplicateGroupKeepStatus.Selected,
+            [1, 2],
+            [1, 2]);
+
+        var result = await service.ReconcileAsync(
+            [afterGroup],
+            [1, 2, 3],
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(onlyInBeforeClosure, result.AffectedPairKeys);
+        Assert.Contains(onlyInBeforeClosure, pairs.PairKeys);
+    }
+
+    [Fact]
     public async Task SaveAsync_完全一致ならCanonicalとDerivedを更新しない()
     {
         var review = new CandidateReview(
