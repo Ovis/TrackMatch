@@ -36,6 +36,35 @@ public sealed class SqliteTrackQualityAnalysisRepository(SqliteDatabase database
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, TrackQualityAnalysis>> GetByTrackIdsAsync(
+        IReadOnlyCollection<long> trackIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trackIds);
+        if (trackIds.Count == 0)
+        {
+            return new Dictionary<long, TrackQualityAnalysis>();
+        }
+
+        const string sql = """
+            SELECT q.TrackId, q.AnalysisVersion, q.Status, q.IntegratedLoudnessLufs, q.TruePeakDbtp,
+                   q.LoudnessRangeLu, q.PeakToLoudnessRatioDb, q.PeakNearSampleCount, q.ClippingRunCount,
+                   q.ClippingTotalDurationTicks, q.ClippingLongestDurationTicks, q.LeftRightLevelDifferenceDb,
+                   q.EffectiveUpperFrequencyHz, q.HasHighFrequencyCutoff, q.HighFrequencyCutoffHz,
+                   q.HighFrequencyEnergyRatio, q.HighFrequencyConsistency, q.AnalyzedAtUtcTicks, q.FailureReason
+            FROM json_each(@TrackIdsJson) requested
+            INNER JOIN TrackQualityAnalyses q ON q.TrackId = requested.value;
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<Row>(new CommandDefinition(
+            sql,
+            new { TrackIdsJson = System.Text.Json.JsonSerializer.Serialize(trackIds.Distinct()) },
+            cancellationToken: cancellationToken));
+        return rows.Select(ToDomain).ToDictionary(item => item.TrackId);
+    }
+
+    /// <inheritdoc />
     public async Task UpsertAsync(TrackQualityAnalysis analysis, CancellationToken cancellationToken = default)
     {
         ValidateAnalysis(analysis);

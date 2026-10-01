@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 using TrackMatch.Core.Quality;
 
@@ -32,6 +33,43 @@ public sealed class SqliteCandidateQualityComparisonRepository(SqliteDatabase da
             new { TrackIdA = a, TrackIdB = b },
             cancellationToken: cancellationToken));
         return row is null ? null : ToDomain(row);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<CandidatePairKey, CandidateQualityComparison>> GetByPairsAsync(
+        IReadOnlyCollection<CandidatePairKey> pairKeys,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pairKeys);
+        if (pairKeys.Count == 0)
+        {
+            return new Dictionary<CandidatePairKey, CandidateQualityComparison>();
+        }
+
+        const string sql = """
+            SELECT q.TrackIdA, q.TrackIdB, q.ComparisonVersion, q.Status, q.MatchedLoudnessDifferenceLu,
+                   q.GainDifferenceMeanDb, q.GainDifferenceStandardDeviationDb,
+                   q.PeakToLoudnessRatioDifferenceDb, q.LoudnessRangeDifferenceLu,
+                   q.IsPrimarilyGainDifference, q.RelativeHighFrequencyDifference,
+                   q.ComparedAtUtcTicks, q.FailureReason
+            FROM json_each(@PairKeysJson) requested
+            INNER JOIN CandidateQualityComparisons q
+                ON q.TrackIdA = json_extract(requested.value, '$[0]')
+               AND q.TrackIdB = json_extract(requested.value, '$[1]');
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var rows = await connection.QueryAsync<Row>(new CommandDefinition(
+            sql,
+            new
+            {
+                PairKeysJson = System.Text.Json.JsonSerializer.Serialize(
+                    pairKeys.Distinct().Select(pair => new[] { pair.TrackIdA, pair.TrackIdB })),
+            },
+            cancellationToken: cancellationToken));
+        return rows
+            .Select(ToDomain)
+            .ToDictionary(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB));
     }
 
     /// <inheritdoc />

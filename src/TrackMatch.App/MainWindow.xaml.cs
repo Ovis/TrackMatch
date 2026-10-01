@@ -56,6 +56,8 @@ public partial class MainWindow : Window
                 await _viewModel.LoadAsync(dialog.CreatedLibrary.Id);
             }
         }
+
+        _qualityController?.Restart();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -78,7 +80,15 @@ public partial class MainWindow : Window
     {
         if (LibraryComboBox.SelectedItem is Library library)
         {
-            await _viewModel.SelectLibraryAsync(library);
+            _qualityController?.Stop();
+            try
+            {
+                await _viewModel.SelectLibraryAsync(library);
+            }
+            finally
+            {
+                _qualityController?.Restart();
+            }
         }
     }
 
@@ -107,10 +117,29 @@ public partial class MainWindow : Window
                 { Owner = this }.ShowDialog();
             }
         }
-        await _viewModel.LoadAsync(dialog.SelectedLibraryId);
+        _qualityController?.Stop();
+        try
+        {
+            await _viewModel.LoadAsync(dialog.SelectedLibraryId);
+        }
+        finally
+        {
+            _qualityController?.Restart();
+        }
     }
 
-    private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e) => await _viewModel.AnalyzeLibraryAsync();
+    private async void AnalyzeLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        _qualityController?.Stop();
+        try
+        {
+            await _viewModel.AnalyzeLibraryAsync();
+        }
+        finally
+        {
+            _qualityController?.Restart();
+        }
+    }
     private void CancelAnalysis_Click(object sender, RoutedEventArgs e) => _viewModel.CancelAnalysis();
 
     private void ShowContentChanges_Click(object sender, RoutedEventArgs e)
@@ -249,7 +278,17 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
+            _qualityController?.Stop();
+            RejectedTrackTrashResult? result;
+            try
+            {
+                result = await _viewModel.ProcessTrashAsync(execute: true, collisionBehavior);
+            }
+            finally
+            {
+                _qualityController?.Restart();
+            }
+
             if (result is not null)
             {
                 new ConfirmationDialog(

@@ -91,6 +91,22 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TrackQualityAnalysisRepository_GetByTrackIds_ReturnsRequestedExistingRows()
+    {
+        var repository = new SqliteTrackQualityAnalysisRepository(_database);
+        var expected = CreateTrackState(QualityAnalysisStatus.Analyzed, DateTime.UtcNow);
+        await repository.UpsertAsync(expected, TestContext.Current.CancellationToken);
+
+        var actual = await repository.GetByTrackIdsAsync(
+            [_trackIdA, _trackIdB, _trackIdA],
+            TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(actual);
+        Assert.Equal(_trackIdA, row.Key);
+        Assert.Equal(expected, row.Value);
+    }
+
+    [Fact]
     public async Task TrackQualityAnalysisRepository_OldGenerationCannotCompleteOrDeleteNewerAnalyzingState()
     {
         var repository = new SqliteTrackQualityAnalysisRepository(_database);
@@ -138,6 +154,23 @@ public sealed class QualityAnalysisPersistenceTests : IAsyncLifetime
         var actual = await repository.GetAsync(_trackIdA, _trackIdB, TestContext.Current.CancellationToken);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task CandidateQualityComparisonRepository_GetByPairs_ReturnsRequestedExistingRows()
+    {
+        var repository = new SqliteCandidateQualityComparisonRepository(_database);
+        var expected = CreateCandidateState(QualityAnalysisStatus.Analyzed, DateTime.UtcNow);
+        await repository.UpsertAsync(expected, TestContext.Current.CancellationToken);
+        var existingPair = CandidatePairKey.Create(_trackIdA, _trackIdB);
+
+        var actual = await repository.GetByPairsAsync(
+            [existingPair, CandidatePairKey.Create(_trackIdA, long.MaxValue), existingPair],
+            TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(actual);
+        Assert.Equal(existingPair, row.Key);
+        Assert.Equal(expected, row.Value);
     }
 
     [Fact]

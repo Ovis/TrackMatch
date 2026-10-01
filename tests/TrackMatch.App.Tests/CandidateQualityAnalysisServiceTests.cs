@@ -207,6 +207,12 @@ public sealed class CandidateQualityAnalysisServiceTests
             return Task.FromResult(value);
         }
 
+        public Task<IReadOnlyDictionary<long, TrackQualityAnalysis>> GetByTrackIdsAsync(
+            IReadOnlyCollection<long> trackIds,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<long, TrackQualityAnalysis>>(
+                Values.Where(pair => trackIds.Contains(pair.Key)).ToDictionary());
+
         public Task UpsertAsync(TrackQualityAnalysis analysis, CancellationToken cancellationToken = default)
         {
             Values[analysis.TrackId] = analysis;
@@ -261,6 +267,19 @@ public sealed class CandidateQualityAnalysisServiceTests
             long trackIdB,
             CancellationToken cancellationToken = default)
             => Task.FromResult(Value);
+
+        public Task<IReadOnlyDictionary<CandidatePairKey, CandidateQualityComparison>> GetByPairsAsync(
+            IReadOnlyCollection<CandidatePairKey> pairKeys,
+            CancellationToken cancellationToken = default)
+        {
+            IReadOnlyDictionary<CandidatePairKey, CandidateQualityComparison> result = Value is null
+                ? new Dictionary<CandidatePairKey, CandidateQualityComparison>()
+                : new Dictionary<CandidatePairKey, CandidateQualityComparison>
+                {
+                    [CandidatePairKey.Create(Value.TrackIdA, Value.TrackIdB)] = Value,
+                };
+            return Task.FromResult(result);
+        }
 
         public Task UpsertAsync(
             CandidateQualityComparison comparison,
