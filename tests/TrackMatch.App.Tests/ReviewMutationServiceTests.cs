@@ -215,12 +215,209 @@ public sealed class ReviewMutationServiceTests
         Assert.All(pairs.OperationCancellationStates, Assert.False);
     }
 
+    [Fact]
+    public async Task SaveAsync_Dirty状態では新しいReviewを拒否する()
+    {
+        var states = new FakeProjectionStateRepository();
+        await states.SetGlobalGroupsDirtyAsync(true, TestContext.Current.CancellationToken);
+        var service = CreateMutationService(
+            new RecordingReviewRepository(),
+            new MutableGroupRepository(),
+            new FakeCandidatePairRepository([]),
+            states);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.NotDuplicate, null, null),
+            TestContext.Current.CancellationToken));
+
+        Assert.Contains("Recovery", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaveAsync_VerdictCommit後の失敗はImmediateRecoveryを一度実行してCleanへ戻す()
+    {
+        var states = new FakeProjectionStateRepository();
+        var groups = new MutableGroupRepository { RemainingReplaceFailures = 1 };
+        var service = CreateMutationService(
+            new RecordingReviewRepository(),
+            groups,
+            new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]),
+            states);
+
+        var result = await service.SaveAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.RecoveryPerformed);
+        Assert.Equal(2, groups.ReplaceAttemptCount);
+        Assert.False(states.GlobalDirty);
+        Assert.False(states.IsLibraryDirty(10));
+    }
+
+    [Fact]
+    public async Task SaveAsync_ImmediateRecoveryも失敗した場合はDirtyを維持する()
+    {
+        var states = new FakeProjectionStateRepository();
+        var groups = new MutableGroupRepository { RemainingReplaceFailures = 2 };
+        var service = CreateMutationService(
+            new RecordingReviewRepository(),
+            groups,
+            new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]),
+            states);
+
+        var exception = await Assert.ThrowsAsync<ReviewMutationRecoveryException>(() => service.SaveAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            TestContext.Current.CancellationToken));
+
+        Assert.IsType<InvalidOperationException>(exception.InitialFailure);
+        Assert.IsType<InvalidOperationException>(exception.RecoveryFailure);
+        Assert.Equal(2, groups.ReplaceAttemptCount);
+        Assert.True(states.GlobalDirty);
+        Assert.True(states.IsLibraryDirty(10));
+    }
+
+    [Fact]
+    public async Task SaveAsync_Verdict未Commitの失敗は元の例外を返してDirtyを解除する()
+    {
+        var states = new FakeProjectionStateRepository();
+        var service = CreateMutationService(
+            new FailingSaveReviewRepository(),
+            new MutableGroupRepository(),
+            new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]),
+            states);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("Verdict save failed.", exception.Message);
+        Assert.False(states.GlobalDirty);
+        Assert.False(states.IsLibraryDirty(10));
+    }
+
+    [Fact]
+    public async Task SaveAsync_AffectedTrackを二つ以上持つ他LibraryだけをDirty化する()
+    {
+        var states = new FakeProjectionStateRepository();
+        var tracks = new FakeTrackLookupRepository(new Dictionary<long, IReadOnlyList<long>>
+        {
+            [1] = [10, 20, 30],
+            [2] = [10, 20],
+        });
+        var service = CreateMutationService(
+            new RecordingReviewRepository(),
+            new MutableGroupRepository(),
+            new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]),
+            states,
+            tracks);
+
+        await service.SaveAsync(
+            10,
+            new CandidateReview(CandidatePairKey.Create(1, 2), CandidateReviewDecision.ConfirmedDuplicate, 1, null),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(states.IsLibraryDirty(20));
+        Assert.False(states.IsLibraryDirty(30));
+        Assert.False(states.IsLibraryDirty(10));
+        Assert.False(states.GlobalDirty);
+    }
+
+    [Fact]
+    public async Task ProjectionRecovery_GlobalDirtyを検出してCurrentVerdictから再構築する()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            1,
+            null);
+        var reviews = new RecordingReviewRepository(review);
+        var tracks = new FakeTrackLookupRepository();
+        var groups = new MutableGroupRepository();
+        var states = new FakeProjectionStateRepository();
+        await states.MarkReviewMutationStartedAsync(10, TestContext.Current.CancellationToken);
+        var pairs = new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]);
+        var comparisons = new FakeComparisonRepository();
+        var classifications = new FakeClassificationRepository();
+        var duplicateGroups = new DuplicateGroupService(reviews, tracks, groups);
+        var recovery = new ProjectionRecoveryService(
+            states,
+            groups,
+            duplicateGroups,
+            new SupplementalCandidateReconciliationService(
+                reviews,
+                tracks,
+                pairs,
+                CreateReviewReadyService(
+                    pairs,
+                    new FakeFingerprintRepository(CreateFingerprints(1, 2)),
+                    comparisons,
+                    classifications)),
+            new GlobalMutationGate());
+
+        var result = await recovery.RecoverIfNeededAsync(10, TestContext.Current.CancellationToken);
+
+        Assert.True(result.RecoveryPerformed);
+        Assert.True(result.GlobalRecoveryPerformed);
+        Assert.Equal(
+            [1L, 2L],
+            Assert.Single(await groups.GetAllGlobalAsync(TestContext.Current.CancellationToken)).TrackIds.Order());
+        Assert.False(states.GlobalDirty);
+        Assert.False(states.IsLibraryDirty(10));
+    }
+
+    [Fact]
+    public async Task ProjectionRecovery_LibraryDirtyだけならGlobalTopologyを置換しない()
+    {
+        var review = new CandidateReview(
+            CandidatePairKey.Create(1, 2),
+            CandidateReviewDecision.ConfirmedDuplicate,
+            1,
+            null);
+        var reviews = new RecordingReviewRepository(review);
+        var tracks = new FakeTrackLookupRepository();
+        var groups = new MutableGroupRepository(new GlobalDuplicateGroup(1, [1, 2]));
+        var states = new FakeProjectionStateRepository();
+        await states.SetLibraryKeepProjectionDirtyAsync(10, true, TestContext.Current.CancellationToken);
+        var pairs = new FakeCandidatePairRepository([new CandidatePair(1, 2, 0)]);
+        var comparisons = new FakeComparisonRepository();
+        var classifications = new FakeClassificationRepository();
+        var duplicateGroups = new DuplicateGroupService(reviews, tracks, groups);
+        var recovery = new ProjectionRecoveryService(
+            states,
+            groups,
+            duplicateGroups,
+            new SupplementalCandidateReconciliationService(
+                reviews,
+                tracks,
+                pairs,
+                CreateReviewReadyService(
+                    pairs,
+                    new FakeFingerprintRepository(CreateFingerprints(1, 2)),
+                    comparisons,
+                    classifications)),
+            new GlobalMutationGate());
+
+        var result = await recovery.RecoverIfNeededAsync(10, TestContext.Current.CancellationToken);
+
+        Assert.True(result.RecoveryPerformed);
+        Assert.False(result.GlobalRecoveryPerformed);
+        Assert.Equal(0, groups.ReplaceAttemptCount);
+        Assert.False(states.IsLibraryDirty(10));
+    }
+
     private static ReviewMutationService CreateMutationService(
         ICandidateReviewMutationRepository reviews,
         MutableGroupRepository groups,
-        FakeCandidatePairRepository pairs)
+        FakeCandidatePairRepository pairs,
+        FakeProjectionStateRepository? states = null,
+        FakeTrackLookupRepository? tracks = null)
     {
-        var tracks = new FakeTrackLookupRepository();
+        tracks ??= new FakeTrackLookupRepository();
+        states ??= new FakeProjectionStateRepository();
         var comparisons = new FakeComparisonRepository();
         var classifications = new FakeClassificationRepository();
         var supplemental = new SupplementalCandidateReconciliationService(
@@ -236,8 +433,10 @@ public sealed class ReviewMutationServiceTests
             reviews,
             tracks,
             groups,
+            states,
             new DuplicateGroupService(reviews, tracks, groups),
-            supplemental);
+            supplemental,
+            new GlobalMutationGate());
     }
 
     private static CandidateReviewReadyService CreateReviewReadyService(
@@ -314,7 +513,23 @@ public sealed class ReviewMutationServiceTests
             => Task.FromResult<IReadOnlySet<CandidatePairKey>>(_items.Select(item => item.Pair).ToHashSet());
     }
 
-    private sealed class FakeTrackLookupRepository : ITrackLookupRepository
+    private sealed class FailingSaveReviewRepository : ICandidateReviewMutationRepository
+    {
+        public Task SaveAsync(CandidateReview review, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Verdict save failed.");
+
+        public Task DeleteAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyList<CandidateReview>> GetAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidateReview>>([]);
+
+        public Task<IReadOnlySet<CandidatePairKey>> GetExcludedPairKeysAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlySet<CandidatePairKey>>(new HashSet<CandidatePairKey>());
+    }
+
+    private sealed class FakeTrackLookupRepository(
+        IReadOnlyDictionary<long, IReadOnlyList<long>>? libraryIdsByTrack = null) : ITrackLookupRepository
     {
         public Task<StoredTrack?> GetByIdAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<StoredTrack?>(new StoredTrack(
@@ -333,13 +548,56 @@ public sealed class ReviewMutationServiceTests
                 false));
 
         public Task<bool> IsInLibraryAsync(long trackId, long libraryId, CancellationToken cancellationToken = default)
-            => Task.FromResult(libraryId == 10 && trackId is >= 1 and <= 10);
+            => Task.FromResult((libraryIdsByTrack?.GetValueOrDefault(trackId) ?? [10]).Contains(libraryId));
 
         public Task<IReadOnlyList<long>> GetLibraryIdsAsync(long trackId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<long>>([10]);
+            => Task.FromResult(libraryIdsByTrack?.GetValueOrDefault(trackId) ?? [10]);
 
         public Task<IReadOnlyList<TrackLibraryReference>> GetLibrariesAsync(long trackId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<TrackLibraryReference>>([new TrackLibraryReference(10, "Library")]);
+    }
+
+    private sealed class FakeProjectionStateRepository : IProjectionStateRepository
+    {
+        private readonly Dictionary<long, bool> _libraryDirty = [];
+
+        public bool GlobalDirty { get; private set; }
+
+        public bool IsLibraryDirty(long libraryId) => _libraryDirty.GetValueOrDefault(libraryId);
+
+        public Task<bool> IsGlobalGroupsDirtyAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(GlobalDirty);
+
+        public Task<bool> IsLibraryKeepProjectionDirtyAsync(
+            long libraryId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(_libraryDirty.GetValueOrDefault(libraryId));
+
+        public Task MarkReviewMutationStartedAsync(
+            long libraryId,
+            CancellationToken cancellationToken = default)
+        {
+            GlobalDirty = true;
+            _libraryDirty[libraryId] = true;
+            return Task.CompletedTask;
+        }
+
+        public Task SetLibraryKeepProjectionDirtyAsync(
+            long libraryId,
+            bool isDirty,
+            CancellationToken cancellationToken = default)
+        {
+            _libraryDirty[libraryId] = isDirty;
+            return Task.CompletedTask;
+        }
+
+        public Task SetGlobalGroupsDirtyAsync(
+            bool isDirty,
+            CancellationToken cancellationToken = default)
+        {
+            GlobalDirty = isDirty;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class MutableGroupRepository(params GlobalDuplicateGroup[] initial) : IDuplicateGroupRepository
@@ -348,6 +606,10 @@ public sealed class ReviewMutationServiceTests
         private List<GlobalDuplicateGroup> _groups = [.. initial];
 
         public int LibraryReadCount { get; private set; }
+
+        public int RemainingReplaceFailures { get; set; }
+
+        public int ReplaceAttemptCount { get; private set; }
 
         public Task<IReadOnlyList<GlobalDuplicateGroup>> GetAllGlobalAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<GlobalDuplicateGroup>>(_groups.ToArray());
@@ -370,6 +632,13 @@ public sealed class ReviewMutationServiceTests
 
         public Task ReplaceGlobalAsync(IReadOnlyCollection<DuplicateGroupRebuildItem> groups, CancellationToken cancellationToken = default)
         {
+            ReplaceAttemptCount++;
+            if (RemainingReplaceFailures > 0)
+            {
+                RemainingReplaceFailures--;
+                throw new InvalidOperationException("Group replace failed.");
+            }
+
             var nextId = _groups.Select(group => group.Id).DefaultIfEmpty(0).Max() + 1;
             _groups = groups.Select(group => new GlobalDuplicateGroup(
                 group.ExistingGroupId ?? nextId++,

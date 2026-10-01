@@ -9,7 +9,7 @@ namespace TrackMatch.Infrastructure.Persistence;
 public sealed class SqliteDatabase
 {
     private const int BusyTimeoutMilliseconds = 5000;
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private readonly string _connectionString;
 
     public SqliteDatabase(string databasePath)
@@ -53,15 +53,16 @@ public sealed class SqliteDatabase
         var hasSchemaInfo = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'SchemaInfo';",
             cancellationToken: cancellationToken)) != 0;
+        long? existingSchemaVersion = null;
         if (hasSchemaInfo)
         {
-            var existingVersion = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            existingSchemaVersion = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
                 "SELECT Version FROM SchemaInfo WHERE Id = 1;",
                 cancellationToken: cancellationToken));
-            if (existingVersion != CurrentSchemaVersion)
+            if (existingSchemaVersion is not 1 and not CurrentSchemaVersion)
             {
                 throw new InvalidOperationException(
-                    $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {existingVersion}。DBを削除して再作成してください。");
+                    $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {existingSchemaVersion}。DBを削除して再作成してください。");
             }
         }
         else
@@ -76,6 +77,11 @@ public sealed class SqliteDatabase
             }
         }
 
+        if (existingSchemaVersion == 1)
+        {
+            await MigrateV1ToV2Async(connection, cancellationToken);
+        }
+
         const string schema = """
             CREATE TABLE IF NOT EXISTS SchemaInfo (
                 Id INTEGER PRIMARY KEY CHECK (Id = 1),
@@ -83,13 +89,29 @@ public sealed class SqliteDatabase
             );
 
             INSERT INTO SchemaInfo (Id, Version)
-            VALUES (1, 1)
+            VALUES (1, 2)
             ON CONFLICT(Id) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS Libraries (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Name TEXT NOT NULL,
                 NormalizedName TEXT NOT NULL UNIQUE
+            );
+
+            -- Canonical Human VerdictとMaterialized Projectionの整合境界を明示的に永続化する。
+            CREATE TABLE IF NOT EXISTS ProjectionStates (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                GlobalGroupsDirty INTEGER NOT NULL DEFAULT 0 CHECK (GlobalGroupsDirty IN (0, 1))
+            );
+
+            INSERT INTO ProjectionStates (Id, GlobalGroupsDirty)
+            VALUES (1, 0)
+            ON CONFLICT(Id) DO NOTHING;
+
+            CREATE TABLE IF NOT EXISTS LibraryProjectionStates (
+                LibraryId INTEGER PRIMARY KEY,
+                KeepProjectionDirty INTEGER NOT NULL DEFAULT 0 CHECK (KeepProjectionDirty IN (0, 1)),
+                FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS LibraryRoots (
@@ -418,6 +440,36 @@ public sealed class SqliteDatabase
             throw new InvalidOperationException(
                 $"対応していないTrackMatch DB Schema Versionです。期待値: {CurrentSchemaVersion}, 実際: {version}");
         }
+    }
+
+    private static async Task MigrateV1ToV2Async(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            CREATE TABLE ProjectionStates (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                GlobalGroupsDirty INTEGER NOT NULL DEFAULT 0 CHECK (GlobalGroupsDirty IN (0, 1))
+            );
+
+            INSERT INTO ProjectionStates (Id, GlobalGroupsDirty) VALUES (1, 0);
+
+            CREATE TABLE LibraryProjectionStates (
+                LibraryId INTEGER PRIMARY KEY,
+                KeepProjectionDirty INTEGER NOT NULL DEFAULT 0 CHECK (KeepProjectionDirty IN (0, 1)),
+                FOREIGN KEY (LibraryId) REFERENCES Libraries (Id) ON DELETE CASCADE
+            );
+
+            INSERT INTO LibraryProjectionStates (LibraryId, KeepProjectionDirty)
+            SELECT Id, 0 FROM Libraries;
+
+            UPDATE SchemaInfo SET Version = 2 WHERE Id = 1;
+            """,
+            transaction: transaction,
+            cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>

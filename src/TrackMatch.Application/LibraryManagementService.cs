@@ -12,13 +12,17 @@ public sealed class LibraryManagementService
 {
     private readonly string _databasePath;
     private readonly string? _trashRoot;
+    private readonly GlobalMutationGate _mutationGate;
 
     /// <summary>
     /// Library管理Serviceを生成する。
     /// </summary>
     /// <param name="databasePath">TrackMatch SQLite DB Path</param>
     /// <param name="trashRoot">設定済みApp-wide Trash Root。未設定ならnull</param>
-    public LibraryManagementService(string databasePath, string? trashRoot = null)
+    public LibraryManagementService(
+        string databasePath,
+        string? trashRoot = null,
+        GlobalMutationGate? mutationGate = null)
     {
         _databasePath = string.IsNullOrWhiteSpace(databasePath)
             ? throw new ArgumentException("Database path is required.", nameof(databasePath))
@@ -26,6 +30,7 @@ public sealed class LibraryManagementService
         _trashRoot = string.IsNullOrWhiteSpace(trashRoot)
             ? null
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(trashRoot));
+        _mutationGate = mutationGate ?? GlobalMutationGate.Shared;
     }
 
     /// <summary>
@@ -97,6 +102,7 @@ public sealed class LibraryManagementService
     /// </summary>
     public async Task RemoveRootAsync(long libraryId, long rootId, CancellationToken cancellationToken = default)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         await new SqliteLibraryRepository(database).RemoveRootAsync(libraryId, rootId, cancellationToken);
     }
@@ -106,6 +112,7 @@ public sealed class LibraryManagementService
     /// </summary>
     public async Task DeleteLibraryAsync(long libraryId, CancellationToken cancellationToken = default)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         await new SqliteLibraryRepository(database).DeleteAsync(libraryId, cancellationToken);
     }
@@ -139,6 +146,7 @@ public sealed class LibraryManagementService
         CancellationToken cancellationToken = default)
     {
         ValidateAgainstTrash([newRootPath]);
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteLibraryRootRemapService(database)
             .ApplyAsync(libraryId, rootId, newRootPath, cancellationToken);

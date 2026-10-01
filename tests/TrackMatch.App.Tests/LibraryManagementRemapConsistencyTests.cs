@@ -112,6 +112,8 @@ public sealed class LibraryManagementRemapConsistencyTests : IAsyncLifetime
             childLibrary.Id,
             new CandidateReview(CandidatePairKey.Create(a, b), CandidateReviewDecision.ConfirmedDuplicate, a, null),
             TestContext.Current.CancellationToken);
+        // Review経路は現在Libraryだけを同期するため、構造変更前の全Library収束状態を明示的に作る。
+        await duplicateGroups.SynchronizeGlobalAsync(TestContext.Current.CancellationToken);
         var groupRepository = new SqliteDuplicateGroupRepository(_database);
         var parentProjection = Assert.Single(await groupRepository.GetByLibraryIdAsync(parentLibrary.Id, TestContext.Current.CancellationToken));
         // Parent LibraryにはAしか存在しないため、Global Preference A>BからLibrary固有Keep=Aが導出される。

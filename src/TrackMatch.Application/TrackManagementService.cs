@@ -10,16 +10,18 @@ namespace TrackMatch.Application;
 public sealed class TrackManagementService
 {
     private readonly string _databasePath;
+    private readonly GlobalMutationGate _mutationGate;
 
     /// <summary>
     /// Global Track管理Serviceを生成する。
     /// </summary>
     /// <param name="databasePath">TrackMatch SQLite DB Path</param>
-    public TrackManagementService(string databasePath)
+    public TrackManagementService(string databasePath, GlobalMutationGate? mutationGate = null)
     {
         _databasePath = string.IsNullOrWhiteSpace(databasePath)
             ? throw new ArgumentException("Database path is required.", nameof(databasePath))
             : databasePath;
+        _mutationGate = mutationGate ?? GlobalMutationGate.Shared;
     }
 
     /// <summary>
@@ -41,6 +43,7 @@ public sealed class TrackManagementService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(trackIds);
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisTracksAsync(trackIds, cancellationToken);
@@ -55,6 +58,7 @@ public sealed class TrackManagementService
         long rootId,
         CancellationToken cancellationToken = default)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisRootAsync(rootId, cancellationToken);
@@ -69,6 +73,7 @@ public sealed class TrackManagementService
         long libraryId,
         CancellationToken cancellationToken = default)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         var result = await new SqliteTrackManagementRepository(database)
             .ForceReanalysisLibraryAsync(libraryId, cancellationToken);
@@ -85,6 +90,7 @@ public sealed class TrackManagementService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(trackIds);
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var database = await OpenDatabaseAsync(cancellationToken);
         var deleted = await new SqliteTrackManagementRepository(database)
             .DeleteTracksAsync(trackIds, cancellationToken);
