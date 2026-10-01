@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using TrackMatch.App.Playback;
@@ -7,6 +8,7 @@ using TrackMatch.App.Settings;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
+using TrackMatch.Core.Comparison;
 using TrackMatch.Core.Duplicates;
 using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Scanning;
@@ -294,16 +296,32 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
+        var reviewStopwatch = Stopwatch.StartNew();
         StopPlayback(); IsLoading = true;
         try
         {
             var pair = CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB);
             // Verdict更新後はGlobal Group再同期や補完Candidate生成まで連鎖するため、
             // DB・CPU処理をUI Threadから分離し、表示状態の差し替えだけをawait後に行う。
-            await Task.Run(() => DeleteReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, pair));
-            await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+            var refresh = await Task.Run(() => DeleteReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, pair));
+            ApplyCandidateRefresh(refresh);
         }
-        finally { IsLoading = false; }
+        catch
+        {
+            await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
+            throw;
+        }
+        finally
+        {
+            IsLoading = false;
+            reviewStopwatch.Stop();
+            _logger.LogInformation(
+                "Review E2E完了 Operation=Delete LibraryId={LibraryId} Pair={TrackIdA}-{TrackIdB} TotalMs={TotalMs:F1}",
+                library.Id,
+                selected.TrackIdA,
+                selected.TrackIdB,
+                reviewStopwatch.Elapsed.TotalMilliseconds);
+        }
     }
 
     public async Task<RejectedTrackTrashResult?> ProcessTrashAsync(bool execute, TrashDestinationCollisionBehavior collisionBehavior = TrashDestinationCollisionBehavior.Skip)
@@ -389,7 +407,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .SynchronizeGlobalAsync();
 
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
-        await EnsureSupplementalCandidatesAsync(database, libraryId);
+        // 初期Loadは全Groupを対象にするが、Review操作中はReviewMutationServiceがAffected Closureだけを渡す。
+        var groups = new SqliteDuplicateGroupRepository(database);
+        var currentGroups = await groups.GetByLibraryIdAsync(libraryId);
+        await CreateSupplementalReconciliationService(database, libraryId)
+            .ReconcileAsync(
+                currentGroups,
+                currentGroups.SelectMany(group => group.GlobalTrackIds).Distinct().ToArray());
         return await LoadCandidateItemsAsync(database, libraryId);
     }
 
@@ -502,6 +526,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 : Candidates[Math.Min(Math.Max(selectedIndex, 0), Candidates.Count - 1)];
         }
 
+        var reviewStopwatch = Stopwatch.StartNew();
         IsLoading = true;
         try
         {
@@ -520,7 +545,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             await ReloadCandidatesPreservingPairAsync(selected.TrackIdA, selected.TrackIdB);
             throw;
         }
-        finally { IsLoading = false; }
+        finally
+        {
+            IsLoading = false;
+            reviewStopwatch.Stop();
+            _logger.LogInformation(
+                "Review E2E完了 Operation=Save LibraryId={LibraryId} Pair={TrackIdA}-{TrackIdB} TotalMs={TotalMs:F1}",
+                library.Id,
+                selected.TrackIdA,
+                selected.TrackIdB,
+                reviewStopwatch.Elapsed.TotalMilliseconds);
+        }
     }
 
     /// <summary>
@@ -533,42 +568,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     {
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
-        var groups = new SqliteDuplicateGroupRepository(database);
-
-        // NotDuplicateでGroupが分割される場合、保存後のGroupだけでは元GroupのTrackを特定できない。
-        // 保存前後の双方を集め、レビューによってPresentation Stateが変わり得る範囲を欠落させない。
-        var affectedTrackIds = GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair);
-        var service = new DuplicateGroupService(
-            new SqliteCandidateReviewRepository(database),
-            new SqliteTrackLookupRepository(database),
-            groups);
-        await service.SaveReviewAsync(libraryId, review);
-        foreach (var trackId in GetRelatedTrackIds(await groups.GetByLibraryIdAsync(libraryId), review.Pair))
-        {
-            affectedTrackIds.Add(trackId);
-        }
-
-        await EnsureSupplementalCandidatesAsync(database, libraryId);
-        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, affectedTrackIds);
-        return new CandidateRefreshResult(affectedTrackIds, items);
-    }
-
-    /// <summary>
-    /// レビューによって影響を受けるGroupのTrackを抽出する。
-    /// </summary>
-    private static HashSet<long> GetRelatedTrackIds(
-        IReadOnlyCollection<DuplicateGroup> groups,
-        CandidatePairKey pair)
-    {
-        var result = new HashSet<long> { pair.TrackIdA, pair.TrackIdB };
-        foreach (var group in groups.Where(group =>
-                     group.GlobalTrackIds.Contains(pair.TrackIdA)
-                     || group.GlobalTrackIds.Contains(pair.TrackIdB)))
-        {
-            result.UnionWith(group.GlobalTrackIds);
-        }
-
-        return result;
+        var mutation = await CreateReviewMutationService(database, libraryId)
+            .SaveAsync(libraryId, review);
+        var reloadStopwatch = Stopwatch.StartNew();
+        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, mutation.AffectedTrackIds);
+        reloadStopwatch.Stop();
+        LogCandidateReloadTiming(libraryId, mutation.AffectedTrackIds.Count, items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(mutation.AffectedTrackIds, items);
     }
 
     /// <summary>
@@ -576,6 +582,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// </summary>
     private void ApplyCandidateRefresh(CandidateRefreshResult refresh)
     {
+        var mergeStopwatch = Stopwatch.StartNew();
         _allCandidates.RemoveAll(item =>
             refresh.AffectedTrackIds.Contains(item.TrackIdA)
             || refresh.AffectedTrackIds.Contains(item.TrackIdB));
@@ -586,6 +593,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         NotifyCandidateCountsChanged();
         RefreshGenreOptions();
         ApplyCandidateFilter();
+        mergeStopwatch.Stop();
+        _logger.LogInformation(
+            "Review Candidate merge/filter完了 LibraryId={LibraryId} AffectedTracks={AffectedTrackCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
+            SelectedLibrary?.Id,
+            refresh.AffectedTrackIds.Count,
+            refresh.Items.Count,
+            mergeStopwatch.Elapsed.TotalMilliseconds);
     }
 
     private static int CompareCandidates(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
@@ -619,17 +633,33 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>
     /// Human Verdictを解除し、残ったVerdictから派生状態と補完CandidateをUI Thread外で再構築する。
     /// </summary>
-    private async Task DeleteReviewAndRefreshDerivedStateAsync(string databasePath, long libraryId, CandidatePairKey pair)
+    private async Task<CandidateRefreshResult> DeleteReviewAndRefreshDerivedStateAsync(
+        string databasePath,
+        long libraryId,
+        CandidatePairKey pair)
     {
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
-        var service = new DuplicateGroupService(
-            new SqliteCandidateReviewRepository(database),
-            new SqliteTrackLookupRepository(database),
-            new SqliteDuplicateGroupRepository(database));
-        await service.DeleteReviewAsync(libraryId, pair);
-        await EnsureSupplementalCandidatesAsync(database, libraryId);
+        var mutation = await CreateReviewMutationService(database, libraryId)
+            .DeleteAsync(libraryId, pair);
+        var reloadStopwatch = Stopwatch.StartNew();
+        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, mutation.AffectedTrackIds);
+        reloadStopwatch.Stop();
+        LogCandidateReloadTiming(libraryId, mutation.AffectedTrackIds.Count, items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(mutation.AffectedTrackIds, items);
     }
+
+    private void LogCandidateReloadTiming(
+        long libraryId,
+        int affectedTrackCount,
+        int itemCount,
+        TimeSpan elapsed)
+        => _logger.LogInformation(
+            "Review Candidate DB reload完了 LibraryId={LibraryId} AffectedTracks={AffectedTrackCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
+            libraryId,
+            affectedTrackCount,
+            itemCount,
+            elapsed.TotalMilliseconds);
 
     /// <summary>
     /// Trashの判定、実ファイル移動、移動後のGlobal Group再同期をUI Thread外で完結させる。
@@ -664,71 +694,59 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     }
 
     /// <summary>
-    /// 現在の優劣関係だけではKeepを一意化できないGroupへ、必要最小限の補完Candidateを生成する。
+    /// Review MutationとAffected Closure内のSupplemental整合を同じRepository Contextで構成する。
     /// </summary>
-    private async Task EnsureSupplementalCandidatesAsync(SqliteDatabase database, long libraryId)
+    private ReviewMutationService CreateReviewMutationService(SqliteDatabase database, long libraryId)
     {
-        var reviews = await GetUsableReviewsAsync(database);
-        var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var tracks = new SqliteTrackLookupRepository(database);
+        var groups = new SqliteDuplicateGroupRepository(database);
+        return new ReviewMutationService(
+            reviews,
+            tracks,
+            groups,
+            new DuplicateGroupService(reviews, tracks, groups),
+            CreateSupplementalReconciliationService(database, libraryId),
+            _loggerFactory.CreateLogger<ReviewMutationService>());
+    }
+
+    /// <summary>
+    /// Pair-local Comparison / Classificationを再利用するSupplemental整合Serviceを構成する。
+    /// </summary>
+    private SupplementalCandidateReconciliationService CreateSupplementalReconciliationService(
+        SqliteDatabase database,
+        long libraryId)
+    {
+        const int fingerprintAlgorithm = 2;
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var tracks = new SqliteTrackLookupRepository(database);
         var pairs = new SqliteCandidatePairRepository(database, libraryId);
-        var existingPairs = await pairs.GetAllAsync();
-        var required = new List<CandidatePairKey>();
-
-        foreach (var group in groups.Where(group => group.KeepStatus == DuplicateGroupKeepStatus.Unselected))
-        {
-            var groupTrackIds = group.GlobalTrackIds.ToHashSet();
-            var groupReviews = reviews
-                .Where(review => groupTrackIds.Contains(review.Pair.TrackIdA)
-                    && groupTrackIds.Contains(review.Pair.TrackIdB))
-                .ToArray();
-            var pair = ReviewNecessityEvaluator.FindSupplementalPair(group.TrackIds, groupReviews, existingPairs);
-            if (pair is { } supplemental)
-            {
-                required.Add(supplemental);
-            }
-        }
-
-        var existingKeys = existingPairs
-            .Select(pair => CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB))
-            .ToHashSet();
-        var created = false;
-        foreach (var pair in required.Where(pair => !existingKeys.Contains(pair)))
-        {
-            await pairs.EnsureSupplementalAsync(pair);
-            created = true;
-        }
-
-        await pairs.DeleteObsoleteSupplementalAsync(required);
-
-        // Pair保存後、比較生成前にアプリが終了した場合でも次回起動で補完Candidateを復旧する。
-        // 「今回作成したか」だけで判定すると、DBにPairだけ残った状態が永久にUIへ現れないため、
-        // 現在必要なPairにCurrent Comparisonが存在するかも確認する。
-        var comparedKeys = (await new SqliteCandidateComparisonRepository(database, libraryId).GetAllAsync())
-            .Select(comparison => CandidatePairKey.Create(comparison.TrackIdA, comparison.TrackIdB))
-            .ToHashSet();
-        var needsAnalysis = created || required.Any(pair => !comparedKeys.Contains(pair));
-
-        // 比較保存後から分類保存前の間に終了したケースも自己修復する。
-        // Review ReportはClassificationをLEFT JOINするため表示自体は可能だが、分類なしのまま恒久化すると
-        // Machine Resultと再確認判定が欠落するので、必要な補完Pairの分類有無も起動時に確認する。
-        var classifiedKeys = await new SqliteCandidateClassificationRepository(database, libraryId)
-            .GetClassifiedPairKeysAsync();
-        var needsClassification = required.Any(pair => comparedKeys.Contains(pair) && !classifiedKeys.Contains(pair));
-        if (!needsAnalysis && !needsClassification)
-        {
-            return;
-        }
-
-        var fpcalcPath = Environment.GetEnvironmentVariable("TRACKMATCH_FPCALC") ?? "fpcalc";
-        var workflow = new LibraryAnalysisWorkflow(DatabasePath, fpcalcPath);
-        if (needsAnalysis)
-        {
-            await workflow.AnalyzeCandidatesAsync(libraryId);
-        }
-
-        // 補完Candidateも通常Candidateと同じMachine Resultを持たせる。
-        // 分類だけ欠けた中断状態では不要なFingerprint比較を繰り返さず、分類処理だけを再実行する。
-        await workflow.ClassifyCandidatesAsync(libraryId);
+        var comparisons = new SqliteCandidateComparisonRepository(database, libraryId);
+        var classifications = new SqliteCandidateClassificationRepository(database, libraryId);
+        var ready = new CandidateReviewReadyService(
+            comparisons,
+            classifications,
+            new CandidateAnalysisService(
+                new SqliteFingerprintCatalogRepository(database, libraryId),
+                pairs,
+                comparisons,
+                new FingerprintComparer()),
+            new CandidateClassificationService(comparisons, classifications),
+            fingerprintAlgorithm,
+            AutomaticRelationshipClassificationProfile.Default);
+        return new SupplementalCandidateReconciliationService(
+            reviews,
+            tracks,
+            pairs,
+            ready,
+            timing => _logger.LogInformation(
+                "Supplemental局所整合完了 LibraryId={LibraryId} Groups={GroupCount} RequiredPairs={RequiredPairCount} SupplementalMs={SupplementalMs:F1} ReviewReadyMs={ReviewReadyMs:F1} TotalMs={TotalMs:F1}",
+                libraryId,
+                timing.AffectedGroupCount,
+                timing.RequiredPairCount,
+                timing.SupplementalElapsed.TotalMilliseconds,
+                timing.ReviewReadyElapsed.TotalMilliseconds,
+                timing.TotalElapsed.TotalMilliseconds));
     }
 
     /// <summary>
