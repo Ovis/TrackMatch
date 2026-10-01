@@ -30,6 +30,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private readonly List<IncrementalScanError> _analysisErrors = [];
     private readonly List<ContentChangeNotice> _contentChanges = [];
     private readonly List<CandidateReviewItemViewModel> _allCandidates = [];
+    private readonly Dictionary<CandidatePairKey, CandidateReviewItemViewModel> _candidatesByPair = [];
     private readonly string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CancellationTokenSource? _analysisCancellation;
     private TrackMatchAppSettings _settings = TrackMatchAppSettings.Default;
@@ -193,7 +194,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
-            _allCandidates.Clear(); Candidates.Clear(); SelectedCandidate = null; StatusText = $"読み込み失敗: {exception.Message}";
+            _allCandidates.Clear(); _candidatesByPair.Clear(); Candidates.Clear(); SelectedCandidate = null; StatusText = $"読み込み失敗: {exception.Message}";
         }
         finally { IsLoading = false; }
     }
@@ -297,6 +298,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         }
 
         var reviewStopwatch = Stopwatch.StartNew();
+        var selectedIndex = Candidates.IndexOf(selected);
         StopPlayback(); IsLoading = true;
         try
         {
@@ -304,7 +306,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             // Verdict更新後はGlobal Group再同期や補完Candidate生成まで連鎖するため、
             // DB・CPU処理をUI Threadから分離し、表示状態の差し替えだけをawait後に行う。
             var refresh = await Task.Run(() => DeleteReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, pair));
-            ApplyCandidateRefresh(refresh);
+            ApplyCandidateRefresh(refresh, pair, selectedIndex);
         }
         catch
         {
@@ -376,13 +378,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private async Task LoadCandidatesCoreAsync()
     {
-        _allCandidates.Clear(); Candidates.Clear(); SelectedCandidate = null;
+        _allCandidates.Clear(); _candidatesByPair.Clear(); Candidates.Clear(); SelectedCandidate = null;
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         // DB同期、Supplemental Candidate生成、Presentation State構築は候補数に応じて重くなるため、
         // UI Threadでは実行しない。ObservableCollectionなどWPFへ公開する状態の更新だけをawait後に行う。
         var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id));
         _allCandidates.AddRange(loadedCandidates);
+        foreach (var item in loadedCandidates)
+        {
+            _candidatesByPair.Add(GetPair(item), item);
+        }
         NotifyCandidateCountsChanged(); RefreshGenreOptions(); ApplyCandidateFilter();
     }
 
@@ -445,15 +451,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     }
 
     /// <summary>
-    /// 指定Trackに関係するCandidateだけを読み込み、レビュー後の差分更新用ViewModelを構築する。
+    /// 指定Pairと完全一致するCandidateだけを読み込み、レビュー後の差分更新用ViewModelを構築する。
     /// </summary>
-    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsByTrackIdsAsync(
+    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsByPairKeysAsync(
         SqliteDatabase database,
         long libraryId,
-        IReadOnlyCollection<long> affectedTrackIds)
+        IReadOnlyCollection<CandidatePairKey> affectedPairKeys)
     {
         var rows = await new SqliteCandidateReviewReportRepository(database)
-            .GetByTrackIdsAsync(libraryId, affectedTrackIds);
+            .GetByPairKeysAsync(libraryId, affectedPairKeys);
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
         var reviews = await GetUsableReviewsAsync(database);
         var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
@@ -543,7 +549,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 null);
             // Review保存はGlobal Group再同期と補完Candidate生成を伴うため、UI Threadから分離する。
             var refresh = await Task.Run(() => SaveReviewAndRefreshDerivedStateAsync(DatabasePath, library.Id, review));
-            ApplyCandidateRefresh(refresh);
+            ApplyCandidateRefresh(
+                refresh,
+                CandidatePairKey.Create(selected.TrackIdA, selected.TrackIdB),
+                selectedIndex);
         }
         catch
         {
@@ -565,7 +574,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     }
 
     /// <summary>
-    /// Human Verdictを保存し、影響を受けたTrackに関係するCandidateだけを再構築する。
+    /// Human Verdictを保存し、影響を受けたPairだけを再構築する。
     /// </summary>
     private async Task<CandidateRefreshResult> SaveReviewAndRefreshDerivedStateAsync(
         string databasePath,
@@ -577,36 +586,62 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var mutation = await CreateReviewMutationService(database, libraryId)
             .SaveAsync(libraryId, review);
         var reloadStopwatch = Stopwatch.StartNew();
-        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, mutation.AffectedTrackIds);
+        var items = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
         reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedTrackIds.Count, items.Count, reloadStopwatch.Elapsed);
-        return new CandidateRefreshResult(mutation.AffectedTrackIds, items);
+        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(mutation.AffectedPairKeys, items);
     }
 
     /// <summary>
     /// 差分取得したCandidateをメモリ上の一覧へ反映する。
     /// </summary>
-    private void ApplyCandidateRefresh(CandidateRefreshResult refresh)
+    private void ApplyCandidateRefresh(
+        CandidateRefreshResult refresh,
+        CandidatePairKey previousSelection,
+        int previousDisplayIndex)
     {
         var mergeStopwatch = Stopwatch.StartNew();
-        _allCandidates.RemoveAll(item =>
-            refresh.AffectedTrackIds.Contains(item.TrackIdA)
-            || refresh.AffectedTrackIds.Contains(item.TrackIdB));
-        _allCandidates.AddRange(refresh.Items);
+        var merged = CandidateListMerger.Merge(
+            _allCandidates,
+            refresh.AffectedPairKeys,
+            refresh.Items,
+            CompareCandidates);
+        _allCandidates.Clear();
+        _allCandidates.AddRange(merged);
 
-        // DBの全Candidateは再読込しない。表示順とタブProjectionだけを現在のメモリ状態から再計算する。
-        _allCandidates.Sort(CompareCandidates);
+        foreach (var pair in refresh.AffectedPairKeys)
+        {
+            _candidatesByPair.Remove(pair);
+        }
+
+        foreach (var item in refresh.Items)
+        {
+            _candidatesByPair.Add(GetPair(item), item);
+        }
+
+        // DBの全Candidateは再読込せず、全Sortも行わない。Counts/Filterは現行どおり全件から再計算する。
         NotifyCandidateCountsChanged();
         RefreshGenreOptions();
         ApplyCandidateFilter();
+        RestoreSelection(previousSelection, previousDisplayIndex);
         mergeStopwatch.Stop();
         _logger.LogInformation(
-            "Review Candidate merge/filter完了 LibraryId={LibraryId} AffectedTracks={AffectedTrackCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
+            "Review Candidate merge/filter完了 LibraryId={LibraryId} AffectedPairs={AffectedPairCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
             SelectedLibrary?.Id,
-            refresh.AffectedTrackIds.Count,
+            refresh.AffectedPairKeys.Count,
             refresh.Items.Count,
             mergeStopwatch.Elapsed.TotalMilliseconds);
     }
+
+    private void RestoreSelection(CandidatePairKey previousSelection, int previousDisplayIndex)
+        => SelectedCandidate = CandidateSelectionResolver.Resolve(
+            _candidatesByPair,
+            Candidates,
+            previousSelection,
+            previousDisplayIndex);
+
+    private static CandidatePairKey GetPair(CandidateReviewItemViewModel item)
+        => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB);
 
     private static int CompareCandidates(CandidateReviewItemViewModel left, CandidateReviewItemViewModel right)
     {
@@ -649,21 +684,21 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var mutation = await CreateReviewMutationService(database, libraryId)
             .DeleteAsync(libraryId, pair);
         var reloadStopwatch = Stopwatch.StartNew();
-        var items = await LoadCandidateItemsByTrackIdsAsync(database, libraryId, mutation.AffectedTrackIds);
+        var items = await LoadCandidateItemsByPairKeysAsync(database, libraryId, mutation.AffectedPairKeys);
         reloadStopwatch.Stop();
-        LogCandidateReloadTiming(libraryId, mutation.AffectedTrackIds.Count, items.Count, reloadStopwatch.Elapsed);
-        return new CandidateRefreshResult(mutation.AffectedTrackIds, items);
+        LogCandidateReloadTiming(libraryId, mutation.AffectedPairKeys.Count, items.Count, reloadStopwatch.Elapsed);
+        return new CandidateRefreshResult(mutation.AffectedPairKeys, items);
     }
 
     private void LogCandidateReloadTiming(
         long libraryId,
-        int affectedTrackCount,
+        int affectedPairCount,
         int itemCount,
         TimeSpan elapsed)
         => _logger.LogInformation(
-            "Review Candidate DB reload完了 LibraryId={LibraryId} AffectedTracks={AffectedTrackCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
+            "Review Candidate DB reload完了 LibraryId={LibraryId} AffectedPairs={AffectedPairCount} Items={ItemCount} ElapsedMs={ElapsedMs:F1}",
             libraryId,
-            affectedTrackCount,
+            affectedPairCount,
             itemCount,
             elapsed.TotalMilliseconds);
 
@@ -828,6 +863,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return await LoadCandidateItemsAsync(database, library.Id);
         });
         _allCandidates.Clear(); _allCandidates.AddRange(items);
+        _candidatesByPair.Clear();
+        foreach (var item in items)
+        {
+            _candidatesByPair.Add(GetPair(item), item);
+        }
         NotifyCandidateCountsChanged(); ApplyCandidateFilter();
         SelectedCandidate = Candidates.FirstOrDefault(item => item.TrackIdA == trackIdA && item.TrackIdB == trackIdB) ?? SelectedCandidate;
     }
@@ -923,10 +963,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 }
 
 /// <summary>
-/// レビュー後に差分更新するTrack集合とCandidate Projectionを保持する。
+/// レビュー後に差分更新するPair集合とCandidate Projectionを保持する。
 /// </summary>
 internal sealed record CandidateRefreshResult(
-    IReadOnlySet<long> AffectedTrackIds,
+    IReadOnlySet<CandidatePairKey> AffectedPairKeys,
     IReadOnlyList<CandidateReviewItemViewModel> Items);
 
 /// <summary>候補一覧で表示するレビュー状態を表す。</summary>

@@ -29,7 +29,6 @@ public sealed class SupplementalCandidateReconciliationService(
         var totalStopwatch = Stopwatch.StartNew();
         var supplementalStopwatch = Stopwatch.StartNew();
         var reviews = await GetUsableReviewsAsync(cancellationToken);
-        var reviewedPairs = reviews.Select(review => review.Pair).ToHashSet();
         var requiredPairs = new HashSet<CandidatePairKey>();
         var affectedPairKeys = new HashSet<CandidatePairKey>();
         var existingPairKeys = new HashSet<CandidatePairKey>();
@@ -74,14 +73,12 @@ public sealed class SupplementalCandidateReconciliationService(
         var cleanupPairs = await candidatePairRepository.GetWithinTracksAsync(
             cleanupTrackIds,
             cancellationToken);
-        foreach (var candidate in cleanupPairs.Where(candidate => candidate.MinimumSegmentHashDistance < 0))
+        foreach (var candidate in cleanupPairs)
         {
             var pair = CandidatePairKey.Create(candidate.TrackIdA, candidate.TrackIdB);
-            if (!reviewedPairs.Contains(pair) && !requiredPairs.Contains(pair))
-            {
-                // Delete APIは件数を返さないため、削除前にPresentationから除くべきPairを記録する。
-                affectedPairKeys.Add(pair);
-            }
+            // Split後にAfter Groupから外れたNormal CandidateもReview Skip状態が変わり得るため、
+            // Before Closure内のPairは削除対象でなくてもPresentation再評価範囲へ含める。
+            affectedPairKeys.Add(pair);
         }
 
         await candidatePairRepository.DeleteObsoleteSupplementalWithinTracksAsync(

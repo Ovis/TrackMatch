@@ -171,6 +171,44 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetByPairKeysAsync_ReturnsOnlyExactPairsWithinLibraryScope()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "pair-a.flac");
+        var trackB = await AddTrackAsync(tracks, "pair-b.flac");
+        var trackC = await AddTrackAsync(tracks, "pair-c.flac");
+        var trackD = await AddTrackAsync(tracks, "pair-d.flac");
+        var outside = await tracks.UpsertMetadataAsync(
+            CreateMetadata("pair-outside.flac"),
+            TestContext.Current.CancellationToken);
+        await tracks.SaveFingerprintAsync(
+            outside,
+            new AudioFingerprint("pair-outside.flac", TimeSpan.FromMinutes(3), [0x12345678u, 0x23456789u]),
+            2,
+            TestContext.Current.CancellationToken);
+        var requestedA = CandidatePairKey.Create(trackA, trackB);
+        var touchingButNotRequested = CandidatePairKey.Create(trackA, trackC);
+        var requestedB = CandidatePairKey.Create(trackC, trackD);
+        var requestedOutsideLibrary = CandidatePairKey.Create(trackA, outside);
+        var pairs = new[] { requestedA, touchingButNotRequested, requestedB, requestedOutsideLibrary };
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            pairs.Select(pair => new CandidatePair(pair.TrackIdA, pair.TrackIdB, 0)).ToArray(),
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            pairs.Select(pair => CreateComparison(pair.TrackIdA, pair.TrackIdB)).ToArray(),
+            TestContext.Current.CancellationToken);
+
+        var rows = await new SqliteCandidateReviewReportRepository(_database).GetByPairKeysAsync(
+            _libraryId,
+            [requestedA, requestedB, requestedOutsideLibrary],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [requestedA, requestedB],
+            rows.Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)).ToArray());
+    }
+
+    [Fact]
     public async Task GetAsync_DoesNotExposeOlderComparisonAlgorithmVersion()
     {
         var tracks = new SqliteTrackRepository(_database);

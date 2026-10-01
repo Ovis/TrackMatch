@@ -16,7 +16,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     public Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
         CancellationToken cancellationToken = default)
-        => GetCoreAsync(libraryId, affectedTrackIds: null, cancellationToken);
+        => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken);
 
     /// <summary>
     /// 指定Trackのいずれかを含むCandidateだけを取得する。
@@ -33,12 +33,30 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             return Task.FromResult<IReadOnlyList<CandidateReviewReportRow>>([]);
         }
 
-        return GetCoreAsync(libraryId, affectedTrackIds, cancellationToken);
+        return GetCoreAsync(libraryId, affectedTrackIds, affectedPairKeys: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// 指定Pairと完全一致するCandidateだけをLibrary Scope内から取得する。
+    /// </summary>
+    public Task<IReadOnlyList<CandidateReviewReportRow>> GetByPairKeysAsync(
+        long libraryId,
+        IReadOnlyCollection<CandidatePairKey> affectedPairKeys,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(affectedPairKeys);
+        if (affectedPairKeys.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<CandidateReviewReportRow>>([]);
+        }
+
+        return GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys, cancellationToken);
     }
 
     private async Task<IReadOnlyList<CandidateReviewReportRow>> GetCoreAsync(
         long libraryId,
         IReadOnlyCollection<long>? affectedTrackIds,
+        IReadOnlyCollection<CandidatePairKey>? affectedPairKeys,
         CancellationToken cancellationToken)
     {
         if (libraryId <= 0)
@@ -46,7 +64,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             throw new ArgumentOutOfRangeException(nameof(libraryId));
         }
 
-        const string sql = """
+        const string sqlTemplate = """
             SELECT x.TrackIdA, x.TrackIdB, p.MinimumSegmentHashDistance, c.Kind, c.Reason,
                    x.Similarity, x.CoverageA, x.CoverageB, x.DurationRatio,
                    x.BestOffsetTicks, x.MatchedDurationTicks,
@@ -75,7 +93,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                    r.SourceLibraryId AS ReviewSourceLibraryId,
                    rl.Name AS CurrentReviewSourceLibraryName,
                    r.SourceLibraryNameSnapshot AS ReviewSourceLibraryNameSnapshot
-            FROM CandidateComparisons x
+            /*CANDIDATE_SOURCE*/
             INNER JOIN CandidatePairs p
                 ON p.TrackIdA = x.TrackIdA AND p.TrackIdB = x.TrackIdB
             LEFT JOIN CandidateClassifications c
@@ -106,6 +124,18 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 x.Similarity DESC, x.TrackIdA, x.TrackIdB;
             """;
 
+        // Pair-local Queryは大規模CandidateComparisons全体を走査せず、JSON Tableの少数Pairから
+        // 複合Primary KeyへLookupできる形にする。挿入するSQL断片は入力値を含まない固定文字列だけに限定する。
+        var candidateSource = affectedPairKeys is null
+            ? "FROM CandidateComparisons x"
+            : """
+              FROM json_each(@AffectedPairKeysJson) affectedPair
+              INNER JOIN CandidateComparisons x
+                  ON x.TrackIdA = json_extract(affectedPair.value, '$[0]')
+                 AND x.TrackIdB = json_extract(affectedPair.value, '$[1]')
+              """;
+        var sql = sqlTemplate.Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal);
+
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
@@ -116,6 +146,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 FilterAffected = affectedTrackIds is null ? 0 : 1,
                 // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
                 AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
+                // Pair数に比例してSQLite Parameterを増やさず、JSON Tableから完全一致させる。
+                AffectedPairKeysJson = JsonSerializer.Serialize(
+                    affectedPairKeys?.Select(pair => new[] { pair.TrackIdA, pair.TrackIdB }) ?? []),
             },
             cancellationToken: cancellationToken));
         return rows.Select(ToReport).ToArray();
