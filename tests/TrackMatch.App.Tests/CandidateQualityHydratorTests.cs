@@ -1,4 +1,4 @@
-using TrackMatch.App.Quality;
+﻿using TrackMatch.App.Quality;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Persistence;
 using TrackMatch.Core.Quality;
