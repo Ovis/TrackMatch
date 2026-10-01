@@ -53,13 +53,6 @@ public partial class MainWindow
                 return;
             }
 
-            if (modifiers == ModifierKeys.Control && e.Key == Key.Z)
-            {
-                e.Handled = true;
-                await window._viewModel.UndoLastReviewAsync();
-                return;
-            }
-
             if (modifiers != ModifierKeys.None)
             {
                 return;
@@ -92,8 +85,7 @@ public partial class MainWindow
 
         if (decision == CandidateReviewDecision.NotDuplicate)
         {
-            await _viewModel.ExecuteReviewWithUndoAsync(
-                () => ExecuteReviewActionAsync(decision, _viewModel.MarkNotDuplicateAsync));
+            await ExecuteReviewActionAsync(decision, _viewModel.MarkNotDuplicateAsync);
             return;
         }
 
@@ -105,7 +97,7 @@ public partial class MainWindow
         Func<Task> action = preferred == _viewModel.SelectedCandidate.TrackIdA
             ? _viewModel.ConfirmDuplicateKeepAAsync
             : _viewModel.ConfirmDuplicateKeepBAsync;
-        await _viewModel.ExecuteReviewWithUndoAsync(() => ConfirmDuplicateWithImpactAsync(preferred, action));
+        await ConfirmDuplicateWithImpactAsync(preferred, action);
     }
 
     private bool MoveCandidateSelection(int offset)
