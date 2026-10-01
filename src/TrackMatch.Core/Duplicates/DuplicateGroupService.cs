@@ -26,17 +26,8 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(active, existingGroups);
         await reviewRepository.SaveAsync(review, libraryId, cancellationToken);
-        try
-        {
-            if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepForLibraryAsync(libraryId, active, CancellationToken.None);
-            await ApplyDerivedKeepForAllLibrariesAsync(active, libraryId, CancellationToken.None);
-        }
-        catch
-        {
-            await TryRepairGlobalTopologyAsync();
-            throw;
-        }
+        if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+        await ApplyDerivedKeepForLibraryAsync(libraryId, active, CancellationToken.None);
     }
 
     /// <summary>Human Verdictを未確定へ戻し、残った判定から派生Groupを再構成する。</summary>
@@ -52,17 +43,8 @@ public sealed class DuplicateGroupService(
         var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
         var rebuild = DuplicateGroupPlanner.Build(proposed, existingGroups);
         await reviewRepository.DeleteAsync(pair, libraryId, cancellationToken);
-        try
-        {
-            if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
-            await ApplyDerivedKeepForLibraryAsync(libraryId, proposed, CancellationToken.None);
-            await ApplyDerivedKeepForAllLibrariesAsync(proposed, libraryId, CancellationToken.None);
-        }
-        catch
-        {
-            await TryRepairGlobalTopologyAsync();
-            throw;
-        }
+        if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, CancellationToken.None);
+        await ApplyDerivedKeepForLibraryAsync(libraryId, proposed, CancellationToken.None);
     }
 
     /// <summary>Current Human Verdictから派生Global Groupを再同期する。</summary>
@@ -74,6 +56,37 @@ public sealed class DuplicateGroupService(
         var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
         if (HasTopologyChanged(rebuild, existingGroups)) await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
         await ApplyDerivedKeepForAllLibrariesAsync(reviews, excludedLibraryId: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Current Human VerdictからGlobal Groupと指定LibraryのKeepだけを再同期する。
+    /// </summary>
+    public async Task SynchronizeGlobalForLibraryAsync(
+        long libraryId,
+        CancellationToken cancellationToken = default)
+    {
+        var reviews = await GetActiveGlobalReviewsAsync(cancellationToken);
+        PreferenceGraphEvaluator.EnsureAcyclic(reviews);
+        var existingGroups = await groupRepository.GetAllGlobalAsync(cancellationToken);
+        var rebuild = DuplicateGroupPlanner.Build(reviews, existingGroups);
+        if (HasTopologyChanged(rebuild, existingGroups))
+        {
+            await groupRepository.ReplaceGlobalAsync(rebuild, cancellationToken);
+        }
+
+        await ApplyDerivedKeepForLibraryAsync(libraryId, reviews, cancellationToken);
+    }
+
+    /// <summary>
+    /// Current Global Groupを維持したまま、指定LibraryのKeepだけをCurrent Human Verdictから再同期する。
+    /// </summary>
+    public async Task SynchronizeLibraryKeepAsync(
+        long libraryId,
+        CancellationToken cancellationToken = default)
+    {
+        var reviews = await GetActiveGlobalReviewsAsync(cancellationToken);
+        PreferenceGraphEvaluator.EnsureAcyclic(reviews);
+        await ApplyDerivedKeepForLibraryAsync(libraryId, reviews, cancellationToken);
     }
 
     private async Task ApplyDerivedKeepForAllLibrariesAsync(
@@ -146,12 +159,6 @@ public sealed class DuplicateGroupService(
             candidates.Count == 1 ? DuplicateGroupKeepStatus.Selected : DuplicateGroupKeepStatus.Unselected,
             "HumanVerdict",
             cancellationToken);
-    }
-
-    private async Task TryRepairGlobalTopologyAsync()
-    {
-        try { await SynchronizeGlobalAsync(CancellationToken.None); }
-        catch { }
     }
 
     private async Task<IReadOnlyList<CandidateReview>> GetActiveGlobalReviewsAsync(CancellationToken cancellationToken)

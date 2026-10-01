@@ -18,12 +18,12 @@ namespace TrackMatch.Application;
 /// </summary>
 public sealed class LibraryAnalysisWorkflow
 {
-    private static readonly SemaphoreSlim ScanGate = new(1, 1);
     private readonly string _databasePath;
     private readonly string _fpcalcPath;
     private readonly int _fingerprintAlgorithm;
     private readonly int _maxConcurrentFingerprintExtractions;
     private readonly ILogger<LibraryAnalysisWorkflow> _logger;
+    private readonly GlobalMutationGate _mutationGate;
 
     /// <summary>
     /// Library分析Workflowを生成する。
@@ -36,7 +36,8 @@ public sealed class LibraryAnalysisWorkflow
         string fpcalcPath = "fpcalc",
         int fingerprintAlgorithm = 2,
         int maxConcurrentFingerprintExtractions = 4,
-        ILogger<LibraryAnalysisWorkflow>? logger = null)
+        ILogger<LibraryAnalysisWorkflow>? logger = null,
+        GlobalMutationGate? mutationGate = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(fpcalcPath);
@@ -55,6 +56,7 @@ public sealed class LibraryAnalysisWorkflow
         _fingerprintAlgorithm = fingerprintAlgorithm;
         _maxConcurrentFingerprintExtractions = maxConcurrentFingerprintExtractions;
         _logger = logger ?? NullLogger<LibraryAnalysisWorkflow>.Instance;
+        _mutationGate = mutationGate ?? GlobalMutationGate.Shared;
     }
 
     /// <summary>
@@ -68,99 +70,100 @@ public sealed class LibraryAnalysisWorkflow
         CancellationToken cancellationToken = default,
         IProgress<LibraryScanBatchProgress>? progress = null)
     {
-        await EnterScanGateAsync(cancellationToken);
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
+        return await ScanLibraryCoreAsync(libraryId, cancellationToken, progress);
+    }
+
+    private async Task<LibraryRootScanBatchResult> ScanLibraryCoreAsync(
+        long libraryId,
+        CancellationToken cancellationToken,
+        IProgress<LibraryScanBatchProgress>? progress)
+    {
+        var database = await OpenDatabaseAsync(cancellationToken);
+        var scanMayHaveCommittedChanges = false;
         try
         {
-            var database = await OpenDatabaseAsync(cancellationToken);
-            var scanMayHaveCommittedChanges = false;
-            try
+            var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
+            var (service, scanTiming) = CreateScanService(database);
+            var results = new List<IncrementalScanResult>(library.Roots.Count);
+
+            // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
+            // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
+            for (var index = 0; index < library.Roots.Count; index++)
             {
-                var library = await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
-                var (service, scanTiming) = CreateScanService(database);
-                var results = new List<IncrementalScanResult>(library.Roots.Count);
-
-                // Global TrackはRoot間・Library間で共有するが、Membership確立とMissing確定は各Rootの正常Scan単位で行う。
-                // 同一DBへの競合更新を避けるため、Root Scanはここで順番に実行する。
-                for (var index = 0; index < library.Roots.Count; index++)
+                cancellationToken.ThrowIfCancellationRequested();
+                var root = library.Roots[index];
+                scanTiming.Reset();
+                var rootStopwatch = Stopwatch.StartNew();
+                var rootProgress = new Progress<IncrementalScanProgress>(value =>
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var root = library.Roots[index];
-                    scanTiming.Reset();
-                    var rootStopwatch = Stopwatch.StartNew();
-                    var rootProgress = new Progress<IncrementalScanProgress>(value =>
+                    if (_logger.IsEnabled(LogLevel.Debug) && (value.CompletedFiles % 100 == 0 || value.CompletedFiles == value.TotalFiles))
                     {
-                        if (_logger.IsEnabled(LogLevel.Debug) && (value.CompletedFiles % 100 == 0 || value.CompletedFiles == value.TotalFiles))
-                        {
-                            _logger.LogDebug("スキャン進捗 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex} Completed={Completed} Total={Total} ThreadId={ThreadId}", library.Id, root.Id, index + 1, value.CompletedFiles, value.TotalFiles, Environment.CurrentManagedThreadId);
-                        }
+                        _logger.LogDebug("スキャン進捗 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex} Completed={Completed} Total={Total} ThreadId={ThreadId}", library.Id, root.Id, index + 1, value.CompletedFiles, value.TotalFiles, Environment.CurrentManagedThreadId);
+                    }
 
-                        // 数万件の初回スキャンを完走しなくてもボトルネックを判断できるよう、
-                        // 一定件数ごとに現在までの累積時間を出す。計測値自体はResetせずRoot全体の累積を維持する。
-                        if (value.CompletedFiles > 0 && value.CompletedFiles % 500 == 0)
-                        {
-                            var timing = scanTiming.Snapshot();
-                            _logger.LogInformation(
-                                "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
-                                library.Id,
-                                root.Id,
-                                value.CompletedFiles,
-                                value.TotalFiles,
-                                rootStopwatch.ElapsedMilliseconds,
-                                timing.MetadataCount,
-                                timing.MetadataElapsedMilliseconds,
-                                timing.FingerprintCount,
-                                timing.FingerprintElapsedMilliseconds);
-                        }
-
-                        progress?.Report(new LibraryScanBatchProgress(
-                            index + 1,
-                            library.Roots.Count,
+                    // 数万件の初回スキャンを完走しなくてもボトルネックを判断できるよう、
+                    // 一定件数ごとに現在までの累積時間を出す。計測値自体はResetせずRoot全体の累積を維持する。
+                    if (value.CompletedFiles > 0 && value.CompletedFiles % 500 == 0)
+                    {
+                        var timing = scanTiming.Snapshot();
+                        _logger.LogInformation(
+                            "Rootスキャン処理時間途中集計 LibraryId={LibraryId} RootId={RootId} Completed={Completed} Total={Total} ElapsedMs={ElapsedMs} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
+                            library.Id,
+                            root.Id,
                             value.CompletedFiles,
                             value.TotalFiles,
-                            value.CurrentPath));
-                    });
+                            rootStopwatch.ElapsedMilliseconds,
+                            timing.MetadataCount,
+                            timing.MetadataElapsedMilliseconds,
+                            timing.FingerprintCount,
+                            timing.FingerprintElapsedMilliseconds);
+                    }
 
-                    // Root ScanはTrack単位で完了済み更新を保持するため、呼び出し後に例外となっても
-                    // Global Groupの派生状態をCurrent Verdictへ追従させる必要がある。
-                    scanMayHaveCommittedChanges = true;
-                    _logger.LogInformation("Rootスキャン開始 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Path={Path}", library.Id, root.Id, index + 1, library.Roots.Count, root.Path);
-                    var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
-                    results.Add(rootResult);
-                    _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
-                    var timing = scanTiming.Snapshot();
-                    _logger.LogInformation(
-                        "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
-                        library.Id,
-                        root.Id,
-                        timing.MetadataCount,
-                        timing.MetadataElapsedMilliseconds,
-                        timing.FingerprintCount,
-                        timing.FingerprintElapsedMilliseconds);
-                }
+                    progress?.Report(new LibraryScanBatchProgress(
+                        index + 1,
+                        library.Roots.Count,
+                        value.CompletedFiles,
+                        value.TotalFiles,
+                        value.CurrentPath));
+                });
 
-                // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
-                // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
-                var synchronizationStopwatch = Stopwatch.StartNew();
-                _logger.LogInformation("Scan Batch後Duplicate Group同期開始 LibraryId={LibraryId}", library.Id);
-                await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
-                _logger.LogInformation("Scan Batch後Duplicate Group同期完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs}", library.Id, synchronizationStopwatch.ElapsedMilliseconds);
-                return new LibraryRootScanBatchResult(library.Id, results);
+                // Root ScanはTrack単位で完了済み更新を保持するため、呼び出し後に例外となっても
+                // Global Groupの派生状態をCurrent Verdictへ追従させる必要がある。
+                scanMayHaveCommittedChanges = true;
+                _logger.LogInformation("Rootスキャン開始 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Path={Path}", library.Id, root.Id, index + 1, library.Roots.Count, root.Path);
+                var rootResult = await service.ScanAsync(library.Id, root.Id, root.Path, cancellationToken, rootProgress);
+                results.Add(rootResult);
+                _logger.LogInformation("Rootスキャン完了 LibraryId={LibraryId} RootId={RootId} RootIndex={RootIndex}/{RootCount} Total={Total} Processed={Processed} Added={Added} Updated={Updated} Removed={Removed} Errors={Errors} ElapsedMs={ElapsedMs}", library.Id, root.Id, index + 1, library.Roots.Count, rootResult.Summary.TotalFiles, rootResult.Summary.ProcessedFiles, rootResult.Summary.AddedFiles, rootResult.Summary.UpdatedFiles, rootResult.Summary.RemovedFiles, rootResult.Summary.ErrorCount, rootStopwatch.ElapsedMilliseconds);
+                var timing = scanTiming.Snapshot();
+                _logger.LogInformation(
+                    "Rootスキャン処理時間内訳 LibraryId={LibraryId} RootId={RootId} MetadataCount={MetadataCount} MetadataWorkerElapsedMs={MetadataWorkerElapsedMs} FingerprintCount={FingerprintCount} FingerprintWorkerElapsedMs={FingerprintWorkerElapsedMs}",
+                    library.Id,
+                    root.Id,
+                    timing.MetadataCount,
+                    timing.MetadataElapsedMilliseconds,
+                    timing.FingerprintCount,
+                    timing.FingerprintElapsedMilliseconds);
             }
-            catch
-            {
-                if (scanMayHaveCommittedChanges)
-                {
-                    // CancellationだけでなくI/O例外等でも、失敗前までにTrack更新やVerdict無効化がCommit済みになり得る。
-                    // 元のScan例外を失わないよう、派生Global Groupの修復はbest-effortで実行する。
-                    await TrySynchronizeDuplicateGroupsAsync(database);
-                }
 
-                throw;
-            }
+            // ScanはContent ChangeでCurrent Verdictを無効化したりTrackをMissingへ遷移させる。
+            // Materialized Global Groupを古いCurrent Verdictのまま残さないため、正常終了したScan Batchの直後に再同期する。
+            var synchronizationStopwatch = Stopwatch.StartNew();
+            _logger.LogInformation("Scan Batch後Duplicate Group同期開始 LibraryId={LibraryId}", library.Id);
+            await SynchronizeDuplicateGroupsAsync(database, cancellationToken);
+            _logger.LogInformation("Scan Batch後Duplicate Group同期完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs}", library.Id, synchronizationStopwatch.ElapsedMilliseconds);
+            return new LibraryRootScanBatchResult(library.Id, results);
         }
-        finally
+        catch
         {
-            ScanGate.Release();
+            if (scanMayHaveCommittedChanges)
+            {
+                // CancellationだけでなくI/O例外等でも、失敗前までにTrack更新やVerdict無効化がCommit済みになり得る。
+                // 元のScan例外を失わないよう、派生Global Groupの修復はbest-effortで実行する。
+                await TrySynchronizeDuplicateGroupsAsync(database);
+            }
+
+            throw;
         }
     }
 
@@ -176,6 +179,16 @@ public sealed class LibraryAnalysisWorkflow
         CandidateGenerationOptions? options = null,
         CancellationToken cancellationToken = default,
         IProgress<CandidateGenerationProgress>? progress = null)
+    {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
+        return await GenerateCandidatesCoreAsync(libraryId, options, cancellationToken, progress);
+    }
+
+    private async Task<CandidateGenerationResult> GenerateCandidatesCoreAsync(
+        long libraryId,
+        CandidateGenerationOptions? options,
+        CancellationToken cancellationToken,
+        IProgress<CandidateGenerationProgress>? progress)
     {
         options ??= new CandidateGenerationOptions();
         options.Validate();
@@ -202,6 +215,15 @@ public sealed class LibraryAnalysisWorkflow
         CancellationToken cancellationToken = default,
         IProgress<CandidateAnalysisProgress>? progress = null)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
+        return await AnalyzeCandidatesCoreAsync(libraryId, cancellationToken, progress);
+    }
+
+    private async Task<CandidateAnalysisResult> AnalyzeCandidatesCoreAsync(
+        long libraryId,
+        CancellationToken cancellationToken,
+        IProgress<CandidateAnalysisProgress>? progress)
+    {
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
         return await CreateCandidateAnalysisService(database, libraryId)
@@ -220,6 +242,14 @@ public sealed class LibraryAnalysisWorkflow
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesAsync(
         long libraryId,
         CancellationToken cancellationToken = default)
+    {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
+        return await ClassifyCandidatesCoreAsync(libraryId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<CandidateClassificationReportRow>> ClassifyCandidatesCoreAsync(
+        long libraryId,
+        CancellationToken cancellationToken)
     {
         var database = await OpenDatabaseAsync(cancellationToken);
         await GetRequiredLibraryAsync(database, libraryId, cancellationToken);
@@ -240,6 +270,7 @@ public sealed class LibraryAnalysisWorkflow
         IProgress<LibraryAnalysisProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        using var gate = await _mutationGate.EnterAsync(cancellationToken);
         var workflowStopwatch = Stopwatch.StartNew();
         _logger.LogInformation("分析Workflow開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
         progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.Scanning, 0, null, null));
@@ -254,7 +285,7 @@ public sealed class LibraryAnalysisWorkflow
         {
             var stageStopwatch = Stopwatch.StartNew();
             _logger.LogInformation("スキャン開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
-            scan = await ScanLibraryAsync(libraryId, cancellationToken, scanProgress);
+            scan = await ScanLibraryCoreAsync(libraryId, cancellationToken, scanProgress);
             _logger.LogInformation("スキャン完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, stageStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             // Content Changed確定でHuman Verdictが削除された時点から旧Groupを表示・利用し続けない。
@@ -295,15 +326,16 @@ public sealed class LibraryAnalysisWorkflow
                     value.CompletedCount,
                     value.TotalCount,
                     value.Phase == CandidateGenerationProgressPhase.UpdatingIndex ? "索引更新" : "候補ペア探索")));
-            var generation = await GenerateCandidatesAsync(
+            var generation = await GenerateCandidatesCoreAsync(
                 libraryId,
-                cancellationToken: cancellationToken,
-                progress: generationProgress);
+                options: null,
+                cancellationToken,
+                generationProgress);
             _logger.LogInformation("候補生成完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, generationStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             // 前回の処理がComparison保存直後に中断していても、再利用されるComparisonに分類欠落を残さない。
             // 分類は軽量なので、詳細比較再開前にCurrent Comparison全体を一度補完する。
-            await ClassifyCandidatesAsync(libraryId, cancellationToken);
+            await ClassifyCandidatesCoreAsync(libraryId, cancellationToken);
 
             var analysisStopwatch = Stopwatch.StartNew();
             _logger.LogInformation("詳細比較開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
@@ -314,13 +346,13 @@ public sealed class LibraryAnalysisWorkflow
                     value.CompletedPairs,
                     value.TotalPairs,
                     null)));
-            var analysis = await AnalyzeCandidatesAsync(libraryId, cancellationToken, analysisProgress);
+            var analysis = await AnalyzeCandidatesCoreAsync(libraryId, cancellationToken, analysisProgress);
             _logger.LogInformation("詳細比較完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, analysisStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             var classificationStopwatch = Stopwatch.StartNew();
             _logger.LogInformation("自動分類開始 LibraryId={LibraryId} ThreadId={ThreadId}", libraryId, Environment.CurrentManagedThreadId);
             progress?.Report(new LibraryAnalysisProgress(LibraryAnalysisStage.ClassifyingCandidates, 0, null, null));
-            await ClassifyCandidatesAsync(libraryId, cancellationToken);
+            await ClassifyCandidatesCoreAsync(libraryId, cancellationToken);
             _logger.LogInformation("自動分類完了 LibraryId={LibraryId} ElapsedMs={ElapsedMs} ThreadId={ThreadId}", libraryId, classificationStopwatch.ElapsedMilliseconds, Environment.CurrentManagedThreadId);
 
             var database = await OpenDatabaseAsync(CancellationToken.None);
@@ -458,14 +490,6 @@ public sealed class LibraryAnalysisWorkflow
         var database = new SqliteDatabase(_databasePath);
         await database.InitializeAsync(cancellationToken);
         return database;
-    }
-
-    private static async Task EnterScanGateAsync(CancellationToken cancellationToken)
-    {
-        if (!await ScanGate.WaitAsync(0, cancellationToken))
-        {
-            throw new InvalidOperationException("別のスキャンが既に実行中です。完了またはキャンセルしてから再実行してください。");
-        }
     }
 
     /// <summary>

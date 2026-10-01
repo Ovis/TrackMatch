@@ -398,22 +398,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
 
-        // Human Verdict保存後の派生状態更新中にプロセスが終了しても、Current Human Verdictを正本として起動時に自己修復する。
-        // Materialized Group/Keepをそのまま信頼して表示やファイル整理へ進まない。
-        await new DuplicateGroupService(
-            new SqliteCandidateReviewRepository(database),
-            new SqliteTrackLookupRepository(database),
-            new SqliteDuplicateGroupRepository(database))
-            .SynchronizeGlobalAsync();
+        // Dirtyが残る場合だけCurrent Human Verdictを正本として起動時に自己修復する。
+        // Cleanな通常LoadでGlobal Groupを毎回再構築しない。
+        var reviews = new SqliteCandidateReviewRepository(database);
+        var tracks = new SqliteTrackLookupRepository(database);
+        var groups = new SqliteDuplicateGroupRepository(database);
+        var supplemental = CreateSupplementalReconciliationService(database, libraryId);
+        var recovery = await new ProjectionRecoveryService(
+            new SqliteProjectionStateRepository(database),
+            groups,
+            new DuplicateGroupService(reviews, tracks, groups),
+            supplemental)
+            .RecoverIfNeededAsync(libraryId);
 
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
         // 初期Loadは全Groupを対象にするが、Review操作中はReviewMutationServiceがAffected Closureだけを渡す。
-        var groups = new SqliteDuplicateGroupRepository(database);
-        var currentGroups = await groups.GetByLibraryIdAsync(libraryId);
-        await CreateSupplementalReconciliationService(database, libraryId)
-            .ReconcileAsync(
+        if (!recovery.GlobalRecoveryPerformed)
+        {
+            var currentGroups = await groups.GetByLibraryIdAsync(libraryId);
+            await supplemental.ReconcileAsync(
                 currentGroups,
                 currentGroups.SelectMany(group => group.GlobalTrackIds).Distinct().ToArray());
+        }
         return await LoadCandidateItemsAsync(database, libraryId);
     }
 
@@ -671,6 +677,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         bool execute,
         TrashDestinationCollisionBehavior collisionBehavior)
     {
+        using var gate = execute
+            ? await GlobalMutationGate.Shared.EnterAsync()
+            : null;
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
         var reviews = new SqliteCandidateReviewRepository(database);
@@ -678,8 +687,18 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         var groups = new SqliteDuplicateGroupRepository(database);
         var groupService = new DuplicateGroupService(reviews, trackLookup, groups);
 
-        // 実ファイルを動かす直前にGlobal Verdictからグループを再同期し、古い派生状態を削除根拠にしない。
-        await groupService.SynchronizeGlobalAsync();
+        if (execute)
+        {
+            var projectionStates = new SqliteProjectionStateRepository(database);
+            if (await projectionStates.IsGlobalGroupsDirtyAsync()
+                || await projectionStates.IsLibraryKeepProjectionDirtyAsync(libraryId))
+            {
+                throw new InvalidOperationException("派生状態のRecoveryが必要なため、ごみ箱への移動を実行できません。Libraryを再読み込みしてください。");
+            }
+
+            // Preview中はGateもMutationも行わず、実行時に正本から再検証する。
+            await groupService.SynchronizeGlobalAsync();
+        }
 
         var tracks = new SqliteTrackRepository(database);
         var service = new RejectedTrackTrashService(groups, trackLookup, tracks, new LocalTrackFileOperations());
@@ -705,8 +724,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             reviews,
             tracks,
             groups,
+            new SqliteProjectionStateRepository(database),
             new DuplicateGroupService(reviews, tracks, groups),
             CreateSupplementalReconciliationService(database, libraryId),
+            GlobalMutationGate.Shared,
             _loggerFactory.CreateLogger<ReviewMutationService>());
     }
 
