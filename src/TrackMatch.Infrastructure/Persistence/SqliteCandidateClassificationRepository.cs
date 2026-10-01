@@ -124,6 +124,63 @@ public sealed class SqliteCandidateClassificationRepository(
             .ToHashSet();
     }
 
+    /// <inheritdoc />
+    public async Task<CandidateClassification?> GetAsync(
+        CandidatePairKey pair,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT c.TrackIdA, c.TrackIdB, c.Kind, c.Reason, c.ThresholdProfileJson
+            FROM CandidateClassifications c
+            INNER JOIN CandidateComparisons x
+                ON x.TrackIdA = c.TrackIdA AND x.TrackIdB = c.TrackIdB
+               AND x.ComparisonVersion = @ComparisonVersion
+            INNER JOIN CandidatePairs p
+                ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = x.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = x.FingerprintBExtractedAtUtcTicks
+            INNER JOIN Tracks a ON a.Id = c.TrackIdA AND a.IsMissing = 0
+            INNER JOIN Tracks b ON b.Id = c.TrackIdB AND b.IsMissing = 0
+            WHERE c.TrackIdA = @TrackIdA
+              AND c.TrackIdB = @TrackIdB
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks la WHERE la.LibraryId = @LibraryId AND la.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks lb WHERE lb.LibraryId = @LibraryId AND lb.TrackId = c.TrackIdB)));
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<StoredClassificationRow>(new CommandDefinition(
+            sql,
+            new
+            {
+                pair.TrackIdA,
+                pair.TrackIdB,
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
+            cancellationToken: cancellationToken));
+        if (row is null)
+        {
+            return null;
+        }
+
+        if (!Enum.TryParse<AudioRelationshipKind>(row.Kind, out var kind))
+        {
+            throw new InvalidDataException($"未知の分類種別です: {row.Kind}");
+        }
+
+        return new CandidateClassification(
+            row.TrackIdA,
+            row.TrackIdB,
+            kind,
+            row.Reason,
+            row.ThresholdProfileJson);
+    }
+
     public async Task<IReadOnlyList<CandidateClassificationReportRow>> GetReportAsync(
         CancellationToken cancellationToken = default)
     {

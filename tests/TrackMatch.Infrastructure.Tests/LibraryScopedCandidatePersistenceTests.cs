@@ -193,6 +193,105 @@ public sealed class LibraryScopedCandidatePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidatePairRepository_GetWithinTracksReturnsOnlyInternalPairsInCurrentLibrary()
+    {
+        var pairA = CandidatePairKey.Create(_a1, _a2);
+        var crossLibraryPair = CandidatePairKey.Create(_a1, _b1);
+        var pairB = CandidatePairKey.Create(_b1, _b2);
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [
+                new CandidatePair(pairA.TrackIdA, pairA.TrackIdB, 1),
+                new CandidatePair(crossLibraryPair.TrackIdA, crossLibraryPair.TrackIdB, 2),
+                new CandidatePair(pairB.TrackIdA, pairB.TrackIdB, 3),
+            ],
+            TestContext.Current.CancellationToken);
+
+        var pairs = await new SqliteCandidatePairRepository(_database, _libraryAId)
+            .GetWithinTracksAsync([_a1, _a2, _b1], TestContext.Current.CancellationToken);
+
+        var pair = Assert.Single(pairs);
+        Assert.Equal(pairA, CandidatePairKey.Create(pair.TrackIdA, pair.TrackIdB));
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_EnsureSupplementalDoesNotOverwriteNormalCandidate()
+    {
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.ReplaceAllAsync(
+            [new CandidatePair(pair.TrackIdA, pair.TrackIdB, 7)],
+            TestContext.Current.CancellationToken);
+
+        await repository.EnsureSupplementalAsync(pair, TestContext.Current.CancellationToken);
+
+        var persisted = Assert.Single(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(7, persisted.MinimumSegmentHashDistance);
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_LocalSupplementalCleanupPreservesRequiredAndOutsidePairs()
+    {
+        var pairA = CandidatePairKey.Create(_a1, _a2);
+        var pairB = CandidatePairKey.Create(_b1, _b2);
+        var all = new SqliteCandidatePairRepository(_database);
+        await all.EnsureSupplementalAsync(pairA, TestContext.Current.CancellationToken);
+        await all.EnsureSupplementalAsync(pairB, TestContext.Current.CancellationToken);
+        var scoped = new SqliteCandidatePairRepository(_database, _libraryAId);
+
+        await scoped.DeleteObsoleteSupplementalWithinTracksAsync(
+            [_a1, _a2],
+            [pairA],
+            TestContext.Current.CancellationToken);
+        Assert.Equal(2, (await all.GetAllAsync(TestContext.Current.CancellationToken)).Count);
+
+        await scoped.DeleteObsoleteSupplementalWithinTracksAsync(
+            [_a1, _a2],
+            [],
+            TestContext.Current.CancellationToken);
+        var remaining = Assert.Single(await all.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pairB, CandidatePairKey.Create(remaining.TrackIdA, remaining.TrackIdB));
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_LocalSupplementalCleanupPreservesPairUsedByOtherLibrary()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        await tracks.EnsureMembershipAsync(_libraryBId, _rootBId, _a1, "shared-a1.flac", TestContext.Current.CancellationToken);
+        await tracks.EnsureMembershipAsync(_libraryBId, _rootBId, _a2, "shared-a2.flac", TestContext.Current.CancellationToken);
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.EnsureSupplementalAsync(pair, TestContext.Current.CancellationToken);
+
+        await repository.DeleteObsoleteSupplementalWithinTracksAsync(
+            [_a1, _a2],
+            [],
+            TestContext.Current.CancellationToken);
+
+        var remaining = Assert.Single(await new SqliteCandidatePairRepository(_database)
+            .GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(remaining.TrackIdA, remaining.TrackIdB));
+    }
+
+    [Fact]
+    public async Task CandidatePairRepository_LocalSupplementalCleanupPreservesReviewedPair()
+    {
+        var pair = CandidatePairKey.Create(_a1, _a2);
+        var repository = new SqliteCandidatePairRepository(_database, _libraryAId);
+        await repository.EnsureSupplementalAsync(pair, TestContext.Current.CancellationToken);
+        await new SqliteCandidateReviewRepository(_database, _libraryAId).SaveAsync(
+            new CandidateReview(pair, CandidateReviewDecision.NotDuplicate, null, null),
+            TestContext.Current.CancellationToken);
+
+        await repository.DeleteObsoleteSupplementalWithinTracksAsync(
+            [_a1, _a2],
+            [],
+            TestContext.Current.CancellationToken);
+
+        var remaining = Assert.Single(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(pair, CandidatePairKey.Create(remaining.TrackIdA, remaining.TrackIdB));
+    }
+
+    [Fact]
     public async Task CandidatePairRepository_ObsoleteSupplementalPairIsDeletedWhenOnlyCurrentLibraryUsesIt()
     {
         var pair = CandidatePairKey.Create(_a1, _a2);

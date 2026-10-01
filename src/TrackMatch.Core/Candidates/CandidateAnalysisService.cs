@@ -158,6 +158,50 @@ public sealed class CandidateAnalysisService(
         return new CandidateAnalysisResult(pairs.Count, analyzed, reused, skipped);
     }
 
+    /// <summary>
+    /// 指定Candidate Pairだけを現在のFingerprintで詳細比較し、結果を永続化する。
+    /// </summary>
+    /// <param name="pair">詳細比較するCandidate Pair</param>
+    /// <param name="fingerprintAlgorithm">対象Fingerprint Algorithm</param>
+    /// <param name="cancellationToken">処理のキャンセル要求</param>
+    /// <returns>永続化した詳細比較結果</returns>
+    public async Task<CandidateComparison> AnalyzeAsync(
+        CandidatePairKey pair,
+        int fingerprintAlgorithm,
+        CancellationToken cancellationToken = default)
+    {
+        if (fingerprintAlgorithm < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fingerprintAlgorithm));
+        }
+
+        var fingerprints = await fingerprintCatalog.GetActiveByTrackIdsAsync(
+            fingerprintAlgorithm,
+            [pair.TrackIdA, pair.TrackIdB],
+            cancellationToken);
+        var fingerprintsByTrackId = fingerprints.ToDictionary(item => item.TrackId);
+        if (!fingerprintsByTrackId.TryGetValue(pair.TrackIdA, out var a)
+            || !fingerprintsByTrackId.TryGetValue(pair.TrackIdB, out var b))
+        {
+            throw new InvalidOperationException("Candidate Pairの現在Fingerprintが揃っていないため詳細比較できません。");
+        }
+
+        var result = comparer.Compare(a.Fingerprint, b.Fingerprint);
+        var comparison = new CandidateComparison(
+            pair.TrackIdA,
+            pair.TrackIdB,
+            result.Similarity,
+            result.BestOffsetItems,
+            result.BestOffset,
+            result.MatchedItems,
+            result.MatchedDuration,
+            result.CoverageA,
+            result.CoverageB,
+            CalculateDurationRatio(a.Fingerprint.Duration, b.Fingerprint.Duration));
+        await comparisonRepository.UpsertAsync([comparison], cancellationToken);
+        return comparison;
+    }
+
     private static double CalculateDurationRatio(TimeSpan a, TimeSpan b)
     {
         var maximum = Math.Max(a.TotalSeconds, b.TotalSeconds);

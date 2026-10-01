@@ -66,7 +66,13 @@ public sealed class CandidateClassificationPersistenceTests : IAsyncLifetime
                 "test reason", "{\"test\":true}")],
             TestContext.Current.CancellationToken);
 
+        var classification = await repository.GetAsync(
+            CandidatePairKey.Create(idA, idB),
+            TestContext.Current.CancellationToken);
         var row = Assert.Single(await repository.GetReportAsync(TestContext.Current.CancellationToken));
+        Assert.NotNull(classification);
+        Assert.Equal(AudioRelationshipKind.DuplicateCandidate, classification.Kind);
+        Assert.Equal("test reason", classification.Reason);
         Assert.Equal(AudioRelationshipKind.DuplicateCandidate, row.Kind);
         Assert.Equal(0.98, row.Similarity, 6);
         Assert.Equal("Title A", row.TitleA);

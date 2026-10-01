@@ -11,6 +11,13 @@ public interface ICandidateClassificationRepository
         IReadOnlyCollection<CandidateClassification> classifications,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 指定Pairの現在有効な分類結果を取得する。
+    /// </summary>
+    Task<CandidateClassification?> GetAsync(
+        CandidatePairKey pair,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<CandidateClassificationReportRow>> GetReportAsync(
         CancellationToken cancellationToken = default);
 }

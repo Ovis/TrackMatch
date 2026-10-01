@@ -82,6 +82,46 @@ public sealed class SqliteCandidateComparisonRepository(
     }
 
     /// <inheritdoc />
+    public async Task<CandidateComparison?> GetAsync(
+        CandidatePairKey pair,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT c.TrackIdA, c.TrackIdB, c.Similarity, c.BestOffsetItems, c.BestOffsetTicks,
+                   c.MatchedItems, c.MatchedDurationTicks, c.CoverageA, c.CoverageB, c.DurationRatio
+            FROM CandidateComparisons c
+            INNER JOIN CandidatePairs p ON p.TrackIdA = c.TrackIdA AND p.TrackIdB = c.TrackIdB
+            INNER JOIN Tracks ta ON ta.Id = c.TrackIdA AND ta.IsMissing = 0
+            INNER JOIN Tracks tb ON tb.Id = c.TrackIdB AND tb.IsMissing = 0
+            INNER JOIN Fingerprints fa ON fa.TrackId = c.TrackIdA
+                AND fa.ExtractedAtUtcTicks = c.FingerprintAExtractedAtUtcTicks
+            INNER JOIN Fingerprints fb ON fb.TrackId = c.TrackIdB
+                AND fb.ExtractedAtUtcTicks = c.FingerprintBExtractedAtUtcTicks
+            WHERE c.TrackIdA = @TrackIdA
+              AND c.TrackIdB = @TrackIdB
+              AND c.ComparisonVersion = @ComparisonVersion
+              AND (
+                    @LibraryId IS NULL
+                 OR (
+                        EXISTS (SELECT 1 FROM LibraryTracks a WHERE a.LibraryId = @LibraryId AND a.TrackId = c.TrackIdA)
+                    AND EXISTS (SELECT 1 FROM LibraryTracks b WHERE b.LibraryId = @LibraryId AND b.TrackId = c.TrackIdB)));
+            """;
+
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<ComparisonRow>(new CommandDefinition(
+            sql,
+            new
+            {
+                pair.TrackIdA,
+                pair.TrackIdB,
+                LibraryId = libraryId,
+                ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
+            },
+            cancellationToken: cancellationToken));
+        return row is null ? null : ToDomain(row);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<CandidatePairKey, DateTime>> GetComparedAtUtcAsync(
         CancellationToken cancellationToken = default)
     {

@@ -263,6 +263,22 @@ public sealed class CandidateGenerationServiceTests
 
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Pairs);
+
+        public Task<IReadOnlyList<CandidatePair>> GetWithinTracksAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+        {
+            var targets = trackIds.ToHashSet();
+            return Task.FromResult<IReadOnlyList<CandidatePair>>(
+                Pairs.Where(pair => targets.Contains(pair.TrackIdA) && targets.Contains(pair.TrackIdB)).ToArray());
+        }
+
+        public Task EnsureSupplementalAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteObsoleteSupplementalWithinTracksAsync(
+            IReadOnlyCollection<long> cleanupTrackIds,
+            IReadOnlyCollection<CandidatePairKey> requiredPairs,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class FailingPairRepository : ICandidatePairRepository
@@ -272,6 +288,18 @@ public sealed class CandidateGenerationServiceTests
 
         public Task<IReadOnlyList<CandidatePair>> GetAllAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CandidatePair>>([]);
+
+        public Task<IReadOnlyList<CandidatePair>> GetWithinTracksAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CandidatePair>>([]);
+
+        public Task EnsureSupplementalAsync(CandidatePairKey pair, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteObsoleteSupplementalWithinTracksAsync(
+            IReadOnlyCollection<long> cleanupTrackIds,
+            IReadOnlyCollection<CandidatePairKey> requiredPairs,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeGenerationWorkRepository(IReadOnlyCollection<long> pendingTrackIds) : ICandidateGenerationWorkRepository

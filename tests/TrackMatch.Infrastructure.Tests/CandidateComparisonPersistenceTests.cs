@@ -82,6 +82,21 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CandidateComparisonRepository_GetReturnsOnlyRequestedCurrentPair()
+    {
+        var repository = new SqliteCandidateComparisonRepository(_database);
+        var pair = CandidatePairKey.Create(_trackIdA, _trackIdB);
+        await repository.ReplaceAllAsync([CreateComparison(0.987)], TestContext.Current.CancellationToken);
+
+        var comparison = await repository.GetAsync(pair, TestContext.Current.CancellationToken);
+        var missing = await repository.GetAsync(CandidatePairKey.Create(_trackIdA, _trackIdB + 100), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(comparison);
+        Assert.Equal(0.987, comparison.Similarity, 6);
+        Assert.Null(missing);
+    }
+
+    [Fact]
     public async Task CandidateComparisonRepository_DoesNotExposeDifferentFingerprintGenerationAsCurrent()
     {
         var repository = new SqliteCandidateComparisonRepository(_database);
@@ -95,6 +110,9 @@ public sealed class CandidateComparisonPersistenceTests : IAsyncLifetime
         }
 
         Assert.Empty(await repository.GetAllAsync(TestContext.Current.CancellationToken));
+        Assert.Null(await repository.GetAsync(
+            CandidatePairKey.Create(_trackIdA, _trackIdB),
+            TestContext.Current.CancellationToken));
         Assert.DoesNotContain(
             CandidatePairKey.Create(_trackIdA, _trackIdB),
             (await repository.GetComparedAtUtcAsync(TestContext.Current.CancellationToken)).Keys);
