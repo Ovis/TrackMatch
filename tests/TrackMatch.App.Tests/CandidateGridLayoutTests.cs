@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Diagnostics;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
@@ -10,6 +11,7 @@ using TrackMatch.App.Playback;
 using TrackMatch.App.Quality;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
+using TrackMatch.Core.Libraries;
 using TrackMatch.Core.Playback;
 using TrackMatch.Infrastructure.Persistence;
 using Xunit;
@@ -104,6 +106,7 @@ public sealed class CandidateGridLayoutTests
                 window.Close();
                 VerifyQualityPanelScroll();
                 VerifyTagEditorLayout();
+                VerifyQualityRestartDoesNotBlockUi();
                 application.Shutdown();
 
                 // Library切替は候補読込・分析と同時に行うとSelectedLibraryと表示内容がずれるため、
@@ -283,6 +286,52 @@ public sealed class CandidateGridLayoutTests
             Assert.True(discardPromptShown);
             Assert.False(secondEditor.IsVisible);
             Assert.Equal("Changed", service.Read(pathA).Title);
+
+            var owner = new Window { Width = 320, Height = 240 };
+            owner.Show();
+            foreach (var save in new[] { false, true })
+            {
+                var modalEditor = new TrackTagEditorWindow(service, candidate) { Owner = owner };
+                var modalTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+                var discardTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+                var modalActionCompleted = false;
+                var discarded = false;
+                discardTimer.Tick += (_, _) =>
+                {
+                    var prompt = System.Windows.Application.Current.Windows
+                        .OfType<ConfirmationDialog>()
+                        .FirstOrDefault(item => item.IsVisible && item.Title == "未保存の曲情報");
+                    if (prompt is null) return;
+                    discardTimer.Stop();
+                    ((Button)prompt.FindName("SecondaryButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    discarded = true;
+                };
+                modalTimer.Tick += (_, _) =>
+                {
+                    var modalRows = (ItemsControl)modalEditor.FindName("RowsItems");
+                    if (modalRows.Items.Count != 7) return;
+                    modalTimer.Stop();
+                    modalEditor.UpdateLayout();
+                    var titleRow = (ContentPresenter)modalRows.ItemContainerGenerator.ContainerFromIndex(0)!;
+                    FindVisualChildren<TextBox>(titleRow).First().Text = save ? "Modal saved" : "Modal unsaved";
+
+                    var buttonName = save ? "SaveButton" : "CancelButton";
+                    ((Button)modalEditor.FindName(buttonName)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    modalActionCompleted = true;
+                };
+                modalTimer.Start();
+                if (!save) discardTimer.Start();
+                modalEditor.ShowDialog();
+                modalTimer.Stop();
+                discardTimer.Stop();
+                Assert.True(modalActionCompleted);
+                if (!save) Assert.True(discarded);
+                Assert.True(owner.IsEnabled, "モーダル編集画面を閉じても親ウィンドウが無効のままです。");
+                Assert.False(modalEditor.IsVisible);
+            }
+
+            Assert.Equal("Modal saved", service.Read(pathA).Title);
+            owner.Close();
         }
         finally
         {
@@ -310,6 +359,51 @@ public sealed class CandidateGridLayoutTests
             Source = new Uri("/TrackMatch.App;component/Styles/DataGridCorrections.xaml", UriKind.Relative),
         });
         return application;
+    }
+
+    private static void VerifyQualityRestartDoesNotBlockUi()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "TrackMatch.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "trackmatch.db");
+        try
+        {
+            Task.Run(() => new SqliteDatabase(databasePath).InitializeAsync()).GetAwaiter().GetResult();
+            using (var blocker = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+            {
+                blocker.Open();
+                using var transaction = blocker.BeginTransaction();
+                using var command = blocker.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "CREATE TABLE RestartLockProbe (Id INTEGER);";
+                command.ExecuteNonQuery();
+
+                using var viewModel = new MainWindowViewModel(new FakeSynchronizedPlaybackService());
+                viewModel.SelectedLibrary = new Library(1, "Test", []);
+                using var controller = new MainWindowQualityAnalysisController(viewModel, _ => { }, databasePath);
+                var stopwatch = Stopwatch.StartNew();
+                controller.Restart();
+                stopwatch.Stop();
+                Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+                    $"DB待機中の品質解析再開がUIスレッドを{stopwatch.Elapsed.TotalMilliseconds:N0}ms塞ぎました。");
+                transaction.Rollback();
+                var stopping = controller.StopAndWaitAsync();
+                while (!stopping.IsCompleted)
+                {
+                    var frame = new DispatcherFrame();
+                    Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                        new Action(() => frame.Continue = false));
+                    Dispatcher.PushFrame(frame);
+                }
+
+                stopping.GetAwaiter().GetResult();
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject
