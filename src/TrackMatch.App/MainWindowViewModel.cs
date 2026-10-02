@@ -134,7 +134,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             _similarityDisplayLowerBoundPercent = normalized;
-            OnPropertyChanged();
             NotifyCandidateCountsChanged();
             RefreshGenreOptions();
             ApplyCandidateFilter();
@@ -149,6 +148,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             {
                 CancelThresholdLoad();
             }
+
+            OnPropertyChanged();
         }
     }
 
@@ -202,6 +203,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     /// <summary>Review差分反映後に不足Qualityだけを局所解析するための内部通知。</summary>
     internal event EventHandler<ReviewCandidatesUpdatedEventArgs>? ReviewCandidatesUpdated;
+
+    /// <summary>一致度下限の候補追加が完了し、品質解析を再開できることを通知する。</summary>
+    internal event EventHandler? ThresholdCandidateLoadFinished;
 
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
     public async Task LoadAsync(long? preferredLibraryId = null)
@@ -567,7 +571,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void ScheduleThresholdLoad(long libraryId, int minimumPercent)
     {
-        CancelThresholdLoad();
+        _thresholdLoadCancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
         _thresholdLoadCancellation = cancellation;
         SetThresholdLoading(true);
@@ -639,6 +643,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             {
                 _thresholdLoadCancellation = null;
                 SetThresholdLoading(false);
+                ThresholdCandidateLoadFinished?.Invoke(this, EventArgs.Empty);
             }
 
             cancellation.Dispose();

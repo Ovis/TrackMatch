@@ -41,6 +41,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         _viewModel.ReviewStarting += ViewModel_ReviewStarting;
         _viewModel.ReviewCandidatesUpdated += ViewModel_ReviewCandidatesUpdated;
+        _viewModel.ThresholdCandidateLoadFinished += ViewModel_ThresholdCandidateLoadFinished;
     }
 
     /// <summary>現在選択中Libraryのレビュー対象Candidateについて、既存処理を中断してバックグラウンド解析を開始する。</summary>
@@ -164,6 +165,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
         _viewModel.ReviewStarting -= ViewModel_ReviewStarting;
         _viewModel.ReviewCandidatesUpdated -= ViewModel_ReviewCandidatesUpdated;
+        _viewModel.ThresholdCandidateLoadFinished -= ViewModel_ThresholdCandidateLoadFinished;
         Stop();
         _cancellation = null;
         _localCancellation = null;
@@ -535,7 +537,16 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
         if (e.PropertyName == nameof(MainWindowViewModel.SimilarityDisplayLowerBoundPercent))
         {
-            // 下限は表示だけでなく解析対象も定義する。Scan/Reload中ならRestart自身が待機し、完了後にMain Windowから再開される。
+            // 下限は解析対象も定義する。候補の追加読込中は待機し、完了通知で再開する。
+            // Scan/Reload中はMain Window側の完了通知で再開する。
+            Restart();
+        }
+    }
+
+    private void ViewModel_ThresholdCandidateLoadFinished(object? sender, EventArgs e)
+    {
+        if (!_disposed)
+        {
             Restart();
         }
     }
