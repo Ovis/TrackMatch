@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
@@ -15,8 +16,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     /// </summary>
     public Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
-        CancellationToken cancellationToken = default)
-        => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken);
+        CancellationToken cancellationToken = default,
+        Action<CandidateReviewReportTiming>? reportTiming = null)
+        => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken, reportTiming);
 
     /// <summary>
     /// 指定Trackのいずれかを含むCandidateだけを取得する。
@@ -57,7 +59,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         long libraryId,
         IReadOnlyCollection<long>? affectedTrackIds,
         IReadOnlyCollection<CandidatePairKey>? affectedPairKeys,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<CandidateReviewReportTiming>? reportTiming = null)
     {
         if (libraryId <= 0)
         {
@@ -136,6 +139,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
               """;
         var sql = sqlTemplate.Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal);
 
+        var reportStopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
@@ -151,7 +155,13 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                     affectedPairKeys?.Select(pair => new[] { pair.TrackIdA, pair.TrackIdB }) ?? []),
             },
             cancellationToken: cancellationToken));
-        return rows.Select(ToReport).ToArray();
+        var databaseElapsed = reportStopwatch.Elapsed;
+        var reports = rows.Select(ToReport).ToArray();
+        reportTiming?.Invoke(new CandidateReviewReportTiming(
+            reports.Length,
+            databaseElapsed,
+            reportStopwatch.Elapsed - databaseElapsed));
+        return reports;
     }
 
     private static CandidateReviewReportRow ToReport(ReportRow row)
@@ -267,3 +277,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? ReviewDecision, long? PreferredTrackId, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }
+
+public sealed record CandidateReviewReportTiming(
+    int RowCount,
+    TimeSpan DatabaseElapsed,
+    TimeSpan ConversionElapsed);

@@ -402,18 +402,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private async Task LoadCandidatesCoreAsync()
     {
+        var candidateLoadStopwatch = Stopwatch.StartNew();
         _allCandidates.Clear(); _candidatesByPair.Clear(); Candidates.Clear(); SelectedCandidate = null;
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
         // DB同期、Supplemental Candidate生成、Presentation State構築は候補数に応じて重くなるため、
         // UI Threadでは実行しない。ObservableCollectionなどWPFへ公開する状態の更新だけをawait後に行う。
         var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id));
+        var backgroundElapsed = candidateLoadStopwatch.Elapsed;
         _allCandidates.AddRange(loadedCandidates);
         foreach (var item in loadedCandidates)
         {
             _candidatesByPair.Add(GetPair(item), item);
         }
         NotifyCandidateCountsChanged(); RefreshGenreOptions(); ApplyCandidateFilter();
+        var totalElapsed = candidateLoadStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧の状態更新 LibraryId={LibraryId} Count={Count} BackgroundMs={BackgroundMs:F1} UiStateMs={UiStateMs:F1} TotalMs={TotalMs:F1}",
+            library.Id,
+            loadedCandidates.Count,
+            backgroundElapsed.TotalMilliseconds,
+            (totalElapsed - backgroundElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
     }
 
     /// <summary>
@@ -425,8 +435,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
         string databasePath,
         long libraryId)
     {
+        var loadStopwatch = Stopwatch.StartNew();
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
+        var initializeElapsed = loadStopwatch.Elapsed;
 
         // Dirtyが残る場合だけCurrent Human Verdictを正本として起動時に自己修復する。
         // Cleanな通常LoadでGlobal Groupを毎回再構築しない。
@@ -440,6 +452,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             new DuplicateGroupService(reviews, tracks, groups),
             supplemental)
             .RecoverIfNeededAsync(libraryId);
+        var recoveryElapsed = loadStopwatch.Elapsed - initializeElapsed;
 
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
         // 初期Loadは全Groupを対象にするが、Review操作中はReviewMutationServiceがAffected Closureだけを渡す。
@@ -450,28 +463,59 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 currentGroups,
                 currentGroups.SelectMany(group => group.GlobalTrackIds).Distinct().ToArray());
         }
-        return await LoadCandidateItemsAsync(database, libraryId);
+        var reconcileElapsed = loadStopwatch.Elapsed - initializeElapsed - recoveryElapsed;
+        var items = await LoadCandidateItemsAsync(database, libraryId);
+        var totalElapsed = loadStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧のバックグラウンド読込 LibraryId={LibraryId} InitializeMs={InitializeMs:F1} RecoveryMs={RecoveryMs:F1} ReconcileMs={ReconcileMs:F1} ItemsMs={ItemsMs:F1} TotalMs={TotalMs:F1}",
+            libraryId,
+            initializeElapsed.TotalMilliseconds,
+            recoveryElapsed.TotalMilliseconds,
+            reconcileElapsed.TotalMilliseconds,
+            (totalElapsed - initializeElapsed - recoveryElapsed - reconcileElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
+        return items;
     }
 
     /// <summary>
     /// Candidate ReportとDuplicate Group Projectionを同じ一覧更新単位で取得し、UI公開前に派生状態を確定する。
     /// </summary>
-    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsAsync(
+    private async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsAsync(
         SqliteDatabase database,
         long libraryId)
     {
-        var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId);
+        var itemsStopwatch = Stopwatch.StartNew();
+        CandidateReviewReportTiming? reportTiming = null;
+        var rows = await new SqliteCandidateReviewReportRepository(database)
+            .GetAsync(libraryId, reportTiming: timing => reportTiming = timing);
+        var reportElapsed = itemsStopwatch.Elapsed;
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var groupElapsed = itemsStopwatch.Elapsed - reportElapsed;
         var reviews = await GetUsableReviewsAsync(database);
+        var reviewElapsed = itemsStopwatch.Elapsed - reportElapsed - groupElapsed;
 
         // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、派生計算に必要なCurrent Stateを一括取得する。
         // 取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
         var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
-        return rows
+        var stateElapsed = itemsStopwatch.Elapsed - reportElapsed - groupElapsed - reviewElapsed;
+        var items = rows
             .Select(row => new CandidateReviewItemViewModel(
                 row,
                 states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
             .ToArray();
+        var totalElapsed = itemsStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧の構築 LibraryId={LibraryId} Count={Count} ReportDatabaseMs={ReportDatabaseMs:F1} ReportConversionMs={ReportConversionMs:F1} GroupsMs={GroupsMs:F1} ReviewsMs={ReviewsMs:F1} StateMs={StateMs:F1} ViewModelMs={ViewModelMs:F1} TotalMs={TotalMs:F1}",
+            libraryId,
+            items.Length,
+            reportTiming?.DatabaseElapsed.TotalMilliseconds ?? 0,
+            reportTiming?.ConversionElapsed.TotalMilliseconds ?? 0,
+            groupElapsed.TotalMilliseconds,
+            reviewElapsed.TotalMilliseconds,
+            stateElapsed.TotalMilliseconds,
+            (totalElapsed - reportElapsed - groupElapsed - reviewElapsed - stateElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
+        return items;
     }
 
     /// <summary>
