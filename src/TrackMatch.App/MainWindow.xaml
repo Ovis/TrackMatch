@@ -422,15 +422,11 @@
                         <RowDefinition Height="8" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0">
-                        <TextBlock VerticalAlignment="Center"
-                                   FontWeight="SemiBold"
-                                   Text="音源情報" />
-                        <Button HorizontalAlignment="Right"
-                                Click="EditTrackTags_Click"
-                                Content="曲情報を編集..."
-                                IsEnabled="{Binding DataContext.CanEditTags, RelativeSource={RelativeSource AncestorType=Window}}" />
-                    </Grid>
+                    <Button Grid.Row="0"
+                            HorizontalAlignment="Right"
+                            Click="EditTrackTags_Click"
+                            Content="曲情報を編集..."
+                            IsEnabled="{Binding DataContext.CanEditTags, RelativeSource={RelativeSource AncestorType=Window}}" />
                     <Grid Grid.Row="2">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
