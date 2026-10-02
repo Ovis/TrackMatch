@@ -260,8 +260,8 @@ public partial class MainWindow
 
     private static void ReplaceSourcePanels(Grid sourceGrid)
     {
-        var sourceA = sourceGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 A", StringComparison.Ordinal));
-        var sourceB = sourceGrid.Children.OfType<GroupBox>().FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 B", StringComparison.Ordinal));
+        var sourceA = FindVisualChildren<GroupBox>(sourceGrid).FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 A", StringComparison.Ordinal));
+        var sourceB = FindVisualChildren<GroupBox>(sourceGrid).FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 B", StringComparison.Ordinal));
         if (sourceA is not null)
         {
             sourceA.Content = new CandidateSourceSummaryPanel(isTrackA: true);

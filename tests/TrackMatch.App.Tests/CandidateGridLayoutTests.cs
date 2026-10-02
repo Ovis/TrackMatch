@@ -47,6 +47,20 @@ public sealed class CandidateGridLayoutTests
                 var tagEditBinding = BindingOperations.GetBinding(tagEditButton, UIElement.IsEnabledProperty);
                 var sourceA = FindVisualChildren<GroupBox>(window)
                     .Single(item => Equals(item.Header, "音源 A"));
+                var sourceB = FindVisualChildren<GroupBox>(window)
+                    .Single(item => Equals(item.Header, "音源 B"));
+                var sourcePanelStarted = DateTime.UtcNow;
+                while (sourceA.Content is not CandidateSourceSummaryPanel
+                    && DateTime.UtcNow - sourcePanelStarted < TimeSpan.FromSeconds(5))
+                {
+                    var frame = new DispatcherFrame();
+                    Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                        new Action(() => frame.Continue = false));
+                    Dispatcher.PushFrame(frame);
+                }
+
+                var sourcePanelA = Assert.IsType<CandidateSourceSummaryPanel>(sourceA.Content);
+                var sourcePanelB = Assert.IsType<CandidateSourceSummaryPanel>(sourceB.Content);
                 var tagEditPosition = tagEditButton.TranslatePoint(new Point(), window);
                 var sourceAPosition = sourceA.TranslatePoint(new Point(), window);
                 var candidateGrid = (DataGrid)window.FindName("CandidateGrid");
@@ -115,6 +129,8 @@ public sealed class CandidateGridLayoutTests
                 Assert.Equal(nameof(MainWindowViewModel.CanManageLibraries), isEnabledBinding.Path.Path);
                 Assert.NotNull(tagEditBinding);
                 Assert.Equal("DataContext.CanEditTags", tagEditBinding.Path.Path);
+                Assert.True(sourcePanelA.VerticalScrollBarVisibility == ScrollBarVisibility.Auto);
+                Assert.True(sourcePanelB.VerticalScrollBarVisibility == ScrollBarVisibility.Auto);
                 Assert.True(tagEditPosition.Y + tagEditButton.ActualHeight <= sourceAPosition.Y,
                     "曲情報編集ボタンが音源A/B情報欄より下に配置されています。");
                 Assert.Equal(verticalScrollBarWidth, headerCornerOverlayWidth, precision: 5);
