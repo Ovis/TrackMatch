@@ -27,6 +27,11 @@ public partial class MainWindow : Window
     /// </summary>
     /// <param name="viewModel">アプリケーション共通サービスを注入済みのViewModel</param>
     public MainWindow(MainWindowViewModel viewModel)
+        : this(viewModel, loadDataOnShow: true)
+    {
+    }
+
+    internal MainWindow(MainWindowViewModel viewModel, bool loadDataOnShow)
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
@@ -36,7 +41,10 @@ public partial class MainWindow : Window
         _viewModel.Playback.PropertyChanged += Playback_PropertyChanged;
         PlaybackSeekSlider.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_PreviewMouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
-        Loaded += MainWindow_Loaded;
+        if (loadDataOnShow)
+        {
+            Loaded += MainWindow_Loaded;
+        }
         Closed += MainWindow_Closed;
     }
 
