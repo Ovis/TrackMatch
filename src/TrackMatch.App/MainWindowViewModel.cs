@@ -505,10 +505,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             .ToArray();
         var totalElapsed = itemsStopwatch.Elapsed;
         _logger.LogInformation(
-            "候補一覧の構築 LibraryId={LibraryId} Count={Count} ReportDatabaseMs={ReportDatabaseMs:F1} ReportConversionMs={ReportConversionMs:F1} GroupsMs={GroupsMs:F1} ReviewsMs={ReviewsMs:F1} StateMs={StateMs:F1} ViewModelMs={ViewModelMs:F1} TotalMs={TotalMs:F1}",
+            "候補一覧の構築 LibraryId={LibraryId} Count={Count} ReportDatabaseMs={ReportDatabaseMs:F1} ReportSortMs={ReportSortMs:F1} ReportConversionMs={ReportConversionMs:F1} GroupsMs={GroupsMs:F1} ReviewsMs={ReviewsMs:F1} StateMs={StateMs:F1} ViewModelMs={ViewModelMs:F1} TotalMs={TotalMs:F1}",
             libraryId,
             items.Length,
             reportTiming?.DatabaseElapsed.TotalMilliseconds ?? 0,
+            reportTiming?.SortElapsed.TotalMilliseconds ?? 0,
             reportTiming?.ConversionElapsed.TotalMilliseconds ?? 0,
             groupElapsed.TotalMilliseconds,
             reviewElapsed.TotalMilliseconds,

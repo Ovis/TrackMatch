@@ -117,14 +117,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                     WHERE lb.LibraryId = @LibraryId AND lb.TrackId = x.TrackIdB)
               AND (@FilterAffected = 0
                    OR x.TrackIdA IN @AffectedTrackIds
-                   OR x.TrackIdB IN @AffectedTrackIds)
-            ORDER BY CASE c.Kind
-                WHEN 'DuplicateCandidate' THEN 0
-                WHEN 'ShortVersionCandidate' THEN 1
-                WHEN 'AlternateVersionCandidate' THEN 2
-                WHEN 'NeedsReview' THEN 3
-                ELSE 4 END,
-                x.Similarity DESC, x.TrackIdA, x.TrackIdB;
+                   OR x.TrackIdB IN @AffectedTrackIds);
             """;
 
         // Pair-local Queryは大規模CandidateComparisons全体を走査せず、JSON Tableの少数Pairから
@@ -156,13 +149,45 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
             },
             cancellationToken: cancellationToken));
         var databaseElapsed = reportStopwatch.Elapsed;
-        var reports = rows.Select(ToReport).ToArray();
+        // SQLiteの一時B-treeへ全候補を並べ替えさせず、Dapperが既に保持する行をその場で整列する。
+        var sortedRows = rows as List<ReportRow> ?? rows.ToList();
+        sortedRows.Sort(CompareForDisplay);
+        var sortElapsed = reportStopwatch.Elapsed - databaseElapsed;
+        var reports = sortedRows.Select(ToReport).ToArray();
         reportTiming?.Invoke(new CandidateReviewReportTiming(
             reports.Length,
             databaseElapsed,
-            reportStopwatch.Elapsed - databaseElapsed));
+            sortElapsed,
+            reportStopwatch.Elapsed - databaseElapsed - sortElapsed));
         return reports;
     }
+
+    private static int CompareForDisplay(ReportRow left, ReportRow right)
+    {
+        var kindComparison = GetKindOrder(left.Kind).CompareTo(GetKindOrder(right.Kind));
+        if (kindComparison != 0)
+        {
+            return kindComparison;
+        }
+
+        var similarityComparison = right.Similarity.CompareTo(left.Similarity);
+        if (similarityComparison != 0)
+        {
+            return similarityComparison;
+        }
+
+        var trackAComparison = left.TrackIdA.CompareTo(right.TrackIdA);
+        return trackAComparison != 0 ? trackAComparison : left.TrackIdB.CompareTo(right.TrackIdB);
+    }
+
+    private static int GetKindOrder(string? kind) => kind switch
+    {
+        "DuplicateCandidate" => 0,
+        "ShortVersionCandidate" => 1,
+        "AlternateVersionCandidate" => 2,
+        "NeedsReview" => 3,
+        _ => 4,
+    };
 
     private static CandidateReviewReportRow ToReport(ReportRow row)
     {
@@ -281,4 +306,5 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
 public sealed record CandidateReviewReportTiming(
     int RowCount,
     TimeSpan DatabaseElapsed,
+    TimeSpan SortElapsed,
     TimeSpan ConversionElapsed);

@@ -138,6 +138,67 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetAsync_PreservesClassificationSimilarityAndPairOrdering()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "order-a.flac");
+        var trackB = await AddTrackAsync(tracks, "order-b.flac");
+        var trackC = await AddTrackAsync(tracks, "order-c.flac");
+        var trackD = await AddTrackAsync(tracks, "order-d.flac");
+        var trackE = await AddTrackAsync(tracks, "order-e.flac");
+        var candidates = new (CandidatePairKey Pair, double Similarity, string? Kind)[]
+        {
+            (CandidatePairKey.Create(trackA, trackB), 0.99, null),
+            (CandidatePairKey.Create(trackA, trackC), 0.99, "NeedsReview"),
+            (CandidatePairKey.Create(trackA, trackD), 0.99, "AlternateVersionCandidate"),
+            (CandidatePairKey.Create(trackA, trackE), 0.99, "ShortVersionCandidate"),
+            (CandidatePairKey.Create(trackB, trackC), 0.70, "DuplicateCandidate"),
+            (CandidatePairKey.Create(trackB, trackD), 0.90, "DuplicateCandidate"),
+            (CandidatePairKey.Create(trackB, trackE), 0.90, "DuplicateCandidate"),
+        };
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            candidates.Select(candidate => new CandidatePair(
+                candidate.Pair.TrackIdA, candidate.Pair.TrackIdB, 0)).ToArray(),
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            candidates.Select(candidate => CreateComparison(
+                candidate.Pair.TrackIdA, candidate.Pair.TrackIdB) with
+            { Similarity = candidate.Similarity }).ToArray(),
+            TestContext.Current.CancellationToken);
+        await using (var connection = await _database.OpenConnectionAsync(TestContext.Current.CancellationToken))
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO CandidateClassifications (
+                    TrackIdA, TrackIdB, Kind, Reason, ThresholdProfileJson, ClassifiedAtUtcTicks)
+                VALUES (@TrackIdA, @TrackIdB, @Kind, 'test', '{}', @Ticks);
+                """,
+                candidates.Where(candidate => candidate.Kind is not null).Select(candidate => new
+                {
+                    candidate.Pair.TrackIdA,
+                    candidate.Pair.TrackIdB,
+                    candidate.Kind,
+                    Ticks = DateTime.UtcNow.Ticks,
+                }));
+        }
+
+        var rows = await new SqliteCandidateReviewReportRepository(_database)
+            .GetAsync(_libraryId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [
+                CandidatePairKey.Create(trackB, trackD),
+                CandidatePairKey.Create(trackB, trackE),
+                CandidatePairKey.Create(trackB, trackC),
+                CandidatePairKey.Create(trackA, trackE),
+                CandidatePairKey.Create(trackA, trackD),
+                CandidatePairKey.Create(trackA, trackC),
+                CandidatePairKey.Create(trackA, trackB),
+            ],
+            rows.Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)).ToArray());
+    }
+
+    [Fact]
     public async Task GetByTrackIdsAsync_ReturnsOnlyCandidatesTouchingAffectedTracks()
     {
         var tracks = new SqliteTrackRepository(_database);
