@@ -387,6 +387,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SimilarityDisplayLowerBoundTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        ((TextBox)sender).GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        e.Handled = true;
+    }
+
     private void RelativeOffsetMinus_Click(object sender, RoutedEventArgs e)
         => _viewModel.Playback.AdjustOffset(isTrackA: false, -OffsetStep);
 

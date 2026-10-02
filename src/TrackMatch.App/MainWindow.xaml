@@ -222,9 +222,11 @@
                                    VerticalAlignment="Center"
                                    Style="{StaticResource SecondaryTextStyle}"
                                    Text="一致度下限" />
-                        <TextBox Grid.Column="8"
+                        <TextBox x:Name="SimilarityDisplayLowerBoundTextBox"
+                                 Grid.Column="8"
                                  HorizontalContentAlignment="Right"
-                                 Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding SimilarityDisplayLowerBoundPercent, UpdateSourceTrigger=LostFocus}"
+                                 KeyDown="SimilarityDisplayLowerBoundTextBox_KeyDown" />
                         <TextBlock Grid.Column="9"
                                    Margin="4,0,0,0"
                                    VerticalAlignment="Center"
