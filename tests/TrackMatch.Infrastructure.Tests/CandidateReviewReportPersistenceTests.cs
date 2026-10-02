@@ -199,6 +199,46 @@ public sealed class CandidateReviewReportPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetBySimilarityRangeAsync_IncludesSupplementalInitiallyAndOnlyMissingRangeLater()
+    {
+        var tracks = new SqliteTrackRepository(_database);
+        var trackA = await AddTrackAsync(tracks, "range-a.flac");
+        var trackB = await AddTrackAsync(tracks, "range-b.flac");
+        var trackC = await AddTrackAsync(tracks, "range-c.flac");
+        var trackD = await AddTrackAsync(tracks, "range-d.flac");
+        var high = CandidatePairKey.Create(trackA, trackB);
+        var middle = CandidatePairKey.Create(trackA, trackC);
+        var supplemental = CandidatePairKey.Create(trackA, trackD);
+        await new SqliteCandidatePairRepository(_database).ReplaceAllAsync(
+            [
+                new CandidatePair(high.TrackIdA, high.TrackIdB, 0),
+                new CandidatePair(middle.TrackIdA, middle.TrackIdB, 0),
+                new CandidatePair(supplemental.TrackIdA, supplemental.TrackIdB, -1),
+            ],
+            TestContext.Current.CancellationToken);
+        await new SqliteCandidateComparisonRepository(_database).ReplaceAllAsync(
+            [
+                CreateComparison(high.TrackIdA, high.TrackIdB) with { Similarity = 0.90 },
+                CreateComparison(middle.TrackIdA, middle.TrackIdB) with { Similarity = 0.75 },
+                CreateComparison(supplemental.TrackIdA, supplemental.TrackIdB) with { Similarity = 0.50 },
+            ],
+            TestContext.Current.CancellationToken);
+
+        var report = new SqliteCandidateReviewReportRepository(_database);
+        var initial = await report.GetBySimilarityRangeAsync(
+            _libraryId, 0.80, cancellationToken: TestContext.Current.CancellationToken);
+        var additional = await report.GetBySimilarityRangeAsync(
+            _libraryId, 0.70, maximumSimilarityExclusive: 0.80, includeSupplemental: false,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [high, supplemental],
+            initial.Select(row => CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)).ToArray());
+        var additionalRow = Assert.Single(additional);
+        Assert.Equal(middle, CandidatePairKey.Create(additionalRow.TrackIdA, additionalRow.TrackIdB));
+    }
+
+    [Fact]
     public async Task GetByTrackIdsAsync_ReturnsOnlyCandidatesTouchingAffectedTracks()
     {
         var tracks = new SqliteTrackRepository(_database);

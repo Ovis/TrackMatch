@@ -21,6 +21,30 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken, reportTiming);
 
     /// <summary>
+    /// 一致度範囲の候補を取得する。Supplemental Candidateは初回取得時だけ範囲外でも含められる。
+    /// </summary>
+    public Task<IReadOnlyList<CandidateReviewReportRow>> GetBySimilarityRangeAsync(
+        long libraryId,
+        double minimumSimilarity,
+        double? maximumSimilarityExclusive = null,
+        bool includeSupplemental = true,
+        CancellationToken cancellationToken = default,
+        Action<CandidateReviewReportTiming>? reportTiming = null)
+    {
+        if (!double.IsFinite(minimumSimilarity)
+            || minimumSimilarity < 0 || minimumSimilarity > 1
+            || (maximumSimilarityExclusive is { } maximum && (!double.IsFinite(maximum) || maximum < 0 || maximum > 1))
+            || maximumSimilarityExclusive <= minimumSimilarity)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumSimilarity));
+        }
+
+        return GetCoreAsync(
+            libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken, reportTiming,
+            minimumSimilarity, maximumSimilarityExclusive, includeSupplemental);
+    }
+
+    /// <summary>
     /// 指定Trackのいずれかを含むCandidateだけを取得する。
     /// レビュー後の差分更新で全Candidateを再読込しないために使用する。
     /// </summary>
@@ -60,7 +84,10 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         IReadOnlyCollection<long>? affectedTrackIds,
         IReadOnlyCollection<CandidatePairKey>? affectedPairKeys,
         CancellationToken cancellationToken,
-        Action<CandidateReviewReportTiming>? reportTiming = null)
+        Action<CandidateReviewReportTiming>? reportTiming = null,
+        double? minimumSimilarity = null,
+        double? maximumSimilarityExclusive = null,
+        bool includeSupplemental = true)
     {
         if (libraryId <= 0)
         {
@@ -117,7 +144,8 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                     WHERE lb.LibraryId = @LibraryId AND lb.TrackId = x.TrackIdB)
               AND (@FilterAffected = 0
                    OR x.TrackIdA IN @AffectedTrackIds
-                   OR x.TrackIdB IN @AffectedTrackIds);
+                   OR x.TrackIdB IN @AffectedTrackIds)
+              /*SIMILARITY_FILTER*/;
             """;
 
         // Pair-local Queryは大規模CandidateComparisons全体を走査せず、JSON Tableの少数Pairから
@@ -130,7 +158,16 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                   ON x.TrackIdA = json_extract(affectedPair.value, '$[0]')
                  AND x.TrackIdB = json_extract(affectedPair.value, '$[1]')
               """;
-        var sql = sqlTemplate.Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal);
+        var similarityFilter = minimumSimilarity is null
+            ? string.Empty
+            : """
+              AND ((x.Similarity >= @MinimumSimilarity
+                    AND (@MaximumSimilarityExclusive IS NULL OR x.Similarity < @MaximumSimilarityExclusive))
+                   OR (@IncludeSupplemental = 1 AND p.MinimumSegmentHashDistance < 0))
+              """;
+        var sql = sqlTemplate
+            .Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal)
+            .Replace("/*SIMILARITY_FILTER*/", similarityFilter, StringComparison.Ordinal);
 
         var reportStopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -141,6 +178,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 LibraryId = libraryId,
                 ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
                 FilterAffected = affectedTrackIds is null ? 0 : 1,
+                MinimumSimilarity = minimumSimilarity,
+                MaximumSimilarityExclusive = maximumSimilarityExclusive,
+                IncludeSupplemental = includeSupplemental ? 1 : 0,
                 // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
                 AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
                 // Pair数に比例してSQLite Parameterを増やさず、JSON Tableから完全一致させる。

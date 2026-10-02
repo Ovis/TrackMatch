@@ -178,7 +178,8 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var rows = await Task.Run(async () =>
         {
             await database.InitializeAsync(cancellationToken);
-            return (await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken))
+            return (await new SqliteCandidateReviewReportRepository(database).GetBySimilarityRangeAsync(
+                    libraryId, minimumSimilarity, cancellationToken: cancellationToken))
                 .Where(row => row.Similarity >= minimumSimilarity)
                 .ToArray();
         }, cancellationToken);
