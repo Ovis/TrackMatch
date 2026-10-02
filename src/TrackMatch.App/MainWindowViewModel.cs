@@ -178,6 +178,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
     public async Task LoadAsync(long? preferredLibraryId = null)
     {
+        var initialLoad = !_settingsLoaded;
+        var loadStopwatch = Stopwatch.StartNew();
         StopPlayback(); IsLoading = true;
         try
         {
@@ -199,7 +201,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
             var selectedId = preferredLibraryId ?? SelectedLibrary?.Id ?? _settings.LastSelectedLibraryId;
             SelectedLibrary = libraries.FirstOrDefault(item => item.Id == selectedId) ?? libraries.FirstOrDefault();
-            await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync();
+            var libraryElapsed = loadStopwatch.Elapsed;
+            await LoadCandidatesCoreAsync();
+            var candidateElapsed = loadStopwatch.Elapsed - libraryElapsed;
+            await SaveSettingsSafeAsync();
+            if (initialLoad)
+            {
+                _logger.LogInformation(
+                    "起動時読み込み完了 LibraryId={LibraryId} LibraryMs={LibraryMs:F1} CandidateMs={CandidateMs:F1} TotalMs={TotalMs:F1}",
+                    SelectedLibrary?.Id,
+                    libraryElapsed.TotalMilliseconds,
+                    candidateElapsed.TotalMilliseconds,
+                    loadStopwatch.Elapsed.TotalMilliseconds);
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
