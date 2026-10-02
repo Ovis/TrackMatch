@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using TrackMatch.App.Quality;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
@@ -36,6 +37,8 @@ public partial class MainWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+        SourceAGroupBox.Content = new CandidateSourceSummaryPanel(isTrackA: true);
+        SourceBGroupBox.Content = new CandidateSourceSummaryPanel(isTrackA: false);
         _playbackTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _playbackTimer.Tick += PlaybackTimer_Tick;
         _viewModel.Playback.PropertyChanged += Playback_PropertyChanged;

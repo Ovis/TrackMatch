@@ -200,7 +200,6 @@ public partial class MainWindow
             return;
         }
 
-        ReplaceSourcePanels(sourceGrid);
         CompactComparisonResult(comparisonGroup);
         ImproveComparisonMetrics(comparisonGroup);
         sourceGrid.DataContextChanged += (_, _) => ScrollSourcePanelsToTop(sourceGrid);
@@ -256,21 +255,6 @@ public partial class MainWindow
         detailGrid.Children.Add(playbackGroup);
         Grid.SetRow(reviewGrid, 8);
         detailGrid.Children.Add(reviewGrid);
-    }
-
-    private static void ReplaceSourcePanels(Grid sourceGrid)
-    {
-        var sourceA = FindVisualChildren<GroupBox>(sourceGrid).FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 A", StringComparison.Ordinal));
-        var sourceB = FindVisualChildren<GroupBox>(sourceGrid).FirstOrDefault(item => string.Equals(item.Header?.ToString(), "音源 B", StringComparison.Ordinal));
-        if (sourceA is not null)
-        {
-            sourceA.Content = new CandidateSourceSummaryPanel(isTrackA: true);
-        }
-
-        if (sourceB is not null)
-        {
-            sourceB.Content = new CandidateSourceSummaryPanel(isTrackA: false);
-        }
     }
 
     private static void CompactComparisonResult(GroupBox comparisonGroup)

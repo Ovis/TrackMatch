@@ -45,20 +45,8 @@ public sealed class CandidateGridLayoutTests
                 var tagEditButton = FindVisualChildren<Button>(window)
                     .Single(item => Equals(item.Content, "曲情報を編集..."));
                 var tagEditBinding = BindingOperations.GetBinding(tagEditButton, UIElement.IsEnabledProperty);
-                var sourceA = FindVisualChildren<GroupBox>(window)
-                    .Single(item => Equals(item.Header, "音源 A"));
-                var sourceB = FindVisualChildren<GroupBox>(window)
-                    .Single(item => Equals(item.Header, "音源 B"));
-                var sourcePanelStarted = DateTime.UtcNow;
-                while (sourceA.Content is not CandidateSourceSummaryPanel
-                    && DateTime.UtcNow - sourcePanelStarted < TimeSpan.FromSeconds(5))
-                {
-                    var frame = new DispatcherFrame();
-                    Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
-                        new Action(() => frame.Continue = false));
-                    Dispatcher.PushFrame(frame);
-                }
-
+                var sourceA = (GroupBox)window.FindName("SourceAGroupBox");
+                var sourceB = (GroupBox)window.FindName("SourceBGroupBox");
                 var sourcePanelA = Assert.IsType<CandidateSourceSummaryPanel>(sourceA.Content);
                 var sourcePanelB = Assert.IsType<CandidateSourceSummaryPanel>(sourceB.Content);
                 var tagEditPosition = tagEditButton.TranslatePoint(new Point(), window);
