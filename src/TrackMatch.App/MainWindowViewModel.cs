@@ -34,6 +34,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private readonly Dictionary<CandidatePairKey, CandidateReviewItemViewModel> _candidatesByPair = [];
     private readonly string _databasePath = TrackMatchDataPaths.DefaultDatabasePath;
     private CancellationTokenSource? _analysisCancellation;
+    private CancellationTokenSource? _thresholdLoadCancellation;
+    private int? _loadedSimilarityLowerBoundPercent;
     private TrackMatchAppSettings _settings = TrackMatchAppSettings.Default;
     private Library? _selectedLibrary;
     private CandidateReviewItemViewModel? _selectedCandidate;
@@ -45,6 +47,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     private int _similarityDisplayLowerBoundPercent = 70;
     private bool _settingsLoaded;
     private bool _isLoading;
+    private bool _isThresholdLoading;
     private bool _isAnalyzing;
     private bool _isCancellingAnalysis;
     private bool _disposed;
@@ -76,6 +79,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
             RememberCurrentCandidate();
             StopPlayback();
+            CancelThresholdLoad();
+            _loadedSimilarityLowerBoundPercent = null;
             _selectedLibrary = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasLibrary));
@@ -129,11 +134,22 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             }
 
             _similarityDisplayLowerBoundPercent = normalized;
-            OnPropertyChanged();
             NotifyCandidateCountsChanged();
             RefreshGenreOptions();
             ApplyCandidateFilter();
             _ = SaveSettingsSafeAsync();
+            if (_loadedSimilarityLowerBoundPercent is { } loadedMinimum
+                && normalized < loadedMinimum
+                && SelectedLibrary is { } library)
+            {
+                ScheduleThresholdLoad(library.Id, normalized);
+            }
+            else
+            {
+                CancelThresholdLoad();
+            }
+
+            OnPropertyChanged();
         }
     }
 
@@ -160,7 +176,20 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
     public string AnalysisStatusText { get => _analysisStatusText; private set => SetField(ref _analysisStatusText, value); }
     public string TrashStatusText { get => _trashStatusText; private set => SetField(ref _trashStatusText, value); }
-    public bool IsLoading { get => _isLoading; private set { if (SetField(ref _isLoading, value)) { NotifyCommandStateChanged(); } } }
+    public bool IsLoading
+    {
+        get => _isLoading || _isThresholdLoading;
+        private set
+        {
+            var wasLoading = IsLoading;
+            _isLoading = value;
+            if (wasLoading != IsLoading)
+            {
+                OnPropertyChanged();
+                NotifyCommandStateChanged();
+            }
+        }
+    }
     public bool IsAnalyzing { get => _isAnalyzing; private set { if (SetField(ref _isAnalyzing, value)) { NotifyCommandStateChanged(); } } }
     public bool IsCancellingAnalysis { get => _isCancellingAnalysis; private set { if (SetField(ref _isCancellingAnalysis, value)) { OnPropertyChanged(nameof(CanCancelAnalysis)); } } }
     public int AnalysisErrorCount => _analysisErrors.Count;
@@ -175,9 +204,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <summary>Review差分反映後に不足Qualityだけを局所解析するための内部通知。</summary>
     internal event EventHandler<ReviewCandidatesUpdatedEventArgs>? ReviewCandidatesUpdated;
 
+    /// <summary>一致度下限の候補追加が完了し、品質解析を再開できることを通知する。</summary>
+    internal event EventHandler? ThresholdCandidateLoadFinished;
+
     /// <summary>App設定、Library一覧、選択Libraryの候補を読み込む。</summary>
     public async Task LoadAsync(long? preferredLibraryId = null)
     {
+        var initialLoad = !_settingsLoaded;
+        var loadStopwatch = Stopwatch.StartNew();
         StopPlayback(); IsLoading = true;
         try
         {
@@ -199,10 +233,23 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
             var selectedId = preferredLibraryId ?? SelectedLibrary?.Id ?? _settings.LastSelectedLibraryId;
             SelectedLibrary = libraries.FirstOrDefault(item => item.Id == selectedId) ?? libraries.FirstOrDefault();
-            await LoadCandidatesCoreAsync(); await SaveSettingsSafeAsync();
+            var libraryElapsed = loadStopwatch.Elapsed;
+            await LoadCandidatesCoreAsync();
+            var candidateElapsed = loadStopwatch.Elapsed - libraryElapsed;
+            await SaveSettingsSafeAsync();
+            if (initialLoad)
+            {
+                _logger.LogInformation(
+                    "起動時読み込み完了 LibraryId={LibraryId} LibraryMs={LibraryMs:F1} CandidateMs={CandidateMs:F1} TotalMs={TotalMs:F1}",
+                    SelectedLibrary?.Id,
+                    libraryElapsed.TotalMilliseconds,
+                    candidateElapsed.TotalMilliseconds,
+                    loadStopwatch.Elapsed.TotalMilliseconds);
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
+            _loadedSimilarityLowerBoundPercent = null;
             _allCandidates.Clear(); _candidatesByPair.Clear(); Candidates.Clear(); SelectedCandidate = null; StatusText = $"読み込み失敗: {exception.Message}";
         }
         finally { IsLoading = false; }
@@ -374,7 +421,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return;
         }
 
-        _disposed = true; _analysisCancellation?.Cancel(); _analysisCancellation?.Dispose(); Playback.Dispose();
+        _disposed = true; CancelThresholdLoad(); _analysisCancellation?.Cancel(); _analysisCancellation?.Dispose(); Playback.Dispose();
     }
 
     private IEnumerable<CandidateReviewItemViewModel> ReviewTargetCandidates
@@ -388,18 +435,36 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private async Task LoadCandidatesCoreAsync()
     {
+        var candidateLoadStopwatch = Stopwatch.StartNew();
+        CancelThresholdLoad();
+        _loadedSimilarityLowerBoundPercent = null;
         _allCandidates.Clear(); _candidatesByPair.Clear(); Candidates.Clear(); SelectedCandidate = null;
         var library = SelectedLibrary;
         if (library is null) { StatusText = "ライブラリがありません。［管理...］から作成してください。"; return; }
+        var minimumPercent = SimilarityDisplayLowerBoundPercent;
         // DB同期、Supplemental Candidate生成、Presentation State構築は候補数に応じて重くなるため、
         // UI Threadでは実行しない。ObservableCollectionなどWPFへ公開する状態の更新だけをawait後に行う。
-        var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id));
+        var loadedCandidates = await Task.Run(() => LoadCandidatesForLibraryAsync(DatabasePath, library.Id, minimumPercent));
+        var backgroundElapsed = candidateLoadStopwatch.Elapsed;
         _allCandidates.AddRange(loadedCandidates);
+        _loadedSimilarityLowerBoundPercent = minimumPercent;
         foreach (var item in loadedCandidates)
         {
             _candidatesByPair.Add(GetPair(item), item);
         }
         NotifyCandidateCountsChanged(); RefreshGenreOptions(); ApplyCandidateFilter();
+        if (SimilarityDisplayLowerBoundPercent < minimumPercent)
+        {
+            ScheduleThresholdLoad(library.Id, SimilarityDisplayLowerBoundPercent);
+        }
+        var totalElapsed = candidateLoadStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧の状態更新 LibraryId={LibraryId} Count={Count} BackgroundMs={BackgroundMs:F1} UiStateMs={UiStateMs:F1} TotalMs={TotalMs:F1}",
+            library.Id,
+            loadedCandidates.Count,
+            backgroundElapsed.TotalMilliseconds,
+            (totalElapsed - backgroundElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
     }
 
     /// <summary>
@@ -409,10 +474,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     /// <param name="libraryId">読み込み対象LibraryのID</param>
     private async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidatesForLibraryAsync(
         string databasePath,
-        long libraryId)
+        long libraryId,
+        int minimumSimilarityPercent)
     {
+        var loadStopwatch = Stopwatch.StartNew();
         var database = new SqliteDatabase(databasePath);
         await database.InitializeAsync();
+        var initializeElapsed = loadStopwatch.Elapsed;
 
         // Dirtyが残る場合だけCurrent Human Verdictを正本として起動時に自己修復する。
         // Cleanな通常LoadでGlobal Groupを毎回再構築しない。
@@ -426,6 +494,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             new DuplicateGroupService(reviews, tracks, groups),
             supplemental)
             .RecoverIfNeededAsync(libraryId);
+        var recoveryElapsed = loadStopwatch.Elapsed - initializeElapsed;
 
         // 前回終了時やLibrary状態変化後にKeep候補が複数残っていても、次の比較手段が無い状態を起動後へ持ち越さない。
         // 初期Loadは全Groupを対象にするが、Review操作中はReviewMutationServiceがAffected Closureだけを渡す。
@@ -436,28 +505,172 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
                 currentGroups,
                 currentGroups.SelectMany(group => group.GlobalTrackIds).Distinct().ToArray());
         }
-        return await LoadCandidateItemsAsync(database, libraryId);
+        var reconcileElapsed = loadStopwatch.Elapsed - initializeElapsed - recoveryElapsed;
+        var items = await LoadCandidateItemsAsync(database, libraryId, minimumSimilarityPercent / 100d);
+        var totalElapsed = loadStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧のバックグラウンド読込 LibraryId={LibraryId} InitializeMs={InitializeMs:F1} RecoveryMs={RecoveryMs:F1} ReconcileMs={ReconcileMs:F1} ItemsMs={ItemsMs:F1} TotalMs={TotalMs:F1}",
+            libraryId,
+            initializeElapsed.TotalMilliseconds,
+            recoveryElapsed.TotalMilliseconds,
+            reconcileElapsed.TotalMilliseconds,
+            (totalElapsed - initializeElapsed - recoveryElapsed - reconcileElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
+        return items;
     }
 
     /// <summary>
     /// Candidate ReportとDuplicate Group Projectionを同じ一覧更新単位で取得し、UI公開前に派生状態を確定する。
     /// </summary>
-    private static async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsAsync(
+    private async Task<IReadOnlyList<CandidateReviewItemViewModel>> LoadCandidateItemsAsync(
         SqliteDatabase database,
-        long libraryId)
+        long libraryId,
+        double? minimumSimilarity = null,
+        double? maximumSimilarityExclusive = null,
+        bool includeSupplemental = true,
+        CancellationToken cancellationToken = default)
     {
-        var rows = await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId);
+        var itemsStopwatch = Stopwatch.StartNew();
+        CandidateReviewReportTiming? reportTiming = null;
+        var report = new SqliteCandidateReviewReportRepository(database);
+        var rows = minimumSimilarity is { } minimum
+            ? await report.GetBySimilarityRangeAsync(
+                libraryId, minimum, maximumSimilarityExclusive, includeSupplemental,
+                cancellationToken, timing => reportTiming = timing)
+            : await report.GetAsync(libraryId, cancellationToken, timing => reportTiming = timing);
+        var reportElapsed = itemsStopwatch.Elapsed;
         var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(libraryId);
+        var groupElapsed = itemsStopwatch.Elapsed - reportElapsed;
         var reviews = await GetUsableReviewsAsync(database);
+        var reviewElapsed = itemsStopwatch.Elapsed - reportElapsed - groupElapsed;
 
         // CandidateごとのGroup検索は候補数に比例したDBアクセスになるため、派生計算に必要なCurrent Stateを一括取得する。
         // 取得に失敗した場合は例外を伝播し、レビュー省略を判定できない一覧をフェイルオープンで表示しない。
         var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
-        return rows
+        var stateElapsed = itemsStopwatch.Elapsed - reportElapsed - groupElapsed - reviewElapsed;
+        var items = rows
             .Select(row => new CandidateReviewItemViewModel(
                 row,
                 states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)]))
             .ToArray();
+        var totalElapsed = itemsStopwatch.Elapsed;
+        _logger.LogInformation(
+            "候補一覧の構築 LibraryId={LibraryId} Count={Count} ReportDatabaseMs={ReportDatabaseMs:F1} ReportSortMs={ReportSortMs:F1} ReportConversionMs={ReportConversionMs:F1} GroupsMs={GroupsMs:F1} ReviewsMs={ReviewsMs:F1} StateMs={StateMs:F1} ViewModelMs={ViewModelMs:F1} TotalMs={TotalMs:F1}",
+            libraryId,
+            items.Length,
+            reportTiming?.DatabaseElapsed.TotalMilliseconds ?? 0,
+            reportTiming?.SortElapsed.TotalMilliseconds ?? 0,
+            reportTiming?.ConversionElapsed.TotalMilliseconds ?? 0,
+            groupElapsed.TotalMilliseconds,
+            reviewElapsed.TotalMilliseconds,
+            stateElapsed.TotalMilliseconds,
+            (totalElapsed - reportElapsed - groupElapsed - reviewElapsed - stateElapsed).TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
+        return items;
+    }
+
+    private void ScheduleThresholdLoad(long libraryId, int minimumPercent)
+    {
+        _thresholdLoadCancellation?.Cancel();
+        var cancellation = new CancellationTokenSource();
+        _thresholdLoadCancellation = cancellation;
+        SetThresholdLoading(true);
+        StatusText = "一致度下限の候補を追加で読み込んでいます。";
+        _ = LoadAdditionalCandidatesAsync(libraryId, minimumPercent, cancellation);
+    }
+
+    private async Task LoadAdditionalCandidatesAsync(
+        long libraryId,
+        int minimumPercent,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            // 入力途中の「7」から「70」へ戻る操作で大量候補を読み込まない。
+            await Task.Delay(300, cancellation.Token);
+            if (_loadedSimilarityLowerBoundPercent is not { } loadedMinimum
+                || minimumPercent >= loadedMinimum)
+            {
+                return;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            var additional = await Task.Run(async () =>
+            {
+                var database = new SqliteDatabase(DatabasePath);
+                return await LoadCandidateItemsAsync(
+                    database,
+                    libraryId,
+                    minimumPercent / 100d,
+                    loadedMinimum / 100d,
+                    includeSupplemental: false,
+                    cancellation.Token);
+            }, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (SelectedLibrary?.Id != libraryId || !ReferenceEquals(_thresholdLoadCancellation, cancellation))
+            {
+                return;
+            }
+
+            var affectedPairs = additional.Select(GetPair).ToHashSet();
+            var merged = CandidateListMerger.Merge(_allCandidates, affectedPairs, additional, CompareCandidates);
+            _allCandidates.Clear();
+            _allCandidates.AddRange(merged);
+            foreach (var item in additional)
+            {
+                _candidatesByPair[GetPair(item)] = item;
+            }
+
+            _loadedSimilarityLowerBoundPercent = minimumPercent;
+            NotifyCandidateCountsChanged();
+            RefreshGenreOptions();
+            ApplyCandidateFilter();
+            _logger.LogInformation(
+                "一致度下限の追加読込 LibraryId={LibraryId} MinimumPercent={MinimumPercent} AddedCount={AddedCount} TotalMs={TotalMs:F1}",
+                libraryId, minimumPercent, additional.Count, stopwatch.Elapsed.TotalMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "一致度下限の追加読込に失敗 LibraryId={LibraryId}", libraryId);
+            StatusText = $"候補の追加読込に失敗: {exception.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_thresholdLoadCancellation, cancellation))
+            {
+                _thresholdLoadCancellation = null;
+                SetThresholdLoading(false);
+                ThresholdCandidateLoadFinished?.Invoke(this, EventArgs.Empty);
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelThresholdLoad()
+    {
+        _thresholdLoadCancellation?.Cancel();
+        _thresholdLoadCancellation = null;
+        SetThresholdLoading(false);
+    }
+
+    private void SetThresholdLoading(bool value)
+    {
+        if (_isThresholdLoading == value)
+        {
+            return;
+        }
+
+        var wasLoading = IsLoading;
+        _isThresholdLoading = value;
+        if (wasLoading != IsLoading)
+        {
+            OnPropertyChanged(nameof(IsLoading));
+            NotifyCommandStateChanged();
+        }
     }
 
     /// <summary>
@@ -960,6 +1173,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             return await LoadCandidateItemsAsync(database, library.Id);
         });
         _allCandidates.Clear(); _allCandidates.AddRange(items);
+        _loadedSimilarityLowerBoundPercent = 0;
         _candidatesByPair.Clear();
         foreach (var item in items)
         {

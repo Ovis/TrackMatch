@@ -127,6 +127,36 @@ public sealed class ReviewMutationServiceTests
     }
 
     [Fact]
+    public async Task SupplementalReconciliation_複数Groupと旧ClosureのPairを一括取得する()
+    {
+        var pairs = new FakeCandidatePairRepository(
+        [
+            new CandidatePair(1, 2, 0),
+            new CandidatePair(3, 4, 0),
+            new CandidatePair(4, 5, 0),
+        ]);
+        var service = new SupplementalCandidateReconciliationService(
+            new RecordingReviewRepository(),
+            new FakeTrackLookupRepository(),
+            pairs,
+            CreateReviewReadyService(
+                pairs,
+                new FakeFingerprintRepository([]),
+                new FakeComparisonRepository(),
+                new FakeClassificationRepository()));
+        var groups = new[]
+        {
+            new DuplicateGroup(1, 10, 1, DuplicateGroupKeepStatus.Selected, [1, 2], [1, 2]),
+            new DuplicateGroup(2, 10, 3, DuplicateGroupKeepStatus.Selected, [3, 4], [3, 4]),
+        };
+
+        var result = await service.ReconcileAsync(groups, [1, 2, 3, 4, 5], TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L, 2, 3, 4, 5], Assert.Single(pairs.ReadScopes).Order());
+        Assert.Contains(CandidatePairKey.Create(4, 5), result.AffectedPairKeys);
+    }
+
+    [Fact]
     public async Task SaveAsync_完全一致ならCanonicalとDerivedを更新しない()
     {
         var review = new CandidateReview(
@@ -722,6 +752,7 @@ public sealed class ReviewMutationServiceTests
         private readonly List<CandidatePair> _items = [.. initial];
 
         public List<bool> OperationCancellationStates { get; } = [];
+        public List<IReadOnlySet<long>> ReadScopes { get; } = [];
 
         public IReadOnlySet<CandidatePairKey> PairKeys => _items
             .Select(item => CandidatePairKey.Create(item.TrackIdA, item.TrackIdB))
@@ -743,6 +774,7 @@ public sealed class ReviewMutationServiceTests
         {
             OperationCancellationStates.Add(cancellationToken.IsCancellationRequested);
             var scope = trackIds.ToHashSet();
+            ReadScopes.Add(scope);
             return Task.FromResult<IReadOnlyList<CandidatePair>>(_items
                 .Where(pair => scope.Contains(pair.TrackIdA) && scope.Contains(pair.TrackIdB))
                 .ToArray());

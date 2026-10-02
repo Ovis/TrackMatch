@@ -32,12 +32,23 @@ public sealed class SupplementalCandidateReconciliationService(
         var requiredPairs = new HashSet<CandidatePairKey>();
         var affectedPairKeys = new HashSet<CandidatePairKey>();
         var existingPairKeys = new HashSet<CandidatePairKey>();
+        var cleanupIds = cleanupTrackIds.ToHashSet();
+        var pairScope = affectedGroups
+            .SelectMany(group => group.TrackIds)
+            .Concat(cleanupIds)
+            .Distinct()
+            .ToArray();
+        // 起動時は全Groupが対象になる。GroupごとにCandidatePairsを走査せず、
+        // 対象TrackのPairを一度だけ取得して各Groupと旧Closureへ振り分ける。
+        var scopedPairs = await candidatePairRepository.GetWithinTracksAsync(pairScope, cancellationToken);
 
         foreach (var group in affectedGroups)
         {
-            var groupPairs = await candidatePairRepository.GetWithinTracksAsync(
-                group.TrackIds,
-                cancellationToken);
+            var groupTrackIds = group.TrackIds.ToHashSet();
+            var groupPairs = scopedPairs
+                .Where(candidate => groupTrackIds.Contains(candidate.TrackIdA)
+                    && groupTrackIds.Contains(candidate.TrackIdB))
+                .ToArray();
             foreach (var candidate in groupPairs)
             {
                 var pair = CandidatePairKey.Create(candidate.TrackIdA, candidate.TrackIdB);
@@ -70,10 +81,8 @@ public sealed class SupplementalCandidateReconciliationService(
             await candidatePairRepository.EnsureSupplementalAsync(pair, cancellationToken);
         }
 
-        var cleanupPairs = await candidatePairRepository.GetWithinTracksAsync(
-            cleanupTrackIds,
-            cancellationToken);
-        foreach (var candidate in cleanupPairs)
+        foreach (var candidate in scopedPairs.Where(candidate => cleanupIds.Contains(candidate.TrackIdA)
+                     && cleanupIds.Contains(candidate.TrackIdB)))
         {
             var pair = CandidatePairKey.Create(candidate.TrackIdA, candidate.TrackIdB);
             // Split後にAfter Groupから外れたNormal CandidateもReview Skip状態が変わり得るため、

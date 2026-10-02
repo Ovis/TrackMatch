@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -39,6 +40,7 @@ public sealed class CandidateGridLayoutTests
                 var window = new MainWindow(viewModel, loadDataOnShow: false) { Width = 1480, Height = 1040 };
                 window.Show();
                 window.UpdateLayout();
+                VerifySimilarityThresholdCommit(window, viewModel);
 
                 var libraryComboBox = (ComboBox)window.FindName("LibraryComboBox");
                 var isEnabledBinding = BindingOperations.GetBinding(libraryComboBox, UIElement.IsEnabledProperty);
@@ -178,6 +180,30 @@ public sealed class CandidateGridLayoutTests
         Assert.True(scrollableHeight > 100,
             $"スクロール領域が不足しています: extent={scrollViewer.ExtentHeight}, viewport={scrollViewer.ViewportHeight}, scrollable={scrollableHeight}");
         Assert.Equal(20, verticalOffset, precision: 5);
+    }
+
+    private static void VerifySimilarityThresholdCommit(MainWindow window, MainWindowViewModel viewModel)
+    {
+        var input = (TextBox)window.FindName("SimilarityDisplayLowerBoundTextBox");
+        var binding = BindingOperations.GetBinding(input, TextBox.TextProperty);
+        Assert.NotNull(binding);
+        Assert.Equal(UpdateSourceTrigger.LostFocus, binding.UpdateSourceTrigger);
+
+        input.Text = "6";
+        Assert.Equal(70, viewModel.SimilarityDisplayLowerBoundPercent);
+
+        var enter = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), 0, Key.Enter)
+        {
+            RoutedEvent = Keyboard.KeyDownEvent,
+        };
+        input.RaiseEvent(enter);
+        Assert.True(enter.Handled);
+        Assert.Equal(6, viewModel.SimilarityDisplayLowerBoundPercent);
+
+        input.Text = "60";
+        Assert.Equal(6, viewModel.SimilarityDisplayLowerBoundPercent);
+        input.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
+        Assert.Equal(60, viewModel.SimilarityDisplayLowerBoundPercent);
     }
 
     private static void VerifyTagEditorLayout()

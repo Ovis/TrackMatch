@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Dapper;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Classification;
@@ -15,8 +16,33 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
     /// </summary>
     public Task<IReadOnlyList<CandidateReviewReportRow>> GetAsync(
         long libraryId,
-        CancellationToken cancellationToken = default)
-        => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken);
+        CancellationToken cancellationToken = default,
+        Action<CandidateReviewReportTiming>? reportTiming = null)
+        => GetCoreAsync(libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken, reportTiming);
+
+    /// <summary>
+    /// 一致度範囲の候補を取得する。Supplemental Candidateは初回取得時だけ範囲外でも含められる。
+    /// </summary>
+    public Task<IReadOnlyList<CandidateReviewReportRow>> GetBySimilarityRangeAsync(
+        long libraryId,
+        double minimumSimilarity,
+        double? maximumSimilarityExclusive = null,
+        bool includeSupplemental = true,
+        CancellationToken cancellationToken = default,
+        Action<CandidateReviewReportTiming>? reportTiming = null)
+    {
+        if (!double.IsFinite(minimumSimilarity)
+            || minimumSimilarity < 0 || minimumSimilarity > 1
+            || (maximumSimilarityExclusive is { } maximum && (!double.IsFinite(maximum) || maximum < 0 || maximum > 1))
+            || maximumSimilarityExclusive <= minimumSimilarity)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumSimilarity));
+        }
+
+        return GetCoreAsync(
+            libraryId, affectedTrackIds: null, affectedPairKeys: null, cancellationToken, reportTiming,
+            minimumSimilarity, maximumSimilarityExclusive, includeSupplemental);
+    }
 
     /// <summary>
     /// 指定Trackのいずれかを含むCandidateだけを取得する。
@@ -57,7 +83,11 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         long libraryId,
         IReadOnlyCollection<long>? affectedTrackIds,
         IReadOnlyCollection<CandidatePairKey>? affectedPairKeys,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<CandidateReviewReportTiming>? reportTiming = null,
+        double? minimumSimilarity = null,
+        double? maximumSimilarityExclusive = null,
+        bool includeSupplemental = true)
     {
         if (libraryId <= 0)
         {
@@ -115,13 +145,7 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
               AND (@FilterAffected = 0
                    OR x.TrackIdA IN @AffectedTrackIds
                    OR x.TrackIdB IN @AffectedTrackIds)
-            ORDER BY CASE c.Kind
-                WHEN 'DuplicateCandidate' THEN 0
-                WHEN 'ShortVersionCandidate' THEN 1
-                WHEN 'AlternateVersionCandidate' THEN 2
-                WHEN 'NeedsReview' THEN 3
-                ELSE 4 END,
-                x.Similarity DESC, x.TrackIdA, x.TrackIdB;
+              /*SIMILARITY_FILTER*/;
             """;
 
         // Pair-local Queryは大規模CandidateComparisons全体を走査せず、JSON Tableの少数Pairから
@@ -134,8 +158,18 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                   ON x.TrackIdA = json_extract(affectedPair.value, '$[0]')
                  AND x.TrackIdB = json_extract(affectedPair.value, '$[1]')
               """;
-        var sql = sqlTemplate.Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal);
+        var similarityFilter = minimumSimilarity is null
+            ? string.Empty
+            : """
+              AND ((x.Similarity >= @MinimumSimilarity
+                    AND (@MaximumSimilarityExclusive IS NULL OR x.Similarity < @MaximumSimilarityExclusive))
+                   OR (@IncludeSupplemental = 1 AND p.MinimumSegmentHashDistance < 0))
+              """;
+        var sql = sqlTemplate
+            .Replace("/*CANDIDATE_SOURCE*/", candidateSource, StringComparison.Ordinal)
+            .Replace("/*SIMILARITY_FILTER*/", similarityFilter, StringComparison.Ordinal);
 
+        var reportStopwatch = Stopwatch.StartNew();
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         var rows = await connection.QueryAsync<ReportRow>(new CommandDefinition(
             sql,
@@ -144,6 +178,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                 LibraryId = libraryId,
                 ComparisonVersion = CandidateComparisonAlgorithmVersion.Current,
                 FilterAffected = affectedTrackIds is null ? 0 : 1,
+                MinimumSimilarity = minimumSimilarity,
+                MaximumSimilarityExclusive = maximumSimilarityExclusive,
+                IncludeSupplemental = includeSupplemental ? 1 : 0,
                 // Dapperの空IN展開へ依存しないよう、全件取得時は到達しないダミー値を渡す。
                 AffectedTrackIds = affectedTrackIds?.ToArray() ?? [long.MinValue],
                 // Pair数に比例してSQLite Parameterを増やさず、JSON Tableから完全一致させる。
@@ -151,8 +188,46 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
                     affectedPairKeys?.Select(pair => new[] { pair.TrackIdA, pair.TrackIdB }) ?? []),
             },
             cancellationToken: cancellationToken));
-        return rows.Select(ToReport).ToArray();
+        var databaseElapsed = reportStopwatch.Elapsed;
+        // SQLiteの一時B-treeへ全候補を並べ替えさせず、Dapperが既に保持する行をその場で整列する。
+        var sortedRows = rows as List<ReportRow> ?? rows.ToList();
+        sortedRows.Sort(CompareForDisplay);
+        var sortElapsed = reportStopwatch.Elapsed - databaseElapsed;
+        var reports = sortedRows.Select(ToReport).ToArray();
+        reportTiming?.Invoke(new CandidateReviewReportTiming(
+            reports.Length,
+            databaseElapsed,
+            sortElapsed,
+            reportStopwatch.Elapsed - databaseElapsed - sortElapsed));
+        return reports;
     }
+
+    private static int CompareForDisplay(ReportRow left, ReportRow right)
+    {
+        var kindComparison = GetKindOrder(left.Kind).CompareTo(GetKindOrder(right.Kind));
+        if (kindComparison != 0)
+        {
+            return kindComparison;
+        }
+
+        var similarityComparison = right.Similarity.CompareTo(left.Similarity);
+        if (similarityComparison != 0)
+        {
+            return similarityComparison;
+        }
+
+        var trackAComparison = left.TrackIdA.CompareTo(right.TrackIdA);
+        return trackAComparison != 0 ? trackAComparison : left.TrackIdB.CompareTo(right.TrackIdB);
+    }
+
+    private static int GetKindOrder(string? kind) => kind switch
+    {
+        "DuplicateCandidate" => 0,
+        "ShortVersionCandidate" => 1,
+        "AlternateVersionCandidate" => 2,
+        "NeedsReview" => 3,
+        _ => 4,
+    };
 
     private static CandidateReviewReportRow ToReport(ReportRow row)
     {
@@ -267,3 +342,9 @@ public sealed class SqliteCandidateReviewReportRepository(SqliteDatabase databas
         string? ReviewDecision, long? PreferredTrackId, long? ReviewedAtUtcTicks,
         long? ReviewSourceLibraryId, string? CurrentReviewSourceLibraryName, string? ReviewSourceLibraryNameSnapshot);
 }
+
+public sealed record CandidateReviewReportTiming(
+    int RowCount,
+    TimeSpan DatabaseElapsed,
+    TimeSpan SortElapsed,
+    TimeSpan ConversionElapsed);
