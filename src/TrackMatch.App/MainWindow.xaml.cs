@@ -631,6 +631,43 @@ public partial class MainWindow : Window
         { Owner = this }.ShowDialog();
     }
 
+    private async void EditTrackTags_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = _viewModel.SelectedCandidate;
+        if (selected is null || !_viewModel.CanEditTags)
+        {
+            return;
+        }
+
+        _qualityController?.Stop();
+        _viewModel.StopPlayback();
+        try
+        {
+            var dialog = new TrackTagEditorWindow(
+                new TrackTagEditingService(_viewModel.DatabasePath), selected)
+            { Owner = this };
+            dialog.ShowDialog();
+            if (dialog.SavedAny)
+            {
+                await _viewModel.RefreshAfterTagEditAsync(selected.TrackIdA, selected.TrackIdB);
+            }
+        }
+        catch (Exception exception)
+        {
+            new ConfirmationDialog(
+                "曲情報の更新に失敗",
+                "比較画面を更新できませんでした",
+                $"タグを保存した場合は、スキャン・分析で表示を更新してください。\n\n{exception.Message}",
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = this }.ShowDialog();
+        }
+        finally
+        {
+            _qualityController?.Restart();
+        }
+    }
+
     private async void ShowDuplicateGroupDetails_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not long groupId || _viewModel.SelectedLibrary is not { } library)
