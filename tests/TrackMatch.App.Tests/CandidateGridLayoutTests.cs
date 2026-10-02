@@ -51,6 +51,7 @@ public sealed class CandidateGridLayoutTests
                 var sourcePanelB = Assert.IsType<CandidateSourceSummaryPanel>(sourceB.Content);
                 var tagEditPosition = tagEditButton.TranslatePoint(new Point(), window);
                 var sourceAPosition = sourceA.TranslatePoint(new Point(), window);
+                VerifySourcePanelsFitAtCompactWindowSize(window, sourceA, sourceB, sourcePanelA, sourcePanelB);
                 var candidateGrid = (DataGrid)window.FindName("CandidateGrid");
                 candidateGrid.ItemsSource = Enumerable.Range(0, 100).Select(index => new CandidateRow(index));
                 candidateGrid.SelectedIndex = 0;
@@ -342,6 +343,49 @@ public sealed class CandidateGridLayoutTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static void VerifySourcePanelsFitAtCompactWindowSize(
+        MainWindow window,
+        GroupBox sourceA,
+        GroupBox sourceB,
+        CandidateSourceSummaryPanel sourcePanelA,
+        CandidateSourceSummaryPanel sourcePanelB)
+    {
+        var candidate = new CandidateReviewItemViewModel(new CandidateReviewReportRow(
+            1, 2, null, null, 0.95, 0.9, 0.9, 1,
+            TimeSpan.Zero, TimeSpan.FromMinutes(4),
+            @"\\music-server\Music\FLAC\Tieup\アニメ\キルラキル\キルラキル オリジナルサウンドトラック02 goriLLA蛇L.flac",
+            @"\\music-server\Music\FLAC\Tieup\アニメ\キルラキル\キルラキル オリジナルサウンドトラックDisc1\02 goriLLA蛇L.flac",
+            ["澤野弘之"], ["澤野弘之"], "goriLLA蛇L", "goriLLA蛇L",
+            "キルラキル オリジナルサウンドトラック", "キルラキル コンプリートサウンドトラック",
+            ["Soundtrack"], ["Soundtrack"],
+            TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(4),
+            31_000_000, 31_000_000, "FLAC", "FLAC", "FLAC", "FLAC",
+            972, 972, 44100, 44100, 16, 16, 2, 2,
+            YearA: 2013, YearB: 2013));
+        sourceA.DataContext = candidate;
+        sourceB.DataContext = candidate;
+        var sourceGrid = (Grid)((Grid)sourceA.Parent).Parent;
+        var detailGrid = (Grid)sourceGrid.Parent;
+        detailGrid.Visibility = Visibility.Visible;
+        window.Width = 1180;
+        window.Height = 960;
+        window.UpdateLayout();
+
+        Assert.True(sourcePanelA.ExtentHeight > 160 && sourcePanelB.ExtentHeight > 160,
+            $"音源カードの内容がレイアウトされていません。A={sourcePanelA.ExtentHeight:N1}/{sourcePanelA.ViewportHeight:N1}、B={sourcePanelB.ExtentHeight:N1}/{sourcePanelB.ViewportHeight:N1}");
+        Assert.True(sourcePanelA.ScrollableHeight < 0.5,
+            $"幅1180・高さ960で音源Aに縦スクロールが必要です。表示高={sourcePanelA.ViewportHeight:N1}、内容高={sourcePanelA.ExtentHeight:N1}");
+        Assert.True(sourcePanelB.ScrollableHeight < 0.5,
+            $"幅1180・高さ960で音源Bに縦スクロールが必要です。表示高={sourcePanelB.ViewportHeight:N1}、内容高={sourcePanelB.ExtentHeight:N1}");
+
+        sourceA.ClearValue(FrameworkElement.DataContextProperty);
+        sourceB.ClearValue(FrameworkElement.DataContextProperty);
+        detailGrid.Visibility = Visibility.Collapsed;
+        window.Width = 1480;
+        window.Height = 1040;
+        window.UpdateLayout();
     }
 
     private static System.Windows.Application CreateApplication()
