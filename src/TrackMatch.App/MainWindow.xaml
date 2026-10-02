@@ -417,76 +417,30 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="12" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <GroupBox Padding="10"
-                              Header="音源 A">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel>
-                                <TextBlock FontSize="18"
-                                           FontWeight="SemiBold"
-                                           Text="{Binding TitleA}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,6,0,0"
-                                           Text="{Binding ArtistA}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Text="{Binding AlbumA}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Text="{Binding GenreA}"
-                                           TextWrapping="Wrap" />
-                                <Separator Margin="0,8" />
-                                <TextBlock Text="{Binding DurationA, StringFormat=再生時間: {0}}" />
-                                <TextBlock Text="{Binding FormatCodecA, StringFormat=形式 / コーデック: {0}}" />
-                                <TextBlock Text="{Binding FileSizeA, StringFormat=ファイルサイズ: {0}}" />
-                                <TextBlock Text="{Binding BitrateA, StringFormat=ビットレート: {0}}" />
-                                <TextBlock Text="{Binding SampleRateA, StringFormat=サンプルレート: {0}}" />
-                                <TextBlock Text="{Binding BitDepthA, StringFormat=ビット深度: {0}}" />
-                                <TextBlock Text="{Binding ChannelsA, StringFormat=チャンネル数: {0}}" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Opacity="0.7"
-                                           Text="{Binding Row.PathA}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </ScrollViewer>
-                    </GroupBox>
-                    <GroupBox Grid.Column="2"
-                              Padding="10"
-                              Header="音源 B">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel>
-                                <TextBlock FontSize="18"
-                                           FontWeight="SemiBold"
-                                           Text="{Binding TitleB}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,6,0,0"
-                                           Text="{Binding ArtistB}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Text="{Binding AlbumB}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Text="{Binding GenreB}"
-                                           TextWrapping="Wrap" />
-                                <Separator Margin="0,8" />
-                                <TextBlock Text="{Binding DurationB, StringFormat=再生時間: {0}}" />
-                                <TextBlock Text="{Binding FormatCodecB, StringFormat=形式 / コーデック: {0}}" />
-                                <TextBlock Text="{Binding FileSizeB, StringFormat=ファイルサイズ: {0}}" />
-                                <TextBlock Text="{Binding BitrateB, StringFormat=ビットレート: {0}}" />
-                                <TextBlock Text="{Binding SampleRateB, StringFormat=サンプルレート: {0}}" />
-                                <TextBlock Text="{Binding BitDepthB, StringFormat=ビット深度: {0}}" />
-                                <TextBlock Text="{Binding ChannelsB, StringFormat=チャンネル数: {0}}" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Opacity="0.7"
-                                           Text="{Binding Row.PathB}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </ScrollViewer>
-                    </GroupBox>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="8" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Button Grid.Row="0"
+                            HorizontalAlignment="Right"
+                            Click="EditTrackTags_Click"
+                            Content="曲情報を編集..."
+                            IsEnabled="{Binding DataContext.CanEditTags, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox x:Name="SourceAGroupBox"
+                                  Padding="10"
+                                  Header="音源 A" />
+                        <GroupBox x:Name="SourceBGroupBox"
+                                  Grid.Column="2"
+                                  Padding="10"
+                                  Header="音源 B" />
+                    </Grid>
                 </Grid>
                 <Border Grid.Row="2"
                         Padding="10"

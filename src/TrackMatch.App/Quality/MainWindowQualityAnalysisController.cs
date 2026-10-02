@@ -14,6 +14,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly Action<string> _setStatusText;
+    private readonly string _databasePath;
     private CancellationTokenSource? _cancellation;
     private CancellationTokenSource? _localCancellation;
     private Task? _sessionTask;
@@ -25,9 +26,18 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     /// <summary>UI状態と品質解析基盤を接続するControllerを生成する。</summary>
     public MainWindowQualityAnalysisController(MainWindowViewModel viewModel, Action<string> setStatusText)
+        : this(viewModel, setStatusText, viewModel.DatabasePath)
+    {
+    }
+
+    internal MainWindowQualityAnalysisController(
+        MainWindowViewModel viewModel,
+        Action<string> setStatusText,
+        string databasePath)
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _setStatusText = setStatusText ?? throw new ArgumentNullException(nameof(setStatusText));
+        _databasePath = databasePath;
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         _viewModel.ReviewStarting += ViewModel_ReviewStarting;
         _viewModel.ReviewCandidatesUpdated += ViewModel_ReviewCandidatesUpdated;
@@ -75,7 +85,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         var generation = ++_sessionGeneration;
         selected.MarkQualityAnalyzing();
         SetStatusIfCurrent(generation, "音質解析中 0 / 2");
-        var database = new SqliteDatabase(_viewModel.DatabasePath);
+        var database = new SqliteDatabase(_databasePath);
         await database.InitializeAsync();
         var trackRepository = new SqliteTrackQualityAnalysisRepository(database);
         var candidateRepository = new SqliteCandidateQualityComparisonRepository(database);
@@ -162,12 +172,16 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
 
     private async Task RunSessionAsync(long libraryId, int generation, CancellationToken cancellationToken)
     {
-        var database = new SqliteDatabase(_viewModel.DatabasePath);
-        await database.InitializeAsync(cancellationToken);
+        var database = new SqliteDatabase(_databasePath);
         var minimumSimilarity = _viewModel.SimilarityDisplayLowerBoundPercent / 100d;
-        var rows = (await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken))
-            .Where(row => row.Similarity >= minimumSimilarity)
-            .ToArray();
+        // SQLiteのAsync APIは同期的に完了する箇所があり、大きなLibraryではRestart呼び出し中にUIを塞ぐ。
+        var rows = await Task.Run(async () =>
+        {
+            await database.InitializeAsync(cancellationToken);
+            return (await new SqliteCandidateReviewReportRepository(database).GetAsync(libraryId, cancellationToken))
+                .Where(row => row.Similarity >= minimumSimilarity)
+                .ToArray();
+        }, cancellationToken);
         if (rows.Length == 0)
         {
             SetStatusIfCurrent(generation, "音質解析: 対象候補なし");
@@ -184,10 +198,10 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             _trackCoordinator = coordinator;
         }
 
-        var requests = TrackQualityAnalysisRequestFactory.FromCandidates(rows);
+        var requests = await Task.Run(() => TrackQualityAnalysisRequestFactory.FromCandidates(rows), cancellationToken);
         var progress = new Progress<TrackQualityAnalysisProgress>(value =>
             SetStatusIfCurrent(generation, $"音質解析中 {value.CompletedCount} / {value.TotalCount}"));
-        var trackTask = coordinator.RunAsync(requests, progress, cancellationToken);
+        var trackTask = Task.Run(() => coordinator.RunAsync(requests, progress, cancellationToken), cancellationToken);
 
         // 選択中Candidateだけは全Track完了を待たず、A/B両方が解析済みになった時点で先に比較する。
         while (!trackTask.IsCompleted)
@@ -216,14 +230,19 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             _trackCoordinator = null;
         }
 
-        var orderedRows = OrderSelectedFirst(rows);
+        var selectedForOrdering = _viewModel.SelectedCandidate;
+        var selectedPair = selectedForOrdering is null ? ((long TrackIdA, long TrackIdB)?)null
+            : (selectedForOrdering.TrackIdA, selectedForOrdering.TrackIdB);
+        var orderedRows = await Task.Run(() => OrderSelectedFirst(rows, selectedPair), cancellationToken);
         var completed = 0;
         foreach (var row in orderedRows)
         {
             cancellationToken.ThrowIfCancellationRequested();
             completed++;
             SetStatusIfCurrent(generation, $"音質比較中 {completed} / {orderedRows.Count}");
-            var result = await candidateService.AnalyzeAsync(CreateRequest(row), cancellationToken: cancellationToken);
+            var result = await Task.Run(
+                () => candidateService.AnalyzeAsync(CreateRequest(row), cancellationToken: cancellationToken),
+                cancellationToken);
             if (FindVisibleCandidate(row.TrackIdA, row.TrackIdB) is { } item)
             {
                 await RefreshPresentationAsync(
@@ -278,14 +297,15 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         }
 
         SetLocalStatusIfCurrent(generation, $"音質局所解析中 0 / {currentItems.Length}");
-        var database = new SqliteDatabase(_viewModel.DatabasePath);
-        await database.InitializeAsync(cancellationToken);
+        var database = new SqliteDatabase(_databasePath);
+        await Task.Run(() => database.InitializeAsync(cancellationToken), cancellationToken);
         var trackRepository = new SqliteTrackQualityAnalysisRepository(database);
         var candidateRepository = new SqliteCandidateQualityComparisonRepository(database);
         var coordinator = new TrackQualityAnalysisCoordinator(new NAudioTrackQualityAnalyzer(), trackRepository);
-        await coordinator.RunAsync(
-            TrackQualityAnalysisRequestFactory.FromCandidates(currentItems.Select(item => item.Row).ToArray()),
-            cancellationToken: cancellationToken);
+        var requests = await Task.Run(
+            () => TrackQualityAnalysisRequestFactory.FromCandidates(currentItems.Select(item => item.Row).ToArray()),
+            cancellationToken);
+        await Task.Run(() => coordinator.RunAsync(requests, cancellationToken: cancellationToken), cancellationToken);
 
         var candidateService = CreateCandidateService(trackRepository, candidateRepository);
         var completed = 0;
@@ -297,7 +317,9 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
                 continue;
             }
 
-            await candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken);
+            await Task.Run(
+                () => candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken),
+                cancellationToken);
             completed++;
             SetLocalStatusIfCurrent(generation, $"音質局所解析中 {completed} / {currentItems.Length}");
         }
@@ -362,7 +384,9 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         int generation,
         CancellationToken cancellationToken)
     {
-        var result = await candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken);
+        var result = await Task.Run(
+            () => candidateService.AnalyzeAsync(CreateRequest(item.Row), cancellationToken: cancellationToken),
+            cancellationToken);
         await RefreshPresentationAsync(
             item,
             trackRepository,
@@ -398,9 +422,13 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         CandidateQualityComparison? knownComparison = null,
         Func<bool>? shouldApply = null)
     {
-        var analysisA = await trackRepository.GetAsync(item.TrackIdA, cancellationToken);
-        var analysisB = await trackRepository.GetAsync(item.TrackIdB, cancellationToken);
-        var comparison = knownComparison ?? await candidateRepository.GetAsync(item.TrackIdA, item.TrackIdB, cancellationToken);
+        var (analysisA, analysisB, comparison) = await Task.Run(async () =>
+        {
+            var a = await trackRepository.GetAsync(item.TrackIdA, cancellationToken);
+            var b = await trackRepository.GetAsync(item.TrackIdB, cancellationToken);
+            var pair = knownComparison ?? await candidateRepository.GetAsync(item.TrackIdA, item.TrackIdB, cancellationToken);
+            return (a, b, pair);
+        }, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (shouldApply is not null && !shouldApply())
         {
@@ -410,15 +438,17 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
         item.ApplyQualityAnalysis(analysisA, analysisB, comparison);
     }
 
-    private IReadOnlyList<CandidateReviewReportRow> OrderSelectedFirst(IReadOnlyList<CandidateReviewReportRow> rows)
+    private static IReadOnlyList<CandidateReviewReportRow> OrderSelectedFirst(
+        IReadOnlyList<CandidateReviewReportRow> rows,
+        (long TrackIdA, long TrackIdB)? selectedPair)
     {
-        var selected = _viewModel.SelectedCandidate;
-        if (selected is null)
+        if (selectedPair is null)
         {
             return rows;
         }
 
-        return rows.OrderByDescending(row => row.TrackIdA == selected.TrackIdA && row.TrackIdB == selected.TrackIdB).ToArray();
+        return rows.OrderByDescending(row => row.TrackIdA == selectedPair.Value.TrackIdA
+            && row.TrackIdB == selectedPair.Value.TrackIdB).ToArray();
     }
 
     private CandidateReviewItemViewModel? FindVisibleCandidate(long trackIdA, long trackIdB)
@@ -445,7 +475,7 @@ public sealed class MainWindowQualityAnalysisController : IDisposable
             row.PathA,
             row.PathB);
 
-    private async Task StopAndWaitAsync()
+    internal async Task StopAndWaitAsync()
     {
         var task = _sessionTask;
         Stop();

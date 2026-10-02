@@ -34,17 +34,17 @@ internal sealed class CandidateSourceSummaryPanel : ScrollViewer
     {
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var identity = new StackPanel();
         identity.Children.Add(CreateBoundTextBlock(Property("Title"), fontSize: 18, fontWeight: FontWeights.SemiBold));
-        identity.Children.Add(CreateBoundTextBlock(Property("Artist"), margin: new Thickness(0, 4, 0, 0)));
-        identity.Children.Add(CreateBoundTextBlock(Property("Album"), margin: new Thickness(0, 2, 0, 0)));
-        identity.Children.Add(CreateBoundTextBlock(Property("Genre"), margin: new Thickness(0, 2, 0, 0)));
-        identity.Children.Add(CreateBoundTextBlock(Property("Year"), prefix: "年: ", margin: new Thickness(0, 2, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Artist"), margin: new Thickness(0, 2, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Album"), margin: new Thickness(0, 1, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Genre"), margin: new Thickness(0, 1, 0, 0)));
+        identity.Children.Add(CreateBoundTextBlock(Property("Year"), prefix: "年: ", margin: new Thickness(0, 1, 0, 0)));
         content.Children.Add(identity);
 
         var separator = new Separator();
@@ -71,6 +71,8 @@ internal sealed class CandidateSourceSummaryPanel : ScrollViewer
 
         var pathText = CreateBoundTextBlock(PathProperty());
         pathText.TextTrimming = TextTrimming.CharacterEllipsis;
+        // 長いパスは最大2行に収める。全文はツールチップで確認できる。
+        pathText.MaxHeight = 32;
         pathText.VerticalAlignment = VerticalAlignment.Center;
         pathText.Opacity = 0.75;
         pathText.SetBinding(ToolTipProperty, new Binding(PathProperty()));
@@ -113,7 +115,7 @@ internal sealed class CandidateSourceSummaryPanel : ScrollViewer
 
     private WrapPanel CreateMetadataLine(params (string? Prefix, string Path, string? Suffix)[] items)
     {
-        var panel = new WrapPanel { Margin = new Thickness(0, 1, 0, 0) };
+        var panel = new WrapPanel();
         for (var index = 0; index < items.Length; index++)
         {
             if (index > 0)

@@ -1,0 +1,149 @@
+﻿<Window x:Class="TrackMatch.App.TrackTagEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="曲情報を編集"
+        Width="900"
+        Height="570"
+        MinWidth="700"
+        MinHeight="500"
+        Closing="Window_Closing"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock FontSize="16"
+                   FontWeight="SemiBold"
+                   Text="比較中の2ファイルのタグを編集" />
+        <Border Grid.Row="2"
+                Background="{StaticResource CardBackgroundBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid MinHeight="56"
+                      Background="#F3F6F9">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="86" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Margin="10,0"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"
+                               Text="項目" />
+                    <StackPanel Grid.Column="1"
+                                Margin="8,5"
+                                VerticalAlignment="Center">
+                        <TextBlock FontWeight="SemiBold"
+                                   Text="音源 A" />
+                        <TextBlock x:Name="FileNameA"
+                                   Style="{StaticResource SecondaryTextStyle}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"
+                               Text="コピー" />
+                    <StackPanel Grid.Column="3"
+                                Margin="8,5"
+                                VerticalAlignment="Center">
+                        <TextBlock FontWeight="SemiBold"
+                                   Text="音源 B" />
+                        <TextBlock x:Name="FileNameB"
+                                   Style="{StaticResource SecondaryTextStyle}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Grid>
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="RowsItems">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border MinHeight="47"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="0,0,0,1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="86" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Margin="10,0"
+                                                   VerticalAlignment="Center"
+                                                   Text="{Binding Label}" />
+                                        <TextBox Grid.Column="1"
+                                                 Margin="6,6"
+                                                 VerticalContentAlignment="Center"
+                                                 Text="{Binding ValueA, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Grid Grid.Column="2"
+                                              Margin="3,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="3" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0"
+                                                    Padding="0"
+                                                    Click="CopyBToA_Click"
+                                                    Content="←"
+                                                    Tag="{Binding}"
+                                                    ToolTip="Bの値をAへコピー" />
+                                            <Button Grid.Column="2"
+                                                    Padding="0"
+                                                    Click="CopyAToB_Click"
+                                                    Content="→"
+                                                    Tag="{Binding}"
+                                                    ToolTip="Aの値をBへコピー" />
+                                        </Grid>
+                                        <TextBox Grid.Column="3"
+                                                 Margin="6,6"
+                                                 VerticalContentAlignment="Center"
+                                                 Text="{Binding ValueB, UpdateSourceTrigger=PropertyChanged}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+        <TextBlock Grid.Row="4"
+                   Style="{StaticResource SecondaryTextStyle}"
+                   Text="アーティスト・ジャンルの複数値は「;」で区切ります。変更した音源ファイルのタグを保存します。レビュー判定は変更しません。"
+                   TextWrapping="Wrap" />
+        <Grid Grid.Row="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap" />
+            <Button x:Name="CancelButton"
+                    Grid.Column="1"
+                    Click="Cancel_Click"
+                    Content="キャンセル" />
+            <Button x:Name="SaveButton"
+                    Grid.Column="3"
+                    Click="Save_Click"
+                    Content="保存"
+                    Style="{StaticResource PrimaryButtonStyle}" />
+        </Grid>
+    </Grid>
+</Window>

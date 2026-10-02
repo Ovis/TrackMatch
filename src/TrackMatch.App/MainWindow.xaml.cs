@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using TrackMatch.App.Quality;
 using TrackMatch.Application;
 using TrackMatch.Core.Candidates;
 using TrackMatch.Core.Libraries;
@@ -27,16 +28,26 @@ public partial class MainWindow : Window
     /// </summary>
     /// <param name="viewModel">アプリケーション共通サービスを注入済みのViewModel</param>
     public MainWindow(MainWindowViewModel viewModel)
+        : this(viewModel, loadDataOnShow: true)
+    {
+    }
+
+    internal MainWindow(MainWindowViewModel viewModel, bool loadDataOnShow)
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+        SourceAGroupBox.Content = new CandidateSourceSummaryPanel(isTrackA: true);
+        SourceBGroupBox.Content = new CandidateSourceSummaryPanel(isTrackA: false);
         _playbackTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _playbackTimer.Tick += PlaybackTimer_Tick;
         _viewModel.Playback.PropertyChanged += Playback_PropertyChanged;
         PlaybackSeekSlider.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(PlaybackSeekSlider_PreviewMouseDown), handledEventsToo: true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(MainWindow_PreviewMouseUp), handledEventsToo: true);
-        Loaded += MainWindow_Loaded;
+        if (loadDataOnShow)
+        {
+            Loaded += MainWindow_Loaded;
+        }
         Closed += MainWindow_Closed;
     }
 
@@ -629,6 +640,43 @@ public partial class MainWindow : Window
             "閉じる",
             kind: AppDialogKind.Error)
         { Owner = this }.ShowDialog();
+    }
+
+    private async void EditTrackTags_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = _viewModel.SelectedCandidate;
+        if (selected is null || !_viewModel.CanEditTags)
+        {
+            return;
+        }
+
+        _qualityController?.Stop();
+        _viewModel.StopPlayback();
+        try
+        {
+            var dialog = new TrackTagEditorWindow(
+                new TrackTagEditingService(_viewModel.DatabasePath), selected)
+            { Owner = this };
+            dialog.ShowDialog();
+            if (dialog.SavedAny)
+            {
+                await _viewModel.RefreshAfterTagEditAsync(selected.TrackIdA, selected.TrackIdB);
+            }
+        }
+        catch (Exception exception)
+        {
+            new ConfirmationDialog(
+                "曲情報の更新に失敗",
+                "比較画面を更新できませんでした",
+                $"タグを保存した場合は、スキャン・分析で表示を更新してください。\n\n{exception.Message}",
+                "閉じる",
+                kind: AppDialogKind.Error)
+            { Owner = this }.ShowDialog();
+        }
+        finally
+        {
+            _qualityController?.Restart();
+        }
     }
 
     private async void ShowDuplicateGroupDetails_Click(object sender, RoutedEventArgs e)

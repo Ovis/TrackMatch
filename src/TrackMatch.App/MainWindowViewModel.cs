@@ -97,6 +97,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             Playback.LoadCandidate(value);
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(CanEditTags));
             OnPropertyChanged(nameof(CanReview));
             OnPropertyChanged(nameof(CanClearReview));
             RememberCurrentCandidate();
@@ -148,6 +149,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
     public int TotalCandidateCount => ReviewTargetCandidates.Count();
     public bool HasLibrary => SelectedLibrary is not null;
     public bool HasSelection => SelectedCandidate is not null && !IsLoading;
+    public bool CanEditTags => HasSelection && !IsAnalyzing;
     // 省略Candidateもユーザーが直接レビューする場合は通常の3択を使える。
     public bool CanReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsHumanVerdictSuspended != true;
     public bool CanClearReview => HasSelection && !IsAnalyzing && SelectedCandidate?.IsReviewed == true;
@@ -900,6 +902,50 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
             CandidatePairKey.Create(item.TrackIdA, item.TrackIdB) == pair);
     }
 
+    /// <summary>タグ保存後、表示中Libraryの曲情報を更新して選択Pairを維持する。</summary>
+    public async Task RefreshAfterTagEditAsync(long trackIdA, long trackIdB)
+    {
+        var library = SelectedLibrary;
+        if (library is null) return;
+        var selectedPair = CandidatePairKey.Create(trackIdA, trackIdB);
+        var selectedIndex = Candidates.IndexOf(SelectedCandidate!);
+        IsLoading = true;
+        try
+        {
+            var refreshed = await Task.Run(async () =>
+            {
+                var database = new SqliteDatabase(DatabasePath);
+                await database.InitializeAsync();
+                var rows = await new SqliteCandidateReviewReportRepository(database)
+                    .GetByTrackIdsAsync(library.Id, [trackIdA, trackIdB]);
+                var groups = await new SqliteDuplicateGroupRepository(database).GetByLibraryIdAsync(library.Id);
+                var reviews = await GetUsableReviewsAsync(database);
+                var states = CandidateReviewPresentationStateResolver.Resolve(rows, groups, reviews);
+                var items = rows.Select(row => new CandidateReviewItemViewModel(
+                    row, states[CandidatePairKey.Create(row.TrackIdA, row.TrackIdB)])).ToArray();
+                var missingQualityItems = await CandidateQualityHydrator.HydrateAsync(
+                    items,
+                    new SqliteTrackQualityAnalysisRepository(database),
+                    new SqliteCandidateQualityComparisonRepository(database));
+                return (Items: items, MissingQualityItems: missingQualityItems);
+            });
+            var affectedPairs = _allCandidates
+                .Where(item => item.TrackIdA == trackIdA || item.TrackIdB == trackIdA
+                    || item.TrackIdA == trackIdB || item.TrackIdB == trackIdB)
+                .Select(GetPair)
+                .Concat(refreshed.Items.Select(GetPair))
+                .ToHashSet();
+            ApplyCandidateRefresh(
+                new CandidateRefreshResult(affectedPairs, refreshed.Items, refreshed.MissingQualityItems),
+                selectedPair,
+                selectedIndex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
     private async Task ReloadCandidatesPreservingPairAsync(long trackIdA, long trackIdB)
     {
         var library = SelectedLibrary; if (library is null)
@@ -997,7 +1043,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDispo
 
     private void NotifyCommandStateChanged()
     {
-        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
+        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanEditTags)); OnPropertyChanged(nameof(CanReview)); OnPropertyChanged(nameof(CanClearReview)); OnPropertyChanged(nameof(CanAnalyzeLibrary)); OnPropertyChanged(nameof(CanCancelAnalysis)); OnPropertyChanged(nameof(CanManageLibraries)); OnPropertyChanged(nameof(CanProcessTrash));
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
